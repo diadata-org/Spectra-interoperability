@@ -1,0 +1,36 @@
+{
+    "db": "/etc/data/db",
+    "relayChains": "diadata,fuji,alfajores",
+    "allowLocalCheckpointSyncers": "true",
+    "gasPaymentEnforcement": [{ "type": "none" }],
+    "whitelist": [
+      {
+        "origindomain": [23104],
+        "destinationDomain": [23104]
+      },
+      {
+        "origindomain": [23104],
+        "destinationDomain": [43113]
+      }
+    ],
+    "chains": {
+      "alfajores": {
+        "signer": {
+          "type": "hexKey",
+          "key": "{privatekey}"
+        }
+      },
+      "fuji": {
+        "signer": {
+          "type": "hexKey",
+          "key": "{privatekey}"
+        }
+      },
+      "diadata": {
+        "signer": {
+          "type": "hexKey",
+          "key": "{privatekey}"
+        }
+      }
+    }
+  }

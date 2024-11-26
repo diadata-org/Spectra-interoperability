@@ -1,0 +1,67 @@
+version: '2'
+services:
+  relayer:
+    container_name: hpl-relayer
+    # image: gcr.io/abacus-labs-dev/hyperlane-agent:9736164-20240307-131918
+    image: gcr.io/abacus-labs-dev/hyperlane-agent:3bb4d87-20240129-164519
+    user: root
+    # restart: always
+    entrypoint: ['sh', '-c']
+    command:
+      - |
+        rm -rf /app/config/* && \
+        cp "/etc/hyperlane/agent-config.docker.json" "/app/config/agent-config.json" && \
+
+          ./relayer
+    ports:
+      - 9110:9090
+    environment:
+      - HYP_GASPAYMENTENFORCEMENT='[{"type":"none"}]'
+      - HYP_RELAYCHAINS=diadata,fuji
+
+      - HYP_DB=/data/
+      - HYP_TRACING_LEVEL=debug
+       - HYP_DEFAULTSIGNER_KEY=
+ 
+      - CONFIG_FILES=/app/config/agent-config.json
+
+    volumes:
+      - ./hyperlane:/etc/hyperlane
+      - ./checkpoint1:/etc/diadata/validator1/ 
+
+  validator-diadata:
+    container_name: hpl-validator-diadata
+    # image: gcr.io/abacus-labs-dev/hyperlane-agent:9736164-20240307-131918
+    image: gcr.io/abacus-labs-dev/hyperlane-agent:3bb4d87-20240129-164519
+    user: root
+    # restart: always
+    entrypoint: ['sh', '-c']
+    command:
+      - |
+        rm -rf /app/config/* && \
+        cp "/etc/hyperlane/agent-config.docker.json" "/app/config/agent-config.json" && \
+
+
+
+
+          ./validator
+    ports:
+      - 9120:9090
+    volumes:
+      - ./hyperlane:/etc/hyperlane
+      - ./checkpoint1:/etc/diadata/validator1/
+
+
+    environment:
+ 
+      - HYP_CHAINS_diadata_SIGNER_KEY=  
+ 
+      - HYP_VALIDATOR_KEY=
+ 
+      - HYP_ORIGINCHAINNAME=diadata
+      - CONFIG_FILES=/app/config/agent-config.json
+      - HYP_DB=/data/
+      - HYP_CHECKPOINTSYNCER_TYPE=localStorage
+      - HYP_CHECKPOINTSYNCER_PATH=/etc/diadata/validator1/
+      - HYP_TRACING_LEVEL=debug
+      - HYP_TRACING_FMT=compact

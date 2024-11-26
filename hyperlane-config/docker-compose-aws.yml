@@ -1,0 +1,63 @@
+version: '2'
+services:
+  relayer:
+    container_name: hpl-relayer
+    # image: gcr.io/abacus-labs-dev/hyperlane-agent:9736164-20240307-131918
+    image: gcr.io/abacus-labs-dev/hyperlane-agent:3bb4d87-20240129-164519
+    user: root
+    # restart: always
+    entrypoint: ['sh', '-c']
+    command:
+      - |
+        rm -rf /app/config/* && \
+        cp "/etc/hyperlane/agent-config.docker.json" "/app/config/agent-config.json" && \
+
+          ./relayer
+    ports:
+      - 9110:9090
+    environment:
+      - HYP_GASPAYMENTENFORCEMENT='[{"type":"none"}]'
+      - HYP_RELAYCHAINS=diadata,fuji
+      - AWS_ACCESS_KEY_ID=
+      - AWS_SECRET_ACCESS_KEY=
+      - HYP_DB=/data/
+      - HYP_TRACING_LEVEL=DEBUG
+      - HYP_DEFAULTSIGNER_KEY=
+
+      - CONFIG_FILES=/app/config/agent-config.json
+
+    volumes:
+      - ./hyperlane:/etc/hyperlane
+ 
+
+  validator-diadata:
+    container_name: hpl-validator-diadata
+    # image: gcr.io/abacus-labs-dev/hyperlane-agent:9736164-20240307-131918
+    image: gcr.io/abacus-labs-dev/hyperlane-agent:3bb4d87-20240129-164519
+    user: root
+    # restart: always
+    entrypoint: ['sh', '-c']
+    command:
+      - |
+        rm -rf /app/config/* && \
+        cp "/etc/hyperlane/agent-config.docker.json" "/app/config/agent-config.json" && \
+
+          ./validator
+    ports:
+      - 9120:9090
+    volumes:
+      - ./hyperlane:/etc/hyperlane
+
+    environment:
+      - AWS_ACCESS_KEY_ID=
+      - AWS_SECRET_ACCESS_KEY=
+      - HYP_CHAINS_diadata_SIGNER_KEY=  
+      - HYP_CHECKPOINTSYNCER_BUCKET=
+      - HYP_CHECKPOINTSYNCER_FOLDER=
+      - HYP_CHECKPOINTSYNCER_REGION=us-east-1
+      - HYP_CHECKPOINTSYNCER_TYPE=s3
+      - HYP_VALIDATOR_KEY=
+
+      - HYP_ORIGINCHAINNAME=diadata
+      - CONFIG_FILES=/etc/hyperlane/validator.json
+      - HYP_DB=/data/

@@ -1,0 +1,19 @@
+ # yaml-language-server: $schema=../schema.json
+ blockExplorers:
+   - apiUrl: https://explorer-static-violet-vicuna-qhcog2uell.t.conduit.xyz/
+     family: blockscout #explorer you're using, also supporting routescan or blockscout
+     name: diascan
+     url: https://explorer-static-violet-vicuna-qhcog2uell.t.conduit.xyz/
+ chainId: 23104
+ displayName: diachain
+ isTestnet: true # optional
+ name: diachain
+ nativeToken:
+   name: Ether
+   symbol: ETH
+   decimals: 18
+ protocol: ethereum
+ rpcUrls:
+    - http: https://rpc-static-violet-vicuna-qhcog2uell.t.conduit.xyz
+ 
+ mailbox: '0x9475dF7350BE17a0a2F6A285b57564631b149461'
