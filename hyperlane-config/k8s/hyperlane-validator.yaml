@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hyperlane-validator
+  namespace: dia-lumina
+  labels:
+    app: hyperlane-validator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hyperlane-validator
+  template:
+    metadata:
+      labels:
+        app: hyperlane-validator
+    spec:
+      containers:
+        - name: hyperlane-validator
+          image:  dia-registry/hyperlane-validator-lumina:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              memory: "500Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet 
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet
+                  key: AWS_SECRET_ACCESS_KEY
+            - name: HYP_DB
+              value: "/data/"
+            - name: HYP_CHAINS_dia_SIGNER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet
+                  key: HYP_DEFAULTSIGNER_KEY   
+            - name: HYP_CHECKPOINTSYNCER_BUCKET
+              value: "hyperlane-validator-signatures-lasernet-testnet"
+            - name: HYP_CHECKPOINTSYNCER_FOLDER
+              value: "hyperlane_data"
+            - name: HYP_CHECKPOINTSYNCER_REGION
+              value: "eu-central-1"
+            - name: HYP_CHECKPOINTSYNCER_TYPE
+              value: "s3"
+            - name: HYP_VALIDATOR_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet
+                  key: HYP_DEFAULTSIGNER_KEY   
+            - name: HYP_ORIGINCHAINNAME
+              value: "dia"
+            - name: CONFIG_FILES
+              value: "/app/config/agent-config.json"
+ 

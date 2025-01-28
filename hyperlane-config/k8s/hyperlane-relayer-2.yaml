@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hyperlane-relayer-2
+  namespace:  lumina
+  labels:
+    app: hyperlane-relayer-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hyperlane-relayer-2
+  template:
+    metadata:
+      labels:
+        app: hyperlane-relayer-2
+    spec:
+      containers:
+        - name: hyperlane-relayer-2
+          image:  dia-registry/hyperlane-relayer-lumina:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 9090
+          resources:
+            requests:
+              memory: "500Mi"
+              cpu: "750m"
+            limits:
+              memory: "1Gi"
+              cpu: "750m"
+          env:
+            - name: HYP_GASPAYMENTENFORCEMENT
+              value: '[{"type":"none"}]'
+            - name: HYP_RELAYCHAINS
+              value: "dia,sepolia"
+            - name: HYP_DB
+              value: "/data/"
+            - name: HYP_TRACING_LEVEL
+              value: "DEBUG"
+            - name: CONFIG_FILES
+              value: "/app/config/agent-config.json"
+            - name: HYP_WHITELIST
+              value: '[{"originDomain":[10640]}]'
+            - name: HYP_DEFAULTSIGNER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet
+                  key: HYP_DEFAULTSIGNER_KEY   
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet 
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hyperlane-secrets-relayer-lasernet
+                  key: AWS_SECRET_ACCESS_KEY
+            
+      imagePullSecrets:
+        - name: all-icr-io
