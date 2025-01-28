@@ -21,7 +21,7 @@ contract Ism is IInterchainSecurityModule {
         bytes calldata,
         bytes calldata _message
     ) external view override returns (bool) {
-        // return senderShouldBe == Message.sender(_message);
+        return senderShouldBe == Message.sender(_message);
 
          return true;
         
