@@ -1,23 +1,23 @@
 blockExplorers:
-  - apiUrl: https://explorer-static-violet-vicuna-qhcog2uell.t.conduit.xyz/api
+  - apiUrl: https://testnet-explorer.diadata.org/api
     family: blockscout
     name: Blockscout
-    url: https://explorer-static-violet-vicuna-qhcog2uell.t.conduit.xyz/
+    url: https://testnet-explorer.diadata.org/api
 blocks:
   confirmations: 3
   estimateBlockTime: 5
   reorgPeriod: 0
-chainId: 23104
+chainId: 10640
  
 displayName: Diadata Testnet
-domainId: 23104
+domainId: 10640
 isTestnet: true
-name: diadata
+nameh: diadata
 nativeToken:
   decimals: 18
   name: ETH
   symbol: ETH
 protocol: ethereum
 rpcUrls:
-  - http: "https://rpc-static-violet-vicuna-qhcog2uell.t.conduit.xyz"
-mailbox: "0x9475dF7350BE17a0a2F6A285b57564631b149461"
+  - http: "https://testnet-rpc.diadata.org"
+mailbox: "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
