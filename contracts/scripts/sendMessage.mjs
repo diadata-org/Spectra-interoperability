@@ -19,11 +19,9 @@ async function main() {
   console.log("Chain ID:", network.chainId);
 
 
-  const key =  "UNI/USD"; // Assuming key is an address or a bytes32 value
+  const key =  "ETH/USD"; // Assuming key is an address or a bytes32 value
  
   const abiCoder = new ethers.AbiCoder();
-
-   
 
   const body = abiCoder.encode(
     ["string"], // Types of the parameters
@@ -40,7 +38,7 @@ async function main() {
   switch (network.chainId){
     case 84532n: {
        mailBoxAddress = "0x6966b0E55883d49BFB24539356a2f8A673E02039"
-      oracleRequestorAddress = "0x52A2F754d876bF15aE61cfAC62c7d948699965D9"
+      oracleRequestorAddress = "0x9D13514FA039f21EB39BC746cFAE700404AdD97F"
     }
     break;
 
@@ -72,9 +70,6 @@ async function main() {
 
   }
 
-
-  // dia mailbox 0x9475dF7350BE17a0a2F6A285b57564631b149461
-  // sepolia mailbox 0x6966b0E55883d49BFB24539356a2f8A673E02039
   const mailbox = await ethers.getContractAt(
     "IMailbox",
     mailBoxAddress
@@ -89,37 +84,6 @@ async function main() {
 
   console.log("--quoteDispatch---",mailBoxAddress)
 
-
-  // const mb = mailbox.attach(mailBoxAddress)
-
-  //   let  hook = await mailbox.defaultHook();
-  // // console.log("hook",hook)
-    "0x6966b0E55883d49BFB24539356a2f8A673E02039"
-  );
-
-  const OracleUpdateRecipient = await ethers.getContractAt(
-    "OracleRequestor",
-    "0x90a26776EC9B2C0b7234140a4A5Cc085eEFb63cc"
-  );
-
-  // const mb = mailbox.attach("0x68a528ccedc27ead40d7391ebb5182154b754fc9")
-
-  //   let  hook = await mailbox.defaultHook();
-  // console.log("hook",hook)
-  // console.log("messageBody",messageBody)
-  // console.log("formattedRecipient",formattedRecipient)
-
-  const v = await mailbox['quoteDispatch(uint32,bytes32,bytes)'](destinationDomain, formattedRecipient, messageBody);
-  console.log("value",v)
-
-  // console.log("value",messageBody)
-
-
-  // IMailbox _mailbox,
-  // address reciever,
-  // uint32 _destinationDomain,
-  // bytes calldata _messageBody
-
   console.log("mailBoxAddress",  addressToBytes32(
     mailBoxAddress
   ))
@@ -132,26 +96,12 @@ async function main() {
   let messageTx = await OracleUpdateRecipient.request(
     mailBoxAddress,
     diaRecipient,
-  let messageTx = await OracleUpdateRecipient.request(
-    "0x6966b0E55883d49BFB24539356a2f8A673E02039",
-    "0x6ccDb47E3292630699fBCcC1753d78DE18ea5B7e",
     destinationDomain,
     messageBody,
-    { value: 1 }
+    { value: 832474760717120 }
   );
 
-  // console.log("t", t);
-
-  // let messageTx = await mailbox['dispatch(uint32,bytes32,bytes,bytes,address)'](
-  //   destinationDomain,
-  //   formattedRecipient,
-  //   messageBody,
-  //   '0x',
-  //    '0x0000000000000000000000000000000000000000',
-  //   { value: v },
-  // )
-  //   const messageTx = await mailbox['dispatch(uint32,bytes32,bytes,bytes,address)'](destinationDomain, formattedRecipient, messageBody,'0x','0x0000000000000000000000000000000000000000', {value:v});
-   console.log("messageTx",messageTx)
+  console.log("messageTx",messageTx);
 }
 
 main().catch((error) => {
