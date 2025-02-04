@@ -12,7 +12,7 @@ chainId: 10640
 displayName: Diadata Testnet
 domainId: 10640
 isTestnet: true
-nameh: diadata
+name: diadata
 nativeToken:
   decimals: 18
   name: ETH
