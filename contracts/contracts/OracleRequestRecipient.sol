@@ -10,26 +10,28 @@ import {TypeCasts} from "./libs/TypeCasts.sol";
 import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
 
 
+/// @title OracleRequestRecipient
+/// @notice Handles incoming cross-chain messages and triggers an oracle action via IOracleTrigger.
 contract OracleRequestRecipient is
     Ownable,
     IMessageRecipient,
     ISpecifiesInterchainSecurityModule
 {
     struct ChainConfig {
-        address MailBox;
-        address RecipientAddress;
+        address mailBox;
+        address recipientAddress;
     }
 
 
     event ChainAdded(
         uint32 indexed chainId,
-        address MailBox,
-        address RecipientAddress
+        address mailBox,
+        address recipientAddress
     );
     event ChainUpdated(
         uint32 indexed chainId,
-        address MailBox,
-        address RecipientAddress
+        address mailBox,
+        address recipientAddress
     );
 
     mapping(uint32 => ChainConfig) public chains;
@@ -59,61 +61,64 @@ contract OracleRequestRecipient is
 
    function addChain(
         uint32 chainId,
-        address MailBox,
-        address RecipientAddress
-    ) public {
+        address mailBox,
+        address recipientAddress
+    ) public onlyOwner {
         require(
-            chains[chainId].MailBox == address(0),
+            chains[chainId].mailBox == address(0),
             "Chain ID already exists"
         );
-        chains[chainId] = ChainConfig(MailBox, RecipientAddress);
-        // emit ChainAdded(chainId, MailBox, RecipientAddress);
+        chains[chainId] = ChainConfig(mailBox, recipientAddress);
+        emit ChainAdded(chainId, mailBox, recipientAddress);
     }
 
      function updateChain(
         uint32 chainId,
-        address MailBox,
-        address RecipientAddress
-    ) public {
+        address mailBox,
+        address recipientAddress
+    ) public onlyOwner {
         require(
-            chains[chainId].MailBox != address(0),
+            chains[chainId].mailBox != address(0),
             "Chain ID does not exist"
         );
-        chains[chainId] = ChainConfig(MailBox, RecipientAddress);
-        emit ChainUpdated(chainId, MailBox, RecipientAddress);
+        chains[chainId] = ChainConfig(mailBox, recipientAddress);
+        emit ChainUpdated(chainId, mailBox, recipientAddress);
     }
 
     function viewChain(uint32 chainId) public view returns (address, address) {
         require(
-            chains[chainId].MailBox != address(0),
+            chains[chainId].mailBox != address(0),
             "Chain ID does not exist"
         );
         ChainConfig memory config = chains[chainId];
-        return (config.MailBox, config.RecipientAddress);
+        return (config.mailBox, config.recipientAddress);
     }
 
 
+    /**
+     * @notice Handles an incoming message.
+     * @param _origin The originating chain ID.
+     * @param _sender The sender's address encoded as bytes32.
+     * @param _data The message data, expected to be ABI-encoded as a string.
+     */
     function handle(
         uint32 _origin,
         bytes32 _sender,
         bytes calldata _data
     ) external payable virtual override {
-        // string memory key = abi.decode(_data, (string));
+        string memory key = abi.decode(_data, (string));
 
-        //    ChainConfig memory config = chains[_origin];
-        // require(config.MailBox != address(0), "Chain configuration not found");
+        ChainConfig memory config = chains[_origin];
+        require(config.mailBox != address(0), "Chain configuration not found");
+        require(oracleTriggerAddress != address(0), "Oracle trigger not set");
+
  
-        // emit  ReceivedCall(address(uint160(uint256(_sender))), 0, "");
-
-        // IOracleTrigger(oracleTriggerAddress)
-        //     .dispatch(config.MailBox,_origin,address(uint160(uint256(_sender))), key);
+        emit  ReceivedCall(address(uint160(uint256(_sender))), 0, "");
 
 
-
-
-        // updates[key] = receivedData;
-        // emit ReceivedMessage(key,timestamp,value);
-        // lastSender = _sender;
+        IOracleTrigger(oracleTriggerAddress)
+            .dispatch(config.mailBox,_origin,address(uint160(uint256(_sender))), key);
+       
         lastData = _data;
     }
 

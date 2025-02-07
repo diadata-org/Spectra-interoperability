@@ -1,24 +1,30 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity >=0.8.0;
 
-import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-import { IMessageRecipient } from "./interfaces/IMessageRecipient.sol";
-import {
-    IInterchainSecurityModule,
-    ISpecifiesInterchainSecurityModule
-} from "./interfaces/IInterchainSecurityModule.sol";
-import { IMailbox } from "./interfaces/IMailbox.sol";
-import { IPostDispatchHook } from "./interfaces/hooks/IPostDispatchHook.sol";
-import { TypeCasts } from "./libs/TypeCasts.sol";
+import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
+import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
+import {IMailbox} from "./interfaces/IMailbox.sol";
+import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
+import {TypeCasts} from "./libs/TypeCasts.sol";
+import "./UserWallet.sol";
 
-using TypeCasts for address;
+ using TypeCasts for address;
+
+interface IUserWalletFactory {
+    function getAddress(address owner) external view returns (address);
+}
 
 /**
- * @title OracleRequestor
- * @notice Dispatches interchain messages and handles incoming oracle data updates.
+ * @title PushOracleReceiver
+ * @notice Handles incoming oracle data updates.
  */
-contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecurityModule {
+contract PushOracleReceiver is
+    Ownable,
+    IMessageRecipient,
+    ISpecifiesInterchainSecurityModule
+{
     /// @notice Reference to the interchain security module.
     IInterchainSecurityModule public interchainSecurityModule;
 
@@ -28,10 +34,13 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
     /// @notice Stores the raw data of the last received message.
     bytes public lastData;
 
-
-
     /// @notice Address for the post-dispatch payment hook.
     address public paymentHook;
+
+        bool public feeFromUserWallet;
+            address public walletFactory;
+
+
 
     /**
      * @notice Structure representing an oracle data update.
@@ -44,7 +53,7 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
         uint128 timestamp;
         uint128 value;
     }
-    
+
     /// @notice The most recent oracle data received.
     Data public receivedData;
 
@@ -56,6 +65,10 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
 
     /// @notice Emitted when a call is received (currently unused).
     event ReceivedCall(address indexed caller, uint256 amount, string message);
+
+     function setFeeSource(bool _feeFromUserWallet) external onlyOwner {
+        feeFromUserWallet = _feeFromUserWallet;
+    }
 
     /**
      * @notice Dispatches an interchain message via the provided mailbox.
@@ -72,13 +85,14 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
         bytes calldata _messageBody
     ) external payable returns (bytes32 messageId) {
         IPostDispatchHook hook = IPostDispatchHook(paymentHook);
-        return _mailbox.dispatch{value: msg.value}(
-            _destinationDomain,
-            receiver.addressToBytes32(),
-            _messageBody,
-            "", // No additional data
-            hook
-        );
+        return
+            _mailbox.dispatch{value: msg.value}(
+                _destinationDomain,
+                receiver.addressToBytes32(),
+                _messageBody,
+                "", // No additional data
+                hook
+            );
     }
 
     /**
@@ -99,7 +113,11 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
         );
 
         // Update the stored oracle data.
-        Data memory newData = Data({ key: key, timestamp: timestamp, value: value });
+        Data memory newData = Data({
+            key: key,
+            timestamp: timestamp,
+            value: value
+        });
         receivedData = newData;
         updates[key] = newData;
 
@@ -107,6 +125,30 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
 
         lastSender = _sender;
         lastData = _data;
+
+
+        uint256 gasPrice = tx.gasprice;
+        uint256 fee = 2 * 97440 * gasPrice;
+
+ 
+        (bool success, ) = paymentHook.call{value: 2 * 97440 * gasPrice}("");
+        require(success, "Fee transfer failed");
+
+
+         if (feeFromUserWallet) {
+  
+ 
+            address userWallet = IUserWalletFactory(walletFactory).getAddress(address(uint160(uint256(_sender))));
+
+             UserWallet(payable(userWallet)).deductFee(fee);
+        } else {
+            // Deduct fee from this contract.
+            require(address(this).balance >= fee, "Insufficient balance");
+            (bool success, ) = paymentHook.call{value: fee}("");
+            require(success, "Fee transfer failed");
+        }
+
+
     }
 
     /**
@@ -116,4 +158,15 @@ contract OracleRequestor is Ownable, IMessageRecipient, ISpecifiesInterchainSecu
     function setInterchainSecurityModule(address _ism) external onlyOwner {
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
+
+      function setPaymentHook(address _paymentHook) external onlyOwner {
+        paymentHook = _paymentHook;
+    }
+
+      receive() external payable {
+       
+    }
+
+     fallback() external payable {}
+
 }
