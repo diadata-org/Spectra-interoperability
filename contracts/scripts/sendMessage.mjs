@@ -50,8 +50,8 @@ async function main() {
 
 
     case 421614n: {
-       mailBoxAddress = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
-      oracleRequestorAddress = "0xebcdc9d3ef5d07B7B668146E41C73b003314a37f"
+       mailBoxAddress = "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"  
+      oracleRequestorAddress = "0xb31034945a91E6d10afEf68101a0F50A069842c9"
     }
     break;
     case 11155420n: {
@@ -92,16 +92,27 @@ async function main() {
     oracleRequestorAddress
   ))
 
+  console.log("destinationDomain",  destinationDomain)
 
-  let messageTx = await OracleUpdateRecipient.request(
-    mailBoxAddress,
-    diaRecipient,
-    destinationDomain,
-    messageBody,
-    { value: 832474760717120 }
-  );
+  try{
+    let messageTx = await OracleUpdateRecipient.request(
+      mailBoxAddress,
+      diaRecipient,
+      destinationDomain,
+      messageBody,
+      { value: 832474760717120 }
+    );
 
-  console.log("messageTx",messageTx);
+    console.log("messageTx",messageTx);
+
+
+  }catch(e){
+    console.log("err",e);
+
+  }
+
+ 
+
 }
 
 main().catch((error) => {
