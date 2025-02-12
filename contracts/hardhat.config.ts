@@ -32,34 +32,39 @@ const config: HardhatUserConfig = {
       accounts,
     },
     alfajores: {
-      chainId:44787,
+      chainId: 44787,
       url: process.env.AKFAJORES_RPC || "https://alfajores-forno.celo-testnet.org",
       accounts,
     },
     sepolia: {
-      chainId:11155111,
+      chainId: 11155111,
       url: process.env.SEPOLIA_RPC || "https://ethereum-sepolia.publicnode.com",
       accounts,
     },
     fuji: {
-      chainId:43113,
+      chainId: 43113,
       url: process.env.SEPOLIA_RPC || "https://avalanche-fuji.blockpi.network/v1/rpc/public",
       accounts,
     },
     diadata_testnet: {
-      chainId:23104,
+      chainId: 23104,
       url: process.env.DIADATA__TESTNET_RPC || "https://rpc-static-violet-vicuna-qhcog2uell.t.conduit.xyz",
       accounts,
     },
     bsctestnet: {
-      chainId:97,
+      chainId: 97,
       url: process.env.BSC__TESTNET_RPC || "https://bsc-testnet-rpc.publicnode.com",
       accounts,
     },
     base_sepolia: {
-        chainId:84532,
+        chainId: 84532,
         url: process.env.BASE_SEPOLIA__TESTNET_RPC || "https://base-sepolia-rpc.publicnode.com",
         accounts,
+    },
+    arbi_sepolia: {
+      chainId: 421614,
+      url: process.env.ARBI_SEPOLIA__TESTNET_RPC || "https://arbitrum-sepolia-rpc.publicnode.com",
+      accounts,      
     }
   },
 };
