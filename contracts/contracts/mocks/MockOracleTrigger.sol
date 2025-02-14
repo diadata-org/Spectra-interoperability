@@ -9,7 +9,7 @@ contract MockOracleTrigger is IOracleTrigger {
     address public lastSender;
     string public lastKey;
 
-    event DispatchCalled(address mailbox, uint32 origin, address sender, string key);
+    event DispatchCalled( uint32 origin, address sender, string key);
 
        function dispatchToChain(
         uint32 _destinationDomain,
@@ -19,15 +19,13 @@ contract MockOracleTrigger is IOracleTrigger {
     }
 
     function dispatch(
-        address _mailBox,
-        uint32 _origin,
+         uint32 _origin,
         address _sender,
         string calldata key
     ) external payable  {
-        lastMailBox = _mailBox;
-        lastOrigin = _origin;
+         lastOrigin = _origin;
         lastSender = _sender;
         lastKey = key;
-        emit DispatchCalled(_mailBox, _origin, _sender, key);
+        emit DispatchCalled( _origin, _sender, key);
     }
 }

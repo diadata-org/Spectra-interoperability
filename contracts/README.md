@@ -10,3 +10,10 @@ The OracleTrigger smart contract exists on the Diadata chain. It receives asset 
 
 ### OracleUpdateRecipient Smart Contract
 This smart contract resides on the destination chain and retrieves DIA oracle prices.
+
+
+### Test
+
+forge install foundry-rs/forge-std
+
+

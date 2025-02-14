@@ -10,9 +10,9 @@ interface IDIAOracleV2 {
 
 contract DIAOracleV2Meta {
     mapping (uint256 => address) oracles;
-    uint256 numOracles;
-    uint256 threshold;
-    uint256 timeoutSeconds;
+    uint256 public numOracles;
+    uint256 public threshold;
+    uint256 public timeoutSeconds;
 
     address admin;
 

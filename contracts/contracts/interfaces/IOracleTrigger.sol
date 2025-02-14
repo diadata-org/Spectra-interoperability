@@ -10,10 +10,9 @@ interface IOracleTrigger {
     ) external payable ;
 
      function dispatch(
-        address _mailbox,
         uint32 _destinationDomain,
-        address recipientAddress,
-        string memory key
+        address _recipientAddress,
+        string memory _key
     ) external payable;
 
 }

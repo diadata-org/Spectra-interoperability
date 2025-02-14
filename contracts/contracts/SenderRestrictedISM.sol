@@ -9,7 +9,7 @@ import {TypeCasts} from "./libs/TypeCasts.sol";
 using TypeCasts for address;
 
 
-contract Ism is IInterchainSecurityModule {
+contract SenderRestrictedISM is IInterchainSecurityModule {
     uint8 public constant override moduleType = uint8(Types.NULL);
     address public senderShouldBe;
 
@@ -19,9 +19,9 @@ contract Ism is IInterchainSecurityModule {
 
     function verify(
         bytes calldata,
-        bytes calldata 
-    ) public pure returns (bool) {
-        return true;
+        bytes calldata _message
+    ) external view override returns (bool) {
+        return senderShouldBe == Message.senderAddress(_message);
         
     }
 }
