@@ -2,10 +2,10 @@
 import { ethers } from "hardhat";
 
 async function main() {
-  const OracleTrigger = await ethers.getContractFactory("RequestOracle");
+  const OracleTrigger = await ethers.getContractFactory("ProtocolFeeHook");
   const oracleTrigger = await OracleTrigger.deploy();
  
-  console.log("OracleRequestor deployed to:",await  oracleTrigger.getAddress());
+  console.log("ProtocolFeeHook deployed to:",await  oracleTrigger.getAddress());
 }
 
 main().catch((error) => {

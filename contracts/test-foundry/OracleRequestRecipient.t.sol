@@ -3,6 +3,8 @@ pragma solidity >=0.8.0;
 
 import "forge-std/Test.sol";
 import "../contracts/OracleRequestRecipient.sol";
+import "../contracts/RequestOracle.sol";
+
 import "../contracts/interfaces/IOracleTrigger.sol";
 import "../contracts/interfaces/IInterchainSecurityModule.sol";
 
@@ -12,6 +14,10 @@ import "../contracts/interfaces/IInterchainSecurityModule.sol";
  */
 contract OracleRequestRecipientTest is Test {
     OracleRequestRecipient public recipient;
+    RequestOracle public requestOracle1;
+    RequestOracle public requestOracle2;
+
+
     address public owner = address(0x1);
     address public nonOwner = address(0x2);
     address public mockISM = address(0x3);
@@ -26,6 +32,19 @@ contract OracleRequestRecipientTest is Test {
     function setUp() public {
         vm.prank(owner);
         recipient = new OracleRequestRecipient();
+        requestOracle1 = new  RequestOracle();
+        requestOracle2 = new  RequestOracle();
+
+        bytes32 requestOracleAddress = bytes32(uint256(uint160(address(requestOracle1))));
+
+
+        vm.prank(owner);
+        recipient.addToWhitelist(1,requestOracleAddress);
+
+
+
+
+
 
         // Assign mock addresses
         oracleTriggerMock = IOracleTrigger(mockOracleTrigger);
@@ -80,26 +99,45 @@ contract OracleRequestRecipientTest is Test {
 
         // Mock sender verification
         vm.prank(mockMailbox);
-        bytes32 sender = bytes32(uint256(uint160(nonOwner)));
+        bytes32 sender = bytes32(uint256(uint160(address(requestOracle1))));
         bytes memory data = abi.encode("test-key");
 
         // Expect event emission
         vm.expectEmit(true, false, false, true);
-        emit OracleRequestRecipient.ReceivedCall(nonOwner, "test-key");
+        emit OracleRequestRecipient.ReceivedCall(address(requestOracle1), "test-key");
 
         // Call the handle function
         recipient.handle(1, sender, data);
     }
 
-    /// @notice Tests that `handle` reverts if called by an unauthorized sender
+     /// @notice Tests that `handle` reverts if called by an unauthorized RequestOracle/origin
     function testHandleUnauthorizedCaller() public {
         vm.prank(owner);
         recipient.setOracleTriggerAddress(mockOracleTrigger);
 
         vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.mailBox.selector), abi.encode(mockMailbox));
 
-        vm.prank(nonOwner); // Unauthorized sender
+        vm.prank(nonOwner);  
+
         bytes32 sender = bytes32(uint256(uint160(nonOwner)));
+
+ 
+        bytes memory data = abi.encode("test-key");
+
+        vm.expectRevert("Sender not whitelisted for this origin");
+        recipient.handle(1, sender, data);
+    }
+
+    /// @notice Tests that `handle` reverts if called by an unauthorized mailbox
+    function testHandleUnauthorizedMailbox() public {
+        vm.prank(owner);
+        recipient.setOracleTriggerAddress(mockOracleTrigger);
+
+        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.mailBox.selector), abi.encode(mockMailbox));
+
+        vm.prank(nonOwner); // Unauthorized sender
+                bytes32 sender = bytes32(uint256(uint160(address(requestOracle1))));
+
         bytes memory data = abi.encode("test-key");
 
         vm.expectRevert("Unauthorized caller");

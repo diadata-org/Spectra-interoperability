@@ -27,7 +27,7 @@ contract OracleRequestRecipient is
     IInterchainSecurityModule public interchainSecurityModule;
 
     /// @notice Address of the whitelisted RequestOracle
-    mapping(bytes32 => bool) public whitelistedSenders;
+    mapping(uint32 => mapping(bytes32 => bool)) public whitelistedSenders;
 
 
 
@@ -58,6 +58,8 @@ contract OracleRequestRecipient is
             oracleTriggerAddress != address(0),
             "Oracle trigger address not set"
         );
+        require(whitelistedSenders[_origin][_sender], "Sender not whitelisted for this origin");
+
         address sender = address(uint160(uint256(_sender)));
 
         //TODO sender should be whitelisted RequestOracle
@@ -73,6 +75,15 @@ contract OracleRequestRecipient is
 
         IOracleTrigger(oracleTriggerAddress).dispatch(_origin, sender, key);
     }
+
+
+     function addToWhitelist(uint32 _origin, bytes32 _sender) onlyOwner external {
+        whitelistedSenders[_origin][_sender] = true;
+     }
+
+    function removeFromWhitelist(uint32 _origin, bytes32 _sender) onlyOwner external {
+        whitelistedSenders[_origin][_sender] = false;
+     }
 
     /**
      * @notice Sets the interchain security module (ISM) address.
