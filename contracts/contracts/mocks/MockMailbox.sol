@@ -6,94 +6,89 @@ import {IPostDispatchHook} from "../interfaces/hooks/IPostDispatchHook.sol";
 
 
 contract MockMailbox is IMailbox {
-    uint32 public override localDomain;
-    mapping(bytes32 => bool) public  deliveredMessages;
-    IInterchainSecurityModule public override defaultIsm;
-    IPostDispatchHook public override defaultHook;
-    IPostDispatchHook public override requiredHook;
-
-    bytes32 public lastMessageId;
-    bytes32 public override latestDispatchedId;
-
-    constructor(uint32 _localDomain) {
-        localDomain = _localDomain;
+    function dispatch(
+        uint32,
+        bytes32,
+        bytes calldata,
+        bytes calldata,
+        IPostDispatchHook
+    ) external payable returns (bytes32) {
+        return bytes32(uint256(1));
     }
 
-    function delivered(bytes32 messageId) external view override returns (bool) {
-        return deliveredMessages[messageId];
+    function process(bytes calldata, bytes calldata) external payable {}
+
+    function dispatch(
+        uint32,
+        bytes32,
+        bytes calldata
+    ) external payable returns (bytes32) {
+        return bytes32(uint256(1));
     }
 
     function dispatch(
-        uint32 destinationDomain,
-        bytes32 recipientAddress,
-        bytes calldata messageBody
-    ) external payable override returns (bytes32 messageId) {
-        messageId = keccak256(abi.encodePacked(destinationDomain, recipientAddress, messageBody, block.timestamp));
-        latestDispatchedId = messageId;
-        emit Dispatch(msg.sender, destinationDomain, recipientAddress, messageBody);
-        emit DispatchId(messageId);
+        uint32,
+        bytes32,
+        bytes calldata,
+        bytes calldata
+    ) external payable returns (bytes32) {
+        return bytes32(uint256(1));
     }
 
     function quoteDispatch(
-        uint32 destinationDomain,
-        bytes32 recipientAddress,
-        bytes calldata messageBody
-    ) external view override returns (uint256 fee) {
-        return 0; // Mock fee calculation
-    }
-
-    function dispatch(
-        uint32 destinationDomain,
-        bytes32 recipientAddress,
-        bytes calldata body,
-        bytes calldata defaultHookMetadata
-    ) external payable override returns (bytes32 messageId) {
-        messageId = keccak256(abi.encodePacked(destinationDomain, recipientAddress, body, defaultHookMetadata, block.timestamp));
-        latestDispatchedId = messageId;
-        emit Dispatch(msg.sender, destinationDomain, recipientAddress, body);
-        emit DispatchId(messageId);
+        uint32,
+        bytes32,
+        bytes calldata
+    ) external pure returns (uint256) {
+        return 0;
     }
 
     function quoteDispatch(
-        uint32 destinationDomain,
-        bytes32 recipientAddress,
-        bytes calldata messageBody,
-        bytes calldata defaultHookMetadata
-    ) external view override returns (uint256 fee) {
-        return 0; // Mock fee calculation
-    }
-
-    function dispatch(
-        uint32 destinationDomain,
-        bytes32 recipientAddress,
-        bytes calldata body,
-        bytes calldata customHookMetadata,
-        IPostDispatchHook customHook
-    ) external payable override returns (bytes32 messageId) {
-        messageId = keccak256(abi.encodePacked(destinationDomain, recipientAddress, body, customHookMetadata, block.timestamp));
-        latestDispatchedId = messageId;
-        emit Dispatch(msg.sender, destinationDomain, recipientAddress, body);
-        emit DispatchId(messageId);
+        uint32,
+        bytes32,
+        bytes calldata,
+        bytes calldata
+    ) external pure returns (uint256) {
+        return 0;
     }
 
     function quoteDispatch(
-        uint32 destinationDomain,
-        bytes32 recipientAddress,
-        bytes calldata messageBody,
-        bytes calldata customHookMetadata,
-        IPostDispatchHook customHook
-    ) external view override returns (uint256 fee) {
-        return 0; // Mock fee calculation
+        uint32,
+        bytes32,
+        bytes calldata,
+        bytes calldata,
+        IPostDispatchHook
+    ) external pure returns (uint256) {
+        return 0;
     }
 
-    function process(bytes calldata metadata, bytes calldata message) external payable override {
-        bytes32 messageId = keccak256(abi.encodePacked(metadata, message));
-        deliveredMessages[messageId] = true;
-        emit ProcessId(messageId);
-        emit Process(localDomain, keccak256(metadata), msg.sender);
+    function delivered(bytes32) external pure returns (bool) {
+        return false;
     }
 
-    function recipientIsm(address recipient) external view override returns (IInterchainSecurityModule module) {
-        return defaultIsm;
+    function recipientIsm(
+        address
+    ) external pure returns (IInterchainSecurityModule) {
+        return IInterchainSecurityModule(address(0));
+    }
+
+    function defaultIsm() external pure returns (IInterchainSecurityModule) {
+        return IInterchainSecurityModule(address(0));
+    }
+
+    function defaultHook() external pure returns (IPostDispatchHook) {
+        return IPostDispatchHook(address(0));
+    }
+
+    function requiredHook() external pure returns (IPostDispatchHook) {
+        return IPostDispatchHook(address(0));
+    }
+
+    function localDomain() external pure returns (uint32) {
+        return 1;
+    }
+
+    function latestDispatchedId() external pure returns (bytes32) {
+        return bytes32(0);
     }
 }

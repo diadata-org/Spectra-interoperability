@@ -10,7 +10,7 @@ import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
 import {TypeCasts} from "./libs/TypeCasts.sol";
 import "./UserWallet.sol";
 
- using TypeCasts for address;
+using TypeCasts for address;
 
 interface IUserWalletFactory {
     function getAddress(address owner) external view returns (address);
@@ -28,19 +28,11 @@ contract PushOracleReceiver is
     /// @notice Reference to the interchain security module.
     IInterchainSecurityModule public interchainSecurityModule;
 
-    /// @notice Stores the sender of the last received message.
-    bytes32 public lastSender;
-
-    /// @notice Stores the raw data of the last received message.
-    bytes public lastData;
-
     /// @notice Address for the post-dispatch payment hook.
     address public paymentHook;
 
-        bool public feeFromUserWallet;
-            address public walletFactory;
-
-
+    bool public feeFromUserWallet;
+    address public walletFactory;
 
     /**
      * @notice Structure representing an oracle data update.
@@ -66,7 +58,7 @@ contract PushOracleReceiver is
     /// @notice Emitted when a call is received (currently unused).
     event ReceivedCall(address indexed caller, uint256 amount, string message);
 
-     function setFeeSource(bool _feeFromUserWallet) external onlyOwner {
+    function setFeeSource(bool _feeFromUserWallet) external onlyOwner {
         feeFromUserWallet = _feeFromUserWallet;
     }
 
@@ -123,32 +115,25 @@ contract PushOracleReceiver is
 
         emit ReceivedMessage(key, timestamp, value);
 
-        lastSender = _sender;
-        lastData = _data;
-
-
         uint256 gasPrice = tx.gasprice;
-        uint256 fee = 2 * 97440 * gasPrice;
+        uint256 fee = 97440 * gasPrice;
 
- 
-        (bool success, ) = paymentHook.call{value: 2 * 97440 * gasPrice}("");
-        require(success, "Fee transfer failed");
+        // console.log("feeFromUserWallet", feeFromUserWallet);
+        // console.log("gasPrice", gasPrice);
 
+        if (feeFromUserWallet) {
+            address userWallet = IUserWalletFactory(walletFactory).getAddress(
+                address(uint160(uint256(_sender)))
+            );
 
-         if (feeFromUserWallet) {
-  
- 
-            address userWallet = IUserWalletFactory(walletFactory).getAddress(address(uint160(uint256(_sender))));
-
-             UserWallet(payable(userWallet)).deductFee(fee);
-        } else {
-            // Deduct fee from this contract.
-            require(address(this).balance >= fee, "Insufficient balance");
-            (bool success, ) = paymentHook.call{value: fee}("");
-            require(success, "Fee transfer failed");
+            UserWallet(payable(userWallet)).deductFee(fee);
         }
 
+        // Send the fee to the payment hook
+        (bool success, ) = paymentHook.call{value: fee}("");
+        // console.log("address success", success);
 
+        require(success, "Fee transfer failed");
     }
 
     /**
@@ -159,14 +144,15 @@ contract PushOracleReceiver is
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-      function setPaymentHook(address _paymentHook) external onlyOwner {
+    function setPaymentHook(address _paymentHook) external onlyOwner {
         paymentHook = _paymentHook;
     }
 
-      receive() external payable {
-       
+    function setWalletFactory(address _walletFactory) external onlyOwner {
+        walletFactory = _walletFactory;
     }
 
-     fallback() external payable {}
+    receive() external payable {}
 
+    fallback() external payable {}
 }

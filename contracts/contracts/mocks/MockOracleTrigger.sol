@@ -18,6 +18,10 @@ contract MockOracleTrigger is IOracleTrigger {
 
     }
 
+    function mailBox() external pure returns (address){
+        return address(uint160(1));
+    }
+
     function dispatch(
          uint32 _origin,
         address _sender,

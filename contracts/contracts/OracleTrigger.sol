@@ -2,7 +2,7 @@
 pragma solidity >=0.8.0;
 
 import {IInterchainGasPaymaster} from "./interfaces/IInterchainGasPaymaster.sol";
- import {IMailbox} from "./interfaces/IMailbox.sol";
+import {IMailbox} from "./interfaces/IMailbox.sol";
 import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
 import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
 import {TypeCasts} from "./libs/TypeCasts.sol";
@@ -27,6 +27,9 @@ error ExistingAdmin(address account);
 
 error CannotRemoveLastOwner();
 
+// @title OracleTrigger
+/// @notice This contract manages interchain oracle requests and dispatching price updates.
+/// @dev Provides access control for managing chains and secure dispatching mechanisms.
 contract OracleTrigger is
     AccessControlEnumerable,
     ISpecifiesInterchainSecurityModule,
@@ -35,65 +38,99 @@ contract OracleTrigger is
     struct ChainConfig {
         address RecipientAddress;
     }
+    /// @notice Address of the Interchain Security Module (ISM).
     IInterchainSecurityModule public interchainSecurityModule;
 
+    /// @notice Address of the mailbox contract responsible for interchain messaging.
     address public mailBox;
 
+    /// @notice Mapping of chain IDs to their corresponding recipient addresses.
     mapping(uint32 => ChainConfig) public chains;
 
+    /// @notice Role identifier for contract owners.
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
+    /// @notice Address of the DIA oracle metadata contract.
     address public metadataContract;
 
+    /// @notice Emitted when a new chain is added.
+    /// @param chainId The chain ID of the newly added chain.
+    /// @param RecipientAddress Address of the recipient contract on the chain.
     event ChainAdded(uint32 indexed chainId, address RecipientAddress);
+    /// @notice Emitted when a chain configuration is updated.
+    /// @param chainId The chain ID being updated.
+    /// @param RecipientAddress New recipient address.
     event ChainUpdated(uint32 indexed chainId, address RecipientAddress);
 
+    /// @notice Emitted when a message is dispatched to a destination chain.
+    /// @param chainId The destination chain ID.
+    /// @param recipientAddress The recipient contract address on the destination chain.
+    /// @param messageId The message ID.
     event MessageDispatched(
         uint32 chainId,
         address recipientAddress,
         bytes32 indexed messageId
     );
 
-    modifier validateAddress(address _address) {
-        if (_address == address(0)) revert ZeroAddress();
-        _;
-    }
-
-    modifier validateChain(uint32 _chainId) {
-        if (chains[_chainId].RecipientAddress == address(0))
-            revert ChainNotConfigured(_chainId);
-        _;
-    }
-
-    modifier onlyOwner() {
-        if (!hasRole(OWNER_ROLE, msg.sender)) revert NotAuthorized(msg.sender);
-        _;
-    }
-
+    /// @notice Emitted when an owner is added.
+    /// @param account The address of the new owner.
+    /// @param addedBy The address that added the new owner.
+    /// @param timestamp The timestamp of the addition.
     event OwnerAdded(
         address indexed account,
         address indexed addedBy,
         uint256 timestamp
     );
 
+    /// @notice Emitted when an owner is removed.
+    /// @param account The address of the removed owner.
+    /// @param removedBy The address that removed the owner.
+    /// @param timestamp The timestamp of the removal.
     event OwnerRemoved(
         address indexed account,
         address indexed removedBy,
         uint256 timestamp
     );
 
+    /// @notice Emitted when the mailbox contract address is updated.
+    /// @param newMailbox The new mailbox contract address.
     event MailboxUpdated(address indexed newMailbox);
+    /// @notice Emitted when the interchain security module (ISM) address is updated.
+    /// @param newModule The new ISM address.
     event InterchainSecurityModuleUpdated(address indexed newModule);
+
+    /// @notice Emitted when the metadata contract address is updated.
+    /// @param newMetadata The new metadata contract address.
     event MetadataContractUpdated(address indexed newMetadata);
 
+    /// @notice Ensures that the provided address is not a zero address.
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert ZeroAddress();
+        _;
+    }
+
+    /// @notice Ensures that the given chain is configured.
+    modifier validateChain(uint32 _chainId) {
+        if (chains[_chainId].RecipientAddress == address(0))
+            revert ChainNotConfigured(_chainId);
+        _;
+    }
+
+    /// @notice Ensures that only contract owners can execute the function.
+    modifier onlyOwner() {
+        if (!hasRole(OWNER_ROLE, msg.sender)) revert NotAuthorized(msg.sender);
+        _;
+    }
+
+    /// @notice Contract constructor that initializes the contract and assigns the deployer as the first owner.
     constructor() {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(OWNER_ROLE, msg.sender);
     }
 
-    /**
-     * @notice Adds a new chain recipient address. This is optional
-     */
+    /// @notice Adds a new chain recipient address.
+    /// @param chainId The chain ID to be added.
+    /// @param recipientAddress The recipient address for the chain.
     function addChain(
         uint32 chainId,
         address recipientAddress
@@ -102,9 +139,10 @@ contract OracleTrigger is
         emit ChainAdded(chainId, recipientAddress);
     }
 
-    /**
-     * @notice Updates recipient address (Destination chain oracle) for a specific chain.
-     */
+    
+    /// @notice Updates the recipient address for a specific chain.
+    /// @param chainId The chain ID to be updated.
+    /// @param recipientAddress The new recipient address.
     function updateChain(
         uint32 chainId,
         address recipientAddress
@@ -118,29 +156,27 @@ contract OracleTrigger is
         emit ChainUpdated(chainId, recipientAddress);
     }
 
-    /**
-     * @notice Returns the recipient address for a given chain.
-     */
-
+    /// @notice Returns the recipient address for a given chain.
+    /// @param _chainId The chain ID to query.
     function viewChain(
         uint32 _chainId
     ) public view validateChain(_chainId) returns (address) {
         return chains[_chainId].RecipientAddress;
     }
 
-    /**
-     * @notice Updates the metadata contract address.
-     */
+    /// @notice Updates the metadata contract address.
+    /// @param newMetadata The new metadata contract address.
     function updateMetadataContract(
         address newMetadata
     ) external onlyOwner validateAddress(newMetadata) {
         metadataContract = newMetadata;
-       emit MetadataContractUpdated(newMetadata);
-
+        emit MetadataContractUpdated(newMetadata);
     }
 
     /**
-     * @notice Dispatches a message to a configured destination chain.
+     *  @notice Dispatches a message to a configured destination chain.
+     *  @param _destinationDomain The destination chain ID.
+     *  @param key The key used to fetch the oracle value.
      */
 
     function dispatchToChain(
@@ -154,7 +190,7 @@ contract OracleTrigger is
         validateAddress(mailBox)
         nonReentrant
     {
-         ChainConfig storage config = chains[_destinationDomain];
+        ChainConfig storage config = chains[_destinationDomain];
 
         (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
 
@@ -172,15 +208,22 @@ contract OracleTrigger is
         );
     }
 
-    /**
-     * @notice Dispatches a message to a PushOracleReceiver .
-     */
-
+    /// @notice Dispatches a message to a configured destination chain.
+    /// @param _destinationDomain The destination chain ID.
+    /// @param key The key used to fetch the oracle value.
     function dispatch(
         uint32 _destinationDomain,
         address recipientAddress,
         string memory key
-    ) external payable onlyOwner nonReentrant validateAddress(mailBox) validateChain(_destinationDomain) validateAddress(recipientAddress) {
+    )
+        external
+        payable
+        onlyOwner
+        nonReentrant
+        validateAddress(mailBox)
+        validateChain(_destinationDomain)
+        validateAddress(recipientAddress)
+    {
         (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
 
         bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
@@ -194,9 +237,9 @@ contract OracleTrigger is
         emit MessageDispatched(_destinationDomain, recipientAddress, messageId);
     }
 
- 
     /**
      * @notice Sets the interchain security module.
+     * @param _ism The new ISM address.
      */
     function setInterchainSecurityModule(
         address _ism
@@ -207,6 +250,7 @@ contract OracleTrigger is
 
     /**
      * @notice Sets the mailbox address.
+     * @param _mailbox The new mailbox address.
      */
     function setMailbox(
         address _mailbox
@@ -217,6 +261,7 @@ contract OracleTrigger is
 
     /**
      * @notice Fetches value from the oracle.
+     * @param key The oracle key to query.
      */
 
     function _getOracleValue(
@@ -251,7 +296,7 @@ contract OracleTrigger is
     function removeOwner(
         address owner
     ) external validateAddress(owner) onlyOwner {
-        if(getRoleMemberCount(OWNER_ROLE) <=1) revert CannotRemoveLastOwner();
+        if (getRoleMemberCount(OWNER_ROLE) <= 1) revert CannotRemoveLastOwner();
         revokeRole(OWNER_ROLE, owner);
         emit OwnerRemoved(owner, msg.sender, block.timestamp);
     }

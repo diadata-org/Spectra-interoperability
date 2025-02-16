@@ -8,126 +8,117 @@ import {IOracleTrigger} from "./interfaces/IOracleTrigger.sol";
 import {TypeCasts} from "./libs/TypeCasts.sol";
 
 import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
+using TypeCasts for address;
 
-/// @title OracleRequestRecipient
-/// @notice Handles incoming cross-chain messages and triggers an oracle action via IOracleTrigger.
+/**
+ * @title OracleRequestRecipient
+ * @notice This contract receives and processes oracle request messages from an interchain network.
+ * @dev Implements security measures and enforces valid sender verification.
+ */
 contract OracleRequestRecipient is
     Ownable,
     IMessageRecipient,
-    ISpecifiesInterchainSecurityModule
+    ISpecifiesInterchainSecurityModule,
+    ReentrancyGuard
 {
-    struct ChainConfig {
-        address mailBox;
-        address recipientAddress;
-    }
-
-
-    event ChainAdded(
-        uint32 indexed chainId,
-        address mailBox,
-        address recipientAddress
-    );
-    event ChainUpdated(
-        uint32 indexed chainId,
-        address mailBox,
-        address recipientAddress
-    );
-
-    mapping(uint32 => ChainConfig) public chains;
-
+    /// @notice Address of the interchain security module (ISM)
     IInterchainSecurityModule public interchainSecurityModule;
-    bytes32 public lastSender;
-    bytes public lastData;
+
+    /// @notice Address of the whitelisted RequestOracle
+    mapping(bytes32 => bool) public whitelistedSenders;
+
+
+
+
+
+    /// @notice Address of the Oracle Trigger contract
     address public oracleTriggerAddress;
- 
 
-    address public lastCaller;
-    string public lastCallMessage;
-
-    struct Data {
-        string key;
-        uint128 timestamp;
-        uint128 value;
-    }
-    Data public receivedData;
-
-    mapping(string => Data) public updates;
-
-    event ReceivedMessage(string key, uint128 timestamp, uint128 value);
-
-    event ReceivedCall(address indexed caller, uint256 amount, string message);
-
-
-   function addChain(
-        uint32 chainId,
-        address mailBox,
-        address recipientAddress
-    ) public onlyOwner {
-        require(
-            chains[chainId].mailBox == address(0),
-            "Chain ID already exists"
-        );
-        chains[chainId] = ChainConfig(mailBox, recipientAddress);
-        emit ChainAdded(chainId, mailBox, recipientAddress);
-    }
-
-     function updateChain(
-        uint32 chainId,
-        address mailBox,
-        address recipientAddress
-    ) public onlyOwner {
-        require(
-            chains[chainId].mailBox != address(0),
-            "Chain ID does not exist"
-        );
-        chains[chainId] = ChainConfig(mailBox, recipientAddress);
-        emit ChainUpdated(chainId, mailBox, recipientAddress);
-    }
-
-    function viewChain(uint32 chainId) public view returns (address, address) {
-        require(
-            chains[chainId].mailBox != address(0),
-            "Chain ID does not exist"
-        );
-        ChainConfig memory config = chains[chainId];
-        return (config.mailBox, config.recipientAddress);
-    }
-
+    /// @notice Emitted when a valid oracle request update is received
+    /// @param caller The address that sent the request
+    /// @param key The decoded key from the request data
+    event ReceivedCall(address indexed caller, string key);
 
     /**
-     * @notice Handles an incoming message.
-     * @param _origin The originating chain ID.
-     * @param _sender The sender's address encoded as bytes32.
-     * @param _data The message data, expected to be ABI-encoded as a string.
+     * @notice Handles incoming oracle requests from the interchain network.
+     * @dev Ensures only authorized senders can invoke this function and prevents reentrancy attacks.
+     * @param _origin The source chain ID from where the request originated
+     * @param _sender The sender address in bytes32 format
+     * @param _data Encoded payload containing the oracle request key
      */
     function handle(
         uint32 _origin,
         bytes32 _sender,
         bytes calldata _data
-    ) external payable virtual override {
+    ) external payable virtual override nonReentrant {
+        require(_data.length > 0, "Invalid data length");
+        require(
+            oracleTriggerAddress != address(0),
+            "Oracle trigger address not set"
+        );
+        address sender = address(uint160(uint256(_sender)));
+
+        //TODO sender should be whitelisted RequestOracle
+
+        require(
+            msg.sender == IOracleTrigger(oracleTriggerAddress).mailBox(),
+            "Unauthorized caller"
+        );
+
         string memory key = abi.decode(_data, (string));
 
-        ChainConfig memory config = chains[_origin];
-        require(config.mailBox != address(0), "Chain configuration not found");
-        require(oracleTriggerAddress != address(0), "Oracle trigger not set");
+        emit ReceivedCall(sender, key);
 
- 
-        emit  ReceivedCall(address(uint160(uint256(_sender))), 0, "");
-
-
-        IOracleTrigger(oracleTriggerAddress)
-            .dispatch(config.mailBox,_origin,address(uint160(uint256(_sender))), key);
-       
-        lastData = _data;
+        IOracleTrigger(oracleTriggerAddress).dispatch(_origin, sender, key);
     }
 
+    /**
+     * @notice Sets the interchain security module (ISM) address.
+     * @dev Can only be called by the contract owner.
+     * @param _ism Address of the new ISM contract
+     */
     function setInterchainSecurityModule(address _ism) external onlyOwner {
+        require(_ism != address(0), "Invalid ISM address");
+
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-     function setOracleTriggerAddress(address _oracleTrigger) external onlyOwner {
+    /**
+     * @notice Sets the Oracle Trigger contract address.
+     * @dev Can only be called by the contract owner.
+     * @param _oracleTrigger Address of the new Oracle Trigger contract
+     */
+    function setOracleTriggerAddress(
+        address _oracleTrigger
+    ) external onlyOwner {
+        require(_oracleTrigger != address(0), "Invalid oracle trigger address");
+
         oracleTriggerAddress = _oracleTrigger;
     }
 
+    /**
+     * @notice Prevents direct ETH transfers to the contract.
+     */
+    receive() external payable {
+        revert("Direct ETH transfers not allowed");
+    }
+
+    /**
+     * @notice Retrieves the current interchain security module address.
+     * @return Address of the ISM contract
+     */
+    function getInterchainSecurityModule() external view returns (address) {
+        return address(interchainSecurityModule);
+    }
+
+    /**
+     * @notice Retrieves the current Oracle Trigger contract address.
+     * @return Address of the Oracle Trigger contract
+     */
+
+    function getOracleTriggerAddress() external view returns (address) {
+        return oracleTriggerAddress;
+    }
 }

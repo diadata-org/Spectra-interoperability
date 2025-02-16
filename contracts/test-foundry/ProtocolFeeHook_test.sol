@@ -79,7 +79,7 @@ contract ProtocolFeeHookTest is Test {
         require(success, "Funding contract failed");
 
         vm.prank(nonAdmin);
-        vm.expectRevert("Not admin");
+        vm.expectRevert("Ownable: caller is not the owner");
         feeHook.withdrawFees(nonAdmin);
     }
 

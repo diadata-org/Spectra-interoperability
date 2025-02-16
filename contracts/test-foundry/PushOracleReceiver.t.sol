@@ -257,7 +257,7 @@ contract PushOracleReceiverTest is Test {
 
      }
 
-    function testRequest() public {
+    function testRequestPush() public {
         bytes memory messageBody = abi.encode("Test message");
         vm.deal(address(this), 1 ether);
 
