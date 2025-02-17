@@ -63,10 +63,10 @@ contract OracleTriggerTest is Test {
         oracleTrigger.addChain(chainId, recipient);
     }
     
-    function testSetMailbox() public {
+    function testsetMailBox() public {
         vm.prank(owner);
-        oracleTrigger.setMailbox(mailbox);
-        assertEq(oracleTrigger.mailBox(), mailbox);
+        oracleTrigger.setMailBox(mailbox);
+        assertEq(oracleTrigger.getMailBox(), mailbox);
     }
     
     function testSetMetadataContract() public {
@@ -101,7 +101,7 @@ contract OracleTriggerTest is Test {
         oracleTrigger.addChain(chainId, recipient);
         
         vm.prank(owner);
-        oracleTrigger.setMailbox(mailbox);
+        oracleTrigger.setMailBox(mailbox);
         
         vm.prank(owner);
         oracleTrigger.updateMetadataContract(address(mockMetadata));
@@ -109,5 +109,20 @@ contract OracleTriggerTest is Test {
         vm.deal(owner, 1 ether);
         vm.prank(owner);
         oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+    }
+
+     function testDispatch() public {
+        vm.prank(owner);
+        oracleTrigger.addChain(chainId, recipient);
+        
+        vm.prank(owner);
+        oracleTrigger.setMailBox(mailbox);
+        
+        vm.prank(owner);
+        oracleTrigger.updateMetadataContract(address(mockMetadata));
+        
+        vm.deal(owner, 1 ether);
+        vm.prank(owner);
+        oracleTrigger.dispatch{value: 0.1 ether}(chainId, 0xb8565867A5616544d13595fBe30a5693b2207fa0,"BTC");
     }
 }

@@ -9,7 +9,7 @@ interface IOracleTrigger {
         string memory key
     ) external payable ;
 
-    function mailBox() external view returns (address);
+    function getMailBox() external view returns (address);
 
      function dispatch(
         uint32 _destinationDomain,

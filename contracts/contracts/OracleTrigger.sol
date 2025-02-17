@@ -42,7 +42,7 @@ contract OracleTrigger is
     IInterchainSecurityModule public interchainSecurityModule;
 
     /// @notice Address of the mailbox contract responsible for interchain messaging.
-    address public mailBox;
+    address private mailBox;
 
     /// @notice Mapping of chain IDs to their corresponding recipient addresses.
     mapping(uint32 => ChainConfig) public chains;
@@ -221,7 +221,6 @@ contract OracleTrigger is
         onlyOwner
         nonReentrant
         validateAddress(mailBox)
-        validateChain(_destinationDomain)
         validateAddress(recipientAddress)
     {
         (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
@@ -252,11 +251,19 @@ contract OracleTrigger is
      * @notice Sets the mailbox address.
      * @param _mailbox The new mailbox address.
      */
-    function setMailbox(
+    function setMailBox(
         address _mailbox
     ) external onlyOwner validateAddress(_mailbox) {
         mailBox = _mailbox;
         emit MailboxUpdated(_mailbox);
+    }
+
+    /**
+     * @notice Gets the mailbox address.
+     */
+    function getMailBox(
+    ) external view returns    (address) {
+       return mailBox;
     }
 
     /**
@@ -283,29 +290,29 @@ contract OracleTrigger is
      * @notice Adds an owner.
      */
     function addOwner(
-        address newOwner
-    ) external validateAddress(newOwner) onlyOwner {
-        if (hasRole(OWNER_ROLE, newOwner)) revert ExistingAdmin(newOwner);
-        grantRole(OWNER_ROLE, newOwner);
-        emit OwnerAdded(newOwner, msg.sender, block.timestamp);
+        address _newOwner
+    ) external validateAddress(_newOwner) onlyOwner {
+        if (hasRole(OWNER_ROLE, _newOwner)) revert ExistingAdmin(_newOwner);
+        grantRole(OWNER_ROLE, _newOwner);
+        emit OwnerAdded(_newOwner, msg.sender, block.timestamp);
     }
 
     /**
      * @notice Removes an owner but ensures at least one remains.
      */
     function removeOwner(
-        address owner
-    ) external validateAddress(owner) onlyOwner {
+        address _owner
+    ) external validateAddress(_owner) onlyOwner {
         if (getRoleMemberCount(OWNER_ROLE) <= 1) revert CannotRemoveLastOwner();
-        revokeRole(OWNER_ROLE, owner);
-        emit OwnerRemoved(owner, msg.sender, block.timestamp);
+        revokeRole(OWNER_ROLE, _owner);
+        emit OwnerRemoved(_owner, msg.sender, block.timestamp);
     }
 
     /**
      * @notice Checks if an address is an owner.
      */
-    function isOwner(address account) external view returns (bool) {
-        return hasRole(OWNER_ROLE, account);
+    function isOwner(address _account) external view returns (bool) {
+        return hasRole(OWNER_ROLE, _account);
     }
 
     /**

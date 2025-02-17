@@ -65,7 +65,7 @@ contract OracleRequestRecipient is
         //TODO sender should be whitelisted RequestOracle
 
         require(
-            msg.sender == IOracleTrigger(oracleTriggerAddress).mailBox(),
+            msg.sender == IOracleTrigger(oracleTriggerAddress).getMailBox(),
             "Unauthorized caller"
         );
 

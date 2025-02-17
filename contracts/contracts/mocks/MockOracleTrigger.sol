@@ -18,7 +18,7 @@ contract MockOracleTrigger is IOracleTrigger {
 
     }
 
-    function mailBox() external pure returns (address){
+    function getMailBox() external pure returns (address){
         return address(uint160(1));
     }
 

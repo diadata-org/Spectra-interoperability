@@ -95,7 +95,7 @@ contract OracleRequestRecipientTest is Test {
         recipient.setOracleTriggerAddress(mockOracleTrigger);
 
         // Expect call to `dispatch` on the mock OracleTrigger contract
-        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.mailBox.selector), abi.encode(mockMailbox));
+        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.getMailBox.selector), abi.encode(mockMailbox));
 
         // Mock sender verification
         vm.prank(mockMailbox);
@@ -115,7 +115,7 @@ contract OracleRequestRecipientTest is Test {
         vm.prank(owner);
         recipient.setOracleTriggerAddress(mockOracleTrigger);
 
-        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.mailBox.selector), abi.encode(mockMailbox));
+        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.getMailBox.selector), abi.encode(mockMailbox));
 
         vm.prank(nonOwner);  
 
@@ -133,7 +133,7 @@ contract OracleRequestRecipientTest is Test {
         vm.prank(owner);
         recipient.setOracleTriggerAddress(mockOracleTrigger);
 
-        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.mailBox.selector), abi.encode(mockMailbox));
+        vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.getMailBox.selector), abi.encode(mockMailbox));
 
         vm.prank(nonOwner); // Unauthorized sender
                 bytes32 sender = bytes32(uint256(uint160(address(requestOracle1))));
