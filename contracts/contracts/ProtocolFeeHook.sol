@@ -12,6 +12,9 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 contract ProtocolFeeHook is IPostDispatchHook, Ownable{
     address public admin;
 
+    uint256 public gasUsedPerTx = 97440; // Default gas used
+
+
     event DispatchFeePaid(uint256 requiredFee, uint256 actualFee);
 
     function hookType() external pure override returns (uint8) {
@@ -40,13 +43,25 @@ contract ProtocolFeeHook is IPostDispatchHook, Ownable{
         require(msg.value >= requiredFee, "Insufficient fee paid");
     }
 
+     /**
+     * @notice Get quote for gas usage, not works in view txs.
+      */
+
     function quoteDispatch(
         bytes calldata,
         bytes calldata
     ) public view override returns (uint256) {
         uint256 gasPrice = tx.gasprice;
-        uint256 doubleTxCost = 2 * 97440 * gasPrice;
-        return doubleTxCost;
+        uint256 cost =  gasUsedPerTx * gasPrice;
+        return cost;
+    }
+
+    /**
+     * @notice Sets Gas used by update tx.
+     * @param _gasUsedPerTx Gas Used.
+     */
+    function setGasUsedPerTx(uint256 _gasUsedPerTx) external onlyOwner {
+        gasUsedPerTx = _gasUsedPerTx;
     }
 
     function withdrawFees(address feeRecipient) external onlyOwner {

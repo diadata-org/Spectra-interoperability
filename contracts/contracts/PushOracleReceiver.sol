@@ -46,6 +46,8 @@ contract PushOracleReceiver is
         uint128 value;
     }
 
+    uint256 public gasUsedPerTx = 97440; // Default gas used
+
     /// @notice The most recent oracle data received.
     Data public receivedData;
 
@@ -116,7 +118,7 @@ contract PushOracleReceiver is
         emit ReceivedMessage(key, timestamp, value);
 
         uint256 gasPrice = tx.gasprice;
-        uint256 fee = 97440 * gasPrice;
+        uint256 fee = gasUsedPerTx * gasPrice;
 
         // console.log("feeFromUserWallet", feeFromUserWallet);
         // console.log("gasPrice", gasPrice);
@@ -126,14 +128,28 @@ contract PushOracleReceiver is
                 address(uint160(uint256(_sender)))
             );
 
-            UserWallet(payable(userWallet)).deductFee(fee);
+            try UserWallet(payable(userWallet)).deductFee(fee) {} catch {
+                revert("Fee deduction failed");
+            }
         }
 
         // Send the fee to the payment hook
-        (bool success, ) = paymentHook.call{value: fee}("");
+
+        bool success;
+        {
+            (success, ) = paymentHook.call{value: fee}("");
+        }
         // console.log("address success", success);
 
         require(success, "Fee transfer failed");
+    }
+
+    /**
+     * @notice Sets Gas used by update tx.
+     * @param _gasUsedPerTx Gas Used.
+     */
+    function setGasUsedPerTx(uint256 _gasUsedPerTx) external onlyOwner {
+        gasUsedPerTx = _gasUsedPerTx;
     }
 
     /**
