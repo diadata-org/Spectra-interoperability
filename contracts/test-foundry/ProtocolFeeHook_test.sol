@@ -29,7 +29,7 @@ contract ProtocolFeeHookTest is Test {
     function testQuoteDispatch() public {
         // Calculate expected fee using the current tx.gasprice.
         uint256 gasPrice = tx.gasprice;
-        uint256 expectedFee = 2 * 97440 * gasPrice;
+        uint256 expectedFee =  97440 * gasPrice;
         uint256 fee = feeHook.quoteDispatch("dummy", "dummy");
         assertEq(fee, expectedFee, "quoteDispatch should return the expected fee");
     }

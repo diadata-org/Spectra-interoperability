@@ -31,6 +31,9 @@ contract RequestOracle is
     string public lastCallMessage;
     address public paymentHook;
 
+    address public trustedMailBox;
+
+
     struct Data {
         string key;
         uint128 timestamp;
@@ -87,6 +90,10 @@ contract RequestOracle is
         bytes calldata _data
     ) external payable virtual override {
         // check who is calling this
+       require(
+            msg.sender == trustedMailBox,
+            "Unauthorized Mailbox"
+        );
 
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
@@ -107,6 +114,10 @@ contract RequestOracle is
      */
     function setInterchainSecurityModule(address _ism) external onlyOwner {
         interchainSecurityModule = IInterchainSecurityModule(_ism);
+    }
+
+    function setTrustedMailBox(address _mailbox) external onlyOwner {
+        trustedMailBox = _mailbox;
     }
 
     /**

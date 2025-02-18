@@ -101,6 +101,9 @@ contract RequestOracleTest is Test {
         requestOracle.setInterchainSecurityModule(
             address(interchainSecurityModule)
         );
+                vm.prank(owner);
+
+        requestOracle.setTrustedMailBox(address(mailbox));
 
         vm.prank(owner);
         requestOracle.setPaymentHook(address(paymentHook));
@@ -132,6 +135,7 @@ contract RequestOracleTest is Test {
 
     function testHandleMessage() public {
         bytes32 sender = receiver.addressToBytes32();
+
 
         vm.prank(address(mailbox));
         requestOracle.handle(destinationDomain, sender, sampleMessage);

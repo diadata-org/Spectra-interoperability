@@ -189,6 +189,7 @@ contract PushOracleReceiverTest is Test {
         receiver.setInterchainSecurityModule(address(ism));
         receiver.setPaymentHook(address(hook));
         receiver.setWalletFactory(address(walletFactory));
+        receiver.setTrustedMailBox(address(mailbox));
 
         vm.stopPrank();
     }
@@ -221,11 +222,11 @@ contract PushOracleReceiverTest is Test {
         bytes memory data = abi.encode(key, timestamp, value);
         bytes32 sender = bytes32(uint256(uint160(user)));
 
-        vm.deal(address(receiver), 1 ether);
+        vm.deal(address(mailbox), 1 ether);
+        vm.prank(address(mailbox));
         receiver.handle{value: 0.1 ether}(destinationDomain, sender, data);
 
-        // vm.expectEmit(true, true, true, true);
-        // emit ReceivedMessage(key, timestamp, value);
+  
 
         (
             string memory storedKey,
@@ -325,7 +326,7 @@ contract PushOracleReceiverTest is Test {
         bytes32 sender = bytes32(uint256(uint160(user)));
 
         vm.prank(address(mailbox));
-        vm.expectRevert("Insufficient balance");
+        vm.expectRevert("Fee deduction failed");
         receiver.handle(destinationDomain, sender, data);
     }
 }

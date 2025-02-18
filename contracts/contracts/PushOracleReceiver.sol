@@ -9,6 +9,8 @@ import {IMailbox} from "./interfaces/IMailbox.sol";
 import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
 import {TypeCasts} from "./libs/TypeCasts.sol";
 import "./UserWallet.sol";
+import "forge-std/console.sol";
+
 
 using TypeCasts for address;
 
@@ -33,6 +35,10 @@ contract PushOracleReceiver is
 
     bool public feeFromUserWallet;
     address public walletFactory;
+
+    /// @notice only Message from this mailbox will be handled
+    address public trustedMailBox;
+
 
     /**
      * @notice Structure representing an oracle data update.
@@ -89,6 +95,10 @@ contract PushOracleReceiver is
             );
     }
 
+      function setTrustedMailBox(address _mailbox) external onlyOwner {
+        trustedMailBox = _mailbox;
+    }
+
     /**
      * @notice Handles incoming interchain messages by decoding the payload and updating state.
      * @param _origin The origin domain identifier.
@@ -100,6 +110,17 @@ contract PushOracleReceiver is
         bytes32 _sender,
         bytes calldata _data
     ) external payable override {
+
+        console.log("handle-------------------",_origin);
+                console.log("handle-------------------",msg.sender);
+                                console.log("handle-------------------",trustedMailBox);
+
+
+
+          require(
+            msg.sender == trustedMailBox,
+            "Unauthorized Mailbox"
+        );
         // Decode the incoming data into its respective components.
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
