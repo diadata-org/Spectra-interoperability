@@ -15,7 +15,7 @@ using TypeCasts for address;
 
 /**
  * @title RequestOracle
- * @dev This contract receives and stores oracle data from an interchain messaging protocol.
+ * @dev This contract receives and stores oracle data from an interchain messaging protocol.Whitelisted in Hyperlane
  * It allows sending requests and handling received oracle responses.
  */
 contract RequestOracle is

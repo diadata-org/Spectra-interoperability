@@ -32,7 +32,7 @@ spec:
             - name: HYP_GASPAYMENTENFORCEMENT
               value: '[{"type":"none"}]'
             - name: HYP_RELAYCHAINS
-              value: "dia,sepolia"
+              value: "dia,sepolia,arbitrumsepolia,basesepolia"
             - name: HYP_DB
               value: "/data/"
             - name: HYP_TRACING_LEVEL
@@ -40,7 +40,7 @@ spec:
             - name: CONFIG_FILES
               value: "/app/config/agent-config.json"
             - name: HYP_WHITELIST
-              value: '[{"destinationDomain":[10640]}]'
+              value: '[{"originDomain":[11155111],"destinationDomain":[10640]},{"originDomain":[84532],"destinationDomain":[10640]},{"originDomain":[421614],"destinationDomain":[10640]}]'
             - name: HYP_DEFAULTSIGNER_KEY
               valueFrom:
                 secretKeyRef:

@@ -18,7 +18,7 @@ interface IUserWalletFactory {
 
 /**
  * @title PushOracleReceiver
- * @notice Handles incoming oracle data updates.
+ * @notice Handles incoming oracle data updates.Whitelisted in Hyperlane
  */
 contract PushOracleReceiver is
     Ownable,

@@ -14,7 +14,7 @@ using TypeCasts for address;
 
 /**
  * @title OracleRequestRecipient
- * @notice This contract receives and processes oracle request messages from an interchain network.
+ * @notice This contract receives and processes oracle request messages from an interchain network. Whitelisted in Hyperlane
  * @dev Implements security measures and enforces valid sender verification.
  */
 contract OracleRequestRecipient is

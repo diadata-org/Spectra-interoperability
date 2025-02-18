@@ -28,7 +28,7 @@ error ExistingAdmin(address account);
 error CannotRemoveLastOwner();
 
 // @title OracleTrigger
-/// @notice This contract manages interchain oracle requests and dispatching price updates.
+/// @notice This contract manages interchain oracle requests and dispatching price updates.Whitelisted in Hyperlane
 /// @dev Provides access control for managing chains and secure dispatching mechanisms.
 contract OracleTrigger is
     AccessControlEnumerable,
