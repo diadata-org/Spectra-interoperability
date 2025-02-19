@@ -1,0 +1,27 @@
+{
+  "10640": {
+    "ChainId": "10640",
+    "Contracts": {
+      "OracleTrigger": "0xc2fB36EF9F1E11B353d4d7E125835f2E4835B446",
+      "Ism": "0x5B8Ec9F16cc98aD1dE376a9a23184F2Eba5B17d3",
+      "OracleRequestRecipient": "0x5f3Ae50D513fA347fB39571fF81DFa56AAf385D6"
+    }
+  },
+  "421614": {
+    "ChainId": "421614",
+    "Contracts": {
+      "Ism": "0x5dA73B3bBF44A0CFd861426d119fb8db4d6Eb967",
+      "RequestOracle": "0x465ce36e22160691caaae7CABe1F3d430Df4E762"
+    }
+  },
+  "11155420": {
+    "ChainId": "11155420",
+    "Type": "destination",
+    "Contracts": {
+      "Ism": "0x35bAA2e59dd5e6A55AA26Ffdb562ce1aE40112Ed",
+      "RequestOracle": "0xbb3673d4c8c0B6681E59BAD091d506567812f790",
+      "PushOracleReceiver": "0xc4666A676d92A3D774d95ddE2207634FEA546b50",
+      "ProtocolFeeHook": "0xf84361E6FBD1bEf37A4A22B7BaD8E000F6D33AEf"
+    }
+  }
+}
