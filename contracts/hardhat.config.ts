@@ -65,7 +65,12 @@ const config: HardhatUserConfig = {
       chainId: 421614,
       url: process.env.ARBI_SEPOLIA__TESTNET_RPC || "https://arbitrum-sepolia-rpc.publicnode.com",
       accounts,      
-    }
+    },
+    op_sepolia: {
+      chainId: 11155420,
+      url: process.env.OPTIMISM_SEPOLIA__TESTNET_RPC || "https://sepolia.optimism.io",
+      accounts,      
+    },
   },
 };
 
