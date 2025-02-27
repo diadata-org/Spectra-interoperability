@@ -39,18 +39,23 @@ async function main() {
     //   "MetadataContract": "0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6",
     //   "MailBox": "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
     // },
+    // OP sepolia
     "11155420": {
       "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
     },
+    // base sepolia
     "84532": {
       "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
     },
+    // arbitrum sepolia
     "421614": {
       "MailBox": "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
     },
+    // ethereum sepolia
     "11155111":{
       "MailBox":"0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
     },
+    // unichain sepolia
     "1301":{
       "MailBox":"0xDDcFEcF17586D08A5740B7D91735fcCE3dfe3eeD"
     }
@@ -116,7 +121,7 @@ async function main() {
 
 
 
-  console.log("deployedContracts",deployedContracts)
+  // console.log("deployedContracts",deployedContracts)
 }
 
 main().catch((error) => {
