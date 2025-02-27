@@ -71,6 +71,12 @@ const config: HardhatUserConfig = {
       url: process.env.OPTIMISM_SEPOLIA__TESTNET_RPC || "https://sepolia.optimism.io",
       accounts,      
     },
+    unichain: {
+      chainId:1301,
+      url: process.env.UNICHAIN_TESTNET_RPC || "https://unichain-sepolia.api.onfinality.io/public",
+      accounts,
+    }
+
   },
 };
 

@@ -1,27 +1,60 @@
 {
-  "10640": {
-    "ChainId": "10640",
+  "1301": {
+    "ChainId": "1301",
+    "Type": "destination",
     "Contracts": {
-      "OracleTrigger": "0xc2fB36EF9F1E11B353d4d7E125835f2E4835B446",
-      "Ism": "0x5B8Ec9F16cc98aD1dE376a9a23184F2Eba5B17d3",
-      "OracleRequestRecipient": "0x5f3Ae50D513fA347fB39571fF81DFa56AAf385D6"
+      "Ism": "0xAb53e1b4259d607A7EdB9301d1345260d3930F70",
+      "RequestOracle": "0xb7e28B14D76AAE43728AB15703521Fb3F7B599ff",
+      "PushOracleReceiver": "0x52294f3e43cAb6e8Ed33672271D14eB49dCd464d",
+      "ProtocolFeeHook": "0x75e337D261e8940393c96976a2A12717230c2e38"
+    }
+  },
+  "84532": {
+    "ChainId": "84532",
+    "Type": "destination",
+    "Contracts": {
+      "Ism": "0xAb53e1b4259d607A7EdB9301d1345260d3930F70",
+      "RequestOracle": "0xb7e28B14D76AAE43728AB15703521Fb3F7B599ff",
+      "PushOracleReceiver": "0x52294f3e43cAb6e8Ed33672271D14eB49dCd464d",
+      "ProtocolFeeHook": "0x75e337D261e8940393c96976a2A12717230c2e38"
+    }
+  },
+  "100640": {
+    "ChainId": "100640",
+    "Type": "source",
+    "Contracts": {
+      "OracleTrigger": "0x0e005CCB1A04a91EA12593F9338f0D060F533d6D",
+      "Ism": "0x223057FDEef80fb8087DB0406DD67D073DD7c597",
+      "OracleRequestRecipient": "0x371B09B87AB6c8f431281F7559C03B753b1328D2"
     }
   },
   "421614": {
     "ChainId": "421614",
     "Contracts": {
-      "Ism": "0x5dA73B3bBF44A0CFd861426d119fb8db4d6Eb967",
-      "RequestOracle": "0x465ce36e22160691caaae7CABe1F3d430Df4E762"
+      "Ism": "0xAb53e1b4259d607A7EdB9301d1345260d3930F70",
+      "RequestOracle": "0xb7e28B14D76AAE43728AB15703521Fb3F7B599ff",
+      "PushOracleReceiver": "0x52294f3e43cAb6e8Ed33672271D14eB49dCd464d",
+      "ProtocolFeeHook": "0x75e337D261e8940393c96976a2A12717230c2e38"
+    }
+  },
+  "11155111": {
+    "ChainId": "11155111",
+    "Type": "destination",
+    "Contracts": {
+      "Ism": "0x860A8e7E644e2705EB42DaFF485bE54d4CDF0549",
+      "RequestOracle": "0x1bC02DA000943b37646570Ba6a6AD79d4d111067",
+      "PushOracleReceiver": "0xfC73028187D84b6D2B584Bf80726358383D25880",
+      "ProtocolFeeHook": "0xA0e901Eed9393bc5DD87AbCe3caC434Cab410176"
     }
   },
   "11155420": {
     "ChainId": "11155420",
     "Type": "destination",
     "Contracts": {
-      "Ism": "0x35bAA2e59dd5e6A55AA26Ffdb562ce1aE40112Ed",
-      "RequestOracle": "0xbb3673d4c8c0B6681E59BAD091d506567812f790",
-      "PushOracleReceiver": "0xc4666A676d92A3D774d95ddE2207634FEA546b50",
-      "ProtocolFeeHook": "0xf84361E6FBD1bEf37A4A22B7BaD8E000F6D33AEf"
+      "Ism": "0xAb53e1b4259d607A7EdB9301d1345260d3930F70",
+      "RequestOracle": "0xb7e28B14D76AAE43728AB15703521Fb3F7B599ff",
+      "PushOracleReceiver": "0x52294f3e43cAb6e8Ed33672271D14eB49dCd464d",
+      "ProtocolFeeHook": "0x75e337D261e8940393c96976a2A12717230c2e38"
     }
   }
 }

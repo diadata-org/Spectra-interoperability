@@ -12,7 +12,7 @@ import {
 const { ethers } = pkg;
 
 async function main() {
-  let destinationDomain = 10640;
+  let destinationDomain = 100640;
 
   let chainId = process.env.CHAIN_ID;
   const network = await ethers.provider.getNetwork();
@@ -35,10 +35,10 @@ async function main() {
   console.log(`diaRecipient: ${diaRecipient}`);
 
   let allMailbox = {
-    "10640": {
-      "MetadataContract": "0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6",
-      "MailBox": "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
-    },
+    // "10640": {
+    //   "MetadataContract": "0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6",
+    //   "MailBox": "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
+    // },
     "11155420": {
       "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
     },
@@ -47,6 +47,12 @@ async function main() {
     },
     "421614": {
       "MailBox": "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
+    },
+    "11155111":{
+      "MailBox":"0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
+    },
+    "1301":{
+      "MailBox":"0xDDcFEcF17586D08A5740B7D91735fcCE3dfe3eeD"
     }
   }
 
@@ -77,7 +83,12 @@ async function main() {
       [key] // Values to encode
     );
     let messageBody = ethers.hexlify(body);
+
+    console.log("ethers.provider",ethers.provider)
   
+    const gasPrice = (await ethers.provider.getFeeData()).gasPrice;
+        const gasUsed = ethers.toBigInt(97440 *2 );
+    const txCost = gasPrice * gasUsed;
 
 
     console.log("sender",addressToBytes32(oracleRequestorAddress))
@@ -87,7 +98,7 @@ async function main() {
       diaRecipient,
       destinationDomain,
       messageBody,
-      { value: 832474760717120 }
+      { value: txCost }
     );
 
     console.log("messageTx",messageTx);
