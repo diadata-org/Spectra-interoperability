@@ -1,0 +1,26 @@
+{
+  "10640": {
+    "MetadataContract": "0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6",
+    "MailBox": "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
+  },
+  "100640": {
+    "MetadataContract": "0x90857994FA959d77728067A71EFA8dc154D89813",
+    "MailBox": "0x16cD72271498bcaD5aeB9f2D785bA82dC5AfA5E2"
+  },
+  "11155420": {
+    "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
+  },
+  "84532": {
+    "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
+  },
+  "421614": {
+    "MailBox": "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
+  },
+  "11155111":{
+    "MailBox":"0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
+  },
+  "1301":{
+    "MailBox":"0xDDcFEcF17586D08A5740B7D91735fcCE3dfe3eeD"
+  }
+  
+}
