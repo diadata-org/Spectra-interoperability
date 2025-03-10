@@ -1,16 +1,16 @@
 blockExplorers:
-  - apiUrl: https://testnet-explorer.diadata.org/api
+  - apiUrl: https://explorer-dia-lasernet-dipfsyyx2w.t.conduit.xyz//api
     family: blockscout
     name: Blockscout
-    url: https://testnet-explorer.diadata.org/api
+    url: https://explorer-dia-lasernet-dipfsyyx2w.t.conduit.xyz//api
 blocks:
   confirmations: 3
   estimateBlockTime: 5
   reorgPeriod: 0
-chainId: 10640
+chainId: 100640
  
 displayName: Diadata Testnet
-domainId: 10640
+domainId: 100640
 isTestnet: true
 name: diadata
 nativeToken:
@@ -19,5 +19,5 @@ nativeToken:
   symbol: ETH
 protocol: ethereum
 rpcUrls:
-  - http: "https://testnet-rpc.diadata.org"
-mailbox: "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
+  - http: "https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz"
+mailbox: "0x16cD72271498bcaD5aeB9f2D785bA82dC5AfA5E2"

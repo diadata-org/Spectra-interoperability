@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum"
-
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -21,34 +19,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// import statements
 
 type OracleUpdater struct {
-	config                *config.Configuration
-	client                ethclient.EthereumClientProvider
-	oracleMetadata        *OracleMetadata
-	oracleTriggerABI      abi.ABI
-	auth                  *bind.TransactOpts
-	oldPrices             map[string]float64
-	oracleMetadataAddress string
-}
-
-const (
-	oracleTriggerABI = `[{"inputs":[{"internalType":"uint32","name":"_destinationDomain","type":"uint32"},{"internalType":"string","name":"key","type":"string"}],"name":"dispatchToChain","outputs":[],"stateMutability":"payable","type":"function"},{
-        "inputs": [],
-        "name": "metadataContract",
-        "outputs": [
-            {
-                "internalType": "address",
-                "name": "",
-                "type": "address"
-            }
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    }]`
-	oracleMetadataABI = `[{"inputs":[{"internalType":"string","name":"key","type":"string"}],"name":"getValue","outputs":[{"internalType":"uint128","name":"","type":"uint128"},{"internalType":"uint128","name":"","type":"uint128"}],"stateMutability":"view","type":"function"}]`
-)
-
 	config           *config.Configuration
 	client           ethclient.EthereumClientProvider
 	oracleMetadata   *OracleMetadata
@@ -59,11 +32,132 @@ const (
 
 const (
 	oracleTriggerABI  = `[{"inputs":[{"internalType":"uint32","name":"_destinationDomain","type":"uint32"},{"internalType":"string","name":"key","type":"string"}],"name":"dispatchToChain","outputs":[],"stateMutability":"payable","type":"function"}]`
-	oracleMetadataABI = `[{"inputs":[{"internalType":"string","name":"key","type":"string"}],"name":"getValue","outputs":[{"internalType":"uint128","name":"","type":"uint128"},{"internalType":"uint128","name":"","type":"uint128"}],"stateMutability":"view","type":"function"}]`
+	oracleMetadataABI = `[
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOracleAddress",
+        "type": "address"
+      }
+    ],
+    "name": "addOracle",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "key",
+        "type": "string"
+      }
+    ],
+    "name": "getValue",
+    "outputs": [
+      {
+        "internalType": "uint128",
+        "name": "",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "",
+        "type": "uint128"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "numOracles",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "oracleToRemove",
+        "type": "address"
+      }
+    ],
+    "name": "removeOracle",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newThreshold",
+        "type": "uint256"
+      }
+    ],
+    "name": "setThreshold",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "newTimeoutSeconds",
+        "type": "uint256"
+      }
+    ],
+    "name": "setTimeoutSeconds",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "threshold",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "timeoutSeconds",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]`
 )
 
 var (
-	oracleMetadataAddress = "0xb77690Eb2E97E235Bbc198588166a6F7Cb69e008"
+	oracleMetadataAddress = "0x90857994FA959d77728067A71EFA8dc154D89813"
 )
 
 func NewOracleUpdater(config *config.Configuration, client ethclient.EthereumClientProvider) (*OracleUpdater, error) {
@@ -86,39 +180,8 @@ func NewOracleUpdater(config *config.Configuration, client ethclient.EthereumCli
 	if err != nil {
 		return nil, err
 	}
-	auth.GasLimit = uint64(300000) // in units
+	auth.GasLimit = uint64(500000) // in units
 
-	// oracleMetadata, err := NewOracleMetadata(client, oracleMetadataABI, "")
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	ou := &OracleUpdater{
-		config: config,
-		client: client,
-		// oracleMetadata:   oracleMetadata,
-		oracleTriggerABI: parsedOracleTriggerABI,
-		auth:             auth,
-		oldPrices:        make(map[string]float64),
-	}
-
-	metadataAddress, err := ou.GetMetadata(context.Background())
-	if err != nil {
-		fmt.Println("err", err)
-	}
-
-	oracleMetadata, err := NewOracleMetadata(client, oracleMetadataABI, metadataAddress)
-	if err != nil {
-		return nil, err
-	}
-	ou.oracleMetadata = oracleMetadata
-
-	return ou, nil
-}
-
-func (ou *OracleUpdater) Start(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
-	tickerH := time.NewTicker(2 * time.Hour)
 	oracleMetadata, err := NewOracleMetadata(client, oracleMetadataABI, oracleMetadataAddress)
 	if err != nil {
 		return nil, err
@@ -182,7 +245,7 @@ func (ou *OracleUpdater) updateIfNecessary(ctx context.Context, chainIDs []strin
 
 	price, err := ou.oracleMetadata.GetLatestValue(ctx, symbol)
 	if err != nil {
-		log.Printf("Failed to get latest value for %s: %v", symbol, err)
+		log.Printf("Failed to get latest value for %s:  Metadata Address %s, %v", symbol, ou.oracleMetadata.address, err)
 		return
 	}
 
@@ -267,27 +330,3 @@ func (ou *OracleUpdater) sendTransaction(ctx context.Context, chainID, symbol st
 
 	nonce++
 }
-
-func (ou *OracleUpdater) GetMetadata(ctx context.Context) (string, error) {
-	input, err := ou.oracleTriggerABI.Pack("metadataContract")
-	if err != nil {
-		return "", err
-	}
-	add := common.HexToAddress(ou.config.OracleTriggerAddress)
-	msg := ethereum.CallMsg{To: &add, Data: input}
-	result, err := ou.client.CallContract(ctx, msg, nil)
-	if err != nil {
-
-		return "", err
-	}
-
-	var value1 common.Address
-	err = ou.oracleTriggerABI.UnpackIntoInterface(&value1, "metadataContract", result)
-	if err != nil {
-
-		return "", err
-	}
-
-	return value1.String(), nil
-}
-
