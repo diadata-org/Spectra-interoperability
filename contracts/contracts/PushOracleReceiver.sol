@@ -7,6 +7,9 @@ import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
 import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
 import {IMailbox} from "./interfaces/IMailbox.sol";
 import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
+import {ProtocolFeeHook} from "./ProtocolFeeHook.sol";
+
+ 
 import {TypeCasts} from "./libs/TypeCasts.sol";
 import "./UserWallet.sol";
  
@@ -29,7 +32,7 @@ contract PushOracleReceiver is
     IInterchainSecurityModule public interchainSecurityModule;
 
     /// @notice Address for the post-dispatch payment hook.
-    address public paymentHook;
+    address payable public  paymentHook;
 
     bool public feeFromUserWallet;
     address public walletFactory;
@@ -51,8 +54,7 @@ contract PushOracleReceiver is
 
     uint256 public gasUsedPerTx = 97440; // Default gas used
 
-    /// @notice The most recent oracle data received.
-    Data public receivedData;
+ 
 
     /// @notice Mapping of oracle data updates by key.
     mapping(string => Data) public updates;
@@ -67,30 +69,6 @@ contract PushOracleReceiver is
         feeFromUserWallet = _feeFromUserWallet;
     }
 
-    /**
-     * @notice Dispatches an interchain message via the provided mailbox.
-     * @param _mailbox The mailbox contract used to dispatch the message.
-     * @param receiver The address of the message recipient.
-     * @param _destinationDomain The destination domain identifier.
-     * @param _messageBody The body of the message.
-     * @return messageId The unique identifier of the dispatched message.
-     */
-    function request(
-        IMailbox _mailbox,
-        address receiver,
-        uint32 _destinationDomain,
-        bytes calldata _messageBody
-    ) external payable returns (bytes32 messageId) {
-        IPostDispatchHook hook = IPostDispatchHook(paymentHook);
-        return
-            _mailbox.dispatch{value: msg.value}(
-                _destinationDomain,
-                receiver.addressToBytes32(),
-                _messageBody,
-                "", // No additional data
-                hook
-            );
-    }
 
     function setTrustedMailBox(address _mailbox) external onlyOwner {
         trustedMailBox = _mailbox;
@@ -114,19 +92,25 @@ contract PushOracleReceiver is
             (string, uint128, uint128)
         );
 
+        // Ensure the new timestamp is more recent
+        if (updates[key].timestamp >= timestamp) {
+            return; // Ignore outdated data
+        }
+
         // Update the stored oracle data.
         Data memory newData = Data({
             key: key,
             timestamp: timestamp,
             value: value
         });
-        receivedData = newData;
         updates[key] = newData;
 
         emit ReceivedMessage(key, timestamp, value);
 
         uint256 gasPrice = tx.gasprice;
-        uint256 fee = gasUsedPerTx * gasPrice;
+
+        
+        uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() * gasPrice;
 
         // console.log("feeFromUserWallet", feeFromUserWallet);
         // console.log("gasPrice", gasPrice);
@@ -152,13 +136,7 @@ contract PushOracleReceiver is
         require(success, "Fee transfer failed");
     }
 
-    /**
-     * @notice Sets Gas used by update tx.
-     * @param _gasUsedPerTx Gas Used.
-     */
-    function setGasUsedPerTx(uint256 _gasUsedPerTx) external onlyOwner {
-        gasUsedPerTx = _gasUsedPerTx;
-    }
+   
 
     /**
      * @notice Sets the interchain security module.
@@ -168,7 +146,7 @@ contract PushOracleReceiver is
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-    function setPaymentHook(address _paymentHook) external onlyOwner {
+    function setPaymentHook(address payable _paymentHook) external onlyOwner {
         paymentHook = _paymentHook;
     }
 

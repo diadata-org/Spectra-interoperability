@@ -47,6 +47,7 @@ contract Ism is IInterchainSecurityModule,Ownable {
     /// @param _originDomain Origin chain id.
     /// @param _sender The new expected sender address.
     function setSenderShouldBe(uint32 _originDomain, address _sender) onlyOwner external{
+        require(senderShouldBe[_originDomain] != _sender, "No change in sender address");
         emit SenderShouldBeUpdated(_originDomain, senderShouldBe[_originDomain], _sender);
         senderShouldBe[_originDomain] = _sender;
 
@@ -56,6 +57,7 @@ contract Ism is IInterchainSecurityModule,Ownable {
     /// @dev Only callable by the owner.
     /// @param _allowAll Boolean value to enable or disable the allowAll flag.
      function setAllowAll(bool _allowAll) external onlyOwner {
+        require(allowAll != _allowAll, "No change in value");
         emit AllowAllUpdated(allowAll, _allowAll);
         allowAll = _allowAll;
     }

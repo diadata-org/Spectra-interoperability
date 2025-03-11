@@ -73,7 +73,8 @@ contract OracleRequestRecipient is
 
         emit ReceivedCall(sender, key);
 
-        IOracleTrigger(oracleTriggerAddress).dispatch(_origin, sender, key);
+         IOracleTrigger(oracleTriggerAddress).dispatch{value: msg.value}(_origin, sender, key);
+
     }
 
 

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity >=0.8.0;
 
-import {IInterchainGasPaymaster} from "./interfaces/IInterchainGasPaymaster.sol";
 import {IMailbox} from "./interfaces/IMailbox.sol";
-import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
 import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
 import {TypeCasts} from "./libs/TypeCasts.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
@@ -26,6 +24,8 @@ error NotAuthorized(address account);
 error ExistingAdmin(address account);
 
 error CannotRemoveLastOwner();
+error ChainAlreadyExists(uint32 chainId);
+
 
 // @title OracleTrigger
 /// @notice This contract manages interchain oracle requests and dispatching price updates.Whitelisted in Hyperlane
@@ -50,6 +50,11 @@ contract OracleTrigger is
     /// @notice Role identifier for contract owners.
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
+
+    /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestReceipent.
+    bytes32 public constant DISPATCHER_ROLE = keccak256("DISPATCHER_ROLE");
+
+
     /// @notice Address of the DIA oracle metadata contract.
     address public metadataContract;
 
@@ -59,8 +64,9 @@ contract OracleTrigger is
     event ChainAdded(uint32 indexed chainId, address RecipientAddress);
     /// @notice Emitted when a chain configuration is updated.
     /// @param chainId The chain ID being updated.
-    /// @param RecipientAddress New recipient address.
-    event ChainUpdated(uint32 indexed chainId, address RecipientAddress);
+    /// @param oldRecipientAddress Old recipient address.
+    /// @param recipientAddress New recipient address.
+    event ChainUpdated(uint32 indexed chainId, address oldRecipientAddress, address recipientAddress);
 
     /// @notice Emitted when a message is dispatched to a destination chain.
     /// @param chainId The destination chain ID.
@@ -124,7 +130,6 @@ contract OracleTrigger is
 
     /// @notice Contract constructor that initializes the contract and assigns the deployer as the first owner.
     constructor() {
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _setupRole(OWNER_ROLE, msg.sender);
     }
 
@@ -135,6 +140,9 @@ contract OracleTrigger is
         uint32 chainId,
         address recipientAddress
     ) public onlyOwner validateAddress(recipientAddress) {
+    if (chains[chainId].RecipientAddress != address(0)) {
+        revert ChainAlreadyExists(chainId);
+    }
         chains[chainId] = ChainConfig(recipientAddress);
         emit ChainAdded(chainId, recipientAddress);
     }
@@ -152,8 +160,10 @@ contract OracleTrigger is
         validateAddress(recipientAddress)
         validateChain(chainId)
     {
+        address oldRecipientAddress = chains[chainId].RecipientAddress;
+
         chains[chainId] = ChainConfig(recipientAddress);
-        emit ChainUpdated(chainId, recipientAddress);
+        emit ChainUpdated(chainId, oldRecipientAddress, recipientAddress);
     }
 
     /// @notice Returns the recipient address for a given chain.
@@ -185,7 +195,7 @@ contract OracleTrigger is
     )
         external
         payable
-        onlyOwner
+        onlyRole(DISPATCHER_ROLE)
         validateChain(_destinationDomain)
         validateAddress(mailBox)
         nonReentrant
@@ -195,15 +205,18 @@ contract OracleTrigger is
         (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
 
         bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
+
+        address recipient = config.RecipientAddress;
+
         bytes32 messageId = IMailbox(mailBox).dispatch{value: msg.value}(
             _destinationDomain,
-            config.RecipientAddress.addressToBytes32(),
+            recipient.addressToBytes32(),
             messageBody
         );
 
         emit MessageDispatched(
             _destinationDomain,
-            config.RecipientAddress,
+            recipient,
             messageId
         );
     }
@@ -218,7 +231,7 @@ contract OracleTrigger is
     )
         external
         payable
-        onlyOwner
+        onlyRole(DISPATCHER_ROLE)
         nonReentrant
         validateAddress(mailBox)
         validateAddress(recipientAddress)
@@ -328,4 +341,20 @@ contract OracleTrigger is
 
         return owners;
     }
+
+     /**
+     * @notice Add Dispatcher address.
+     */
+    function addDispatcher(address _dispatcher) external onlyOwner {
+        grantRole(DISPATCHER_ROLE, _dispatcher);
+    }
+
+    /**
+     * @notice Remove Dispatcher address.
+     */
+    function removeDispatcher(address _dispatcher) external onlyOwner {
+         revokeRole(DISPATCHER_ROLE, _dispatcher);
+    }
+
+    
 }
