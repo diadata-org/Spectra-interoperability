@@ -41,6 +41,13 @@ contract OracleRequestRecipient is
     /// @param key The decoded key from the request data
     event ReceivedCall(address indexed caller, string key);
 
+
+    event WhitelistUpdated(uint32 indexed origin, bytes32 indexed sender, bool status);
+
+    event OracleTriggerUpdated(address indexed oldAddress, address indexed newAddress);
+
+    event ISMUpdated(address indexed oldISM, address indexed newISM);
+
     /**
      * @notice Handles incoming oracle requests from the interchain network.
      * @dev Ensures only authorized senders can invoke this function and prevents reentrancy attacks.
@@ -53,7 +60,7 @@ contract OracleRequestRecipient is
         bytes32 _sender,
         bytes calldata _data
     ) external payable virtual override nonReentrant {
-        require(_data.length > 0, "Invalid data length");
+        require(_data.length > 0, "Oracle request data cannot be empty");
         require(
             oracleTriggerAddress != address(0),
             "Oracle trigger address not set"
@@ -62,8 +69,7 @@ contract OracleRequestRecipient is
 
         address sender = address(uint160(uint256(_sender)));
 
-        //TODO sender should be whitelisted RequestOracle
-
+ 
         require(
             msg.sender == IOracleTrigger(oracleTriggerAddress).getMailBox(),
             "Unauthorized caller"
@@ -79,11 +85,19 @@ contract OracleRequestRecipient is
 
 
      function addToWhitelist(uint32 _origin, bytes32 _sender) onlyOwner external {
+        require(_sender != bytes32(0), "Invalid sender address");
+        require(!whitelistedSenders[_origin][_sender], "Already whitelisted");
+        
         whitelistedSenders[_origin][_sender] = true;
+        emit WhitelistUpdated(_origin, _sender, true);
+
      }
 
     function removeFromWhitelist(uint32 _origin, bytes32 _sender) onlyOwner external {
+        require(_sender != bytes32(0), "Invalid sender address");
         whitelistedSenders[_origin][_sender] = false;
+        emit WhitelistUpdated(_origin, _sender, false);
+
      }
 
     /**
@@ -93,6 +107,7 @@ contract OracleRequestRecipient is
      */
     function setInterchainSecurityModule(address _ism) external onlyOwner {
         require(_ism != address(0), "Invalid ISM address");
+        emit ISMUpdated(address(interchainSecurityModule), _ism);
 
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
@@ -106,15 +121,23 @@ contract OracleRequestRecipient is
         address _oracleTrigger
     ) external onlyOwner {
         require(_oracleTrigger != address(0), "Invalid oracle trigger address");
+        emit OracleTriggerUpdated(oracleTriggerAddress, _oracleTrigger);
 
         oracleTriggerAddress = _oracleTrigger;
     }
 
     /**
-     * @notice Prevents direct ETH transfers to the contract.
+     * @notice Allow ETH transfers to the contract this is to recover funds if something fails in handle.
      */
     receive() external payable {
-        revert("Direct ETH transfers not allowed");
+     }
+
+    /**
+    * @notice Withdraw ETH to reover stuck funds 
+     */
+    function withdrawETH(address payable recipient) external onlyOwner {
+    require(recipient != address(0), "Invalid recipient");
+     recipient.transfer(address(this).balance);
     }
 
     /**

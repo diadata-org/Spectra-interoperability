@@ -59,7 +59,7 @@ contract RequestOracle is
         address receiver,
         uint32 _destinationDomain,
         bytes calldata _messageBody
-    ) external payable returns (bytes32 messageId) {
+    ) external payable whenNotPaused returns (bytes32 messageId) {
         // bytes memory messageBody = abi.encode("aa", 111111, 11);
 
         IPostDispatchHook hook = IPostDispatchHook(paymentHook);
@@ -111,6 +111,7 @@ contract RequestOracle is
     }
 
     function setTrustedMailBox(address _mailbox) external onlyOwner {
+        require(_mailbox != address(0), "Invalid address");
         trustedMailBox = _mailbox;
     }
 
@@ -139,4 +140,12 @@ contract RequestOracle is
     receive() external payable {}
 
     fallback() external payable {}
+
+      /**
+    * @notice Withdraw ETH to reover stuck funds 
+     */
+    function withdrawETH(address payable recipient) external onlyOwner {
+    require(recipient != address(0), "Invalid recipient");
+     recipient.transfer(address(this).balance);
+    }
 }

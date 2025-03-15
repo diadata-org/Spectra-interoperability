@@ -9,15 +9,12 @@ import {IMailbox} from "./interfaces/IMailbox.sol";
 import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
 import {ProtocolFeeHook} from "./ProtocolFeeHook.sol";
 
- 
 import {TypeCasts} from "./libs/TypeCasts.sol";
-import "./UserWallet.sol";
- 
+ // import "forge-std/console.sol";
+
 using TypeCasts for address;
 
-interface IUserWalletFactory {
-    function getAddress(address owner) external view returns (address);
-}
+
 
 /**
  * @title PushOracleReceiver
@@ -32,13 +29,14 @@ contract PushOracleReceiver is
     IInterchainSecurityModule public interchainSecurityModule;
 
     /// @notice Address for the post-dispatch payment hook.
-    address payable public  paymentHook;
+    address payable public paymentHook;
 
-    bool public feeFromUserWallet;
     address public walletFactory;
 
     /// @notice only Message from this mailbox will be handled
     address public trustedMailBox;
+
+    error ZeroAddress();
 
     /**
      * @notice Structure representing an oracle data update.
@@ -54,8 +52,6 @@ contract PushOracleReceiver is
 
     uint256 public gasUsedPerTx = 97440; // Default gas used
 
- 
-
     /// @notice Mapping of oracle data updates by key.
     mapping(string => Data) public updates;
 
@@ -65,10 +61,11 @@ contract PushOracleReceiver is
     /// @notice Emitted when a call is received (currently unused).
     event ReceivedCall(address indexed caller, uint256 amount, string message);
 
-    function setFeeSource(bool _feeFromUserWallet) external onlyOwner {
-        feeFromUserWallet = _feeFromUserWallet;
+    /// @notice Ensures that the provided address is not a zero address.
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert ZeroAddress();
+        _;
     }
-
 
     function setTrustedMailBox(address _mailbox) external onlyOwner {
         trustedMailBox = _mailbox;
@@ -84,8 +81,9 @@ contract PushOracleReceiver is
         uint32 _origin,
         bytes32 _sender,
         bytes calldata _data
-    ) external payable override {
+    ) external payable override validateAddress(paymentHook) {
         require(msg.sender == trustedMailBox, "Unauthorized Mailbox");
+
         // Decode the incoming data into its respective components.
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
@@ -109,21 +107,10 @@ contract PushOracleReceiver is
 
         uint256 gasPrice = tx.gasprice;
 
-        
-        uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() * gasPrice;
+        uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
+            gasPrice;
 
-        // console.log("feeFromUserWallet", feeFromUserWallet);
         // console.log("gasPrice", gasPrice);
-
-        if (feeFromUserWallet) {
-            address userWallet = IUserWalletFactory(walletFactory).getAddress(
-                address(uint160(uint256(_sender)))
-            );
-
-            try UserWallet(payable(userWallet)).deductFee(fee) {} catch {
-                revert("Fee deduction failed");
-            }
-        }
 
         // Send the fee to the payment hook
 
@@ -135,8 +122,6 @@ contract PushOracleReceiver is
 
         require(success, "Fee transfer failed");
     }
-
-   
 
     /**
      * @notice Sets the interchain security module.
@@ -150,9 +135,7 @@ contract PushOracleReceiver is
         paymentHook = _paymentHook;
     }
 
-    function setWalletFactory(address _walletFactory) external onlyOwner {
-        walletFactory = _walletFactory;
-    }
+     
 
     receive() external payable {}
 
