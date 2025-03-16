@@ -5,8 +5,7 @@ import {IMailbox} from "./interfaces/IMailbox.sol";
  import {TypeCasts} from "./libs/TypeCasts.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-// import "forge-std/console.sol";
-
+ 
 interface IDIAOracleV2 {
     function getValue(
         string memory key
@@ -348,4 +347,6 @@ contract OracleTrigger is
         require(recipient != address(0), "Invalid recipient");
         recipient.transfer(address(this).balance);
     }
+
+    
 }
