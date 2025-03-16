@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+pragma solidity 0.8.29;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -46,7 +46,7 @@ contract OracleRequestRecipient is
 
     event OracleTriggerUpdated(address indexed oldAddress, address indexed newAddress);
 
-    event ISMUpdated(address indexed oldISM, address indexed newISM);
+    event InterchainSecurityModuleUpdated(address indexed previousISM, address indexed newISM);
 
     /**
      * @notice Handles incoming oracle requests from the interchain network.
@@ -107,7 +107,7 @@ contract OracleRequestRecipient is
      */
     function setInterchainSecurityModule(address _ism) external onlyOwner {
         require(_ism != address(0), "Invalid ISM address");
-        emit ISMUpdated(address(interchainSecurityModule), _ism);
+        emit InterchainSecurityModuleUpdated(address(interchainSecurityModule), _ism);
 
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }

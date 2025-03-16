@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+pragma solidity 0.8.29;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -26,15 +26,13 @@ contract RequestOracle is
     ISpecifiesInterchainSecurityModule
 {
     IInterchainSecurityModule public interchainSecurityModule;
-    bytes public lastData;
-
+ 
     address public paymentHook;
 
     address public trustedMailBox;
 
     struct Data {
-        string key;
-        uint128 timestamp;
+         uint128 timestamp;
         uint128 value;
     }
     Data public receivedData;
@@ -44,7 +42,35 @@ contract RequestOracle is
     event EmergencyPaused(address indexed admin);
     event EmergencyUnpaused(address indexed admin);
 
+
+
+    event TrustedMailBoxUpdated(address indexed previousMailBox, address indexed newMailBox);
+
+    event InterchainSecurityModuleUpdated(address indexed previousISM, address indexed newISM);
+    
+    event PaymentHookUpdated(address indexed previousPaymentHook, address indexed newPaymentHook);
+
+
+
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
+
+    error ZeroAddress();
+
+
+       /// @notice Ensures that the provided address is not a zero address.
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert ZeroAddress();
+        _;
+    }
+
+
+    event RequestSent(
+    address indexed sender,
+    address indexed receiver,
+    uint32 destinationDomain,
+    bytes32 messageId,
+    uint256 value
+);
 
     /**
      * @notice Sends a request to a receiver on another chain.
@@ -59,19 +85,20 @@ contract RequestOracle is
         address receiver,
         uint32 _destinationDomain,
         bytes calldata _messageBody
-    ) external payable whenNotPaused returns (bytes32 messageId) {
-        // bytes memory messageBody = abi.encode("aa", 111111, 11);
-
+    ) external payable whenNotPaused validateAddress(paymentHook) returns (bytes32 messageId) {
+ 
         IPostDispatchHook hook = IPostDispatchHook(paymentHook);
 
-        return
-            _mailbox.dispatch{value: msg.value}(
+         
+          messageId =   _mailbox.dispatch{value: msg.value}(
                 _destinationDomain,
                 receiver.addressToBytes32(),
                 _messageBody,
                 bytes(""),
                 hook
             );
+        emit RequestSent(msg.sender, receiver, _destinationDomain, messageId, msg.value);
+
     }
 
     event ReceivedCall(address indexed caller, uint256 amount, string message);
@@ -94,25 +121,31 @@ contract RequestOracle is
             _data,
             (string, uint128, uint128)
         );
-        receivedData = Data({key: key, timestamp: timestamp, value: value});
+        receivedData = Data({ timestamp: timestamp, value: value});
+
+
+          // Ensure the new timestamp is more recent
+        if (updates[key].timestamp >= timestamp) {
+            return; // Ignore outdated data
+        }
 
         updates[key] = receivedData;
         emit ReceivedMessage(key, timestamp, value);
-        lastData = _data;
-    }
+     }
 
     /**
      * @notice Sets the interchain security module contract.
      * @dev Can only be called by the owner.
      * @param _ism The address of the interchain security module.
      */
-    function setInterchainSecurityModule(address _ism) external onlyOwner {
+    function setInterchainSecurityModule(address _ism) external onlyOwner validateAddress(_ism) {
+        emit InterchainSecurityModuleUpdated(address(interchainSecurityModule), _ism);  
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-    function setTrustedMailBox(address _mailbox) external onlyOwner {
-        require(_mailbox != address(0), "Invalid address");
-        trustedMailBox = _mailbox;
+    function setTrustedMailBox(address _mailbox) external onlyOwner validateAddress(_mailbox) {
+         emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);  
+         trustedMailBox = _mailbox;
     }
 
     /**
@@ -121,7 +154,8 @@ contract RequestOracle is
      * @param _paymentHook The address of the payment hook contract.
      */
 
-    function setPaymentHook(address _paymentHook) external onlyOwner {
+    function setPaymentHook(address _paymentHook) external onlyOwner validateAddress(_paymentHook) {
+        emit PaymentHookUpdated(paymentHook, _paymentHook);  
         paymentHook = _paymentHook;
     }
 

@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+pragma solidity 0.8.29;
 
 import {IMailbox} from "./interfaces/IMailbox.sol";
-import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
-import {TypeCasts} from "./libs/TypeCasts.sol";
+ import {TypeCasts} from "./libs/TypeCasts.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+// import "forge-std/console.sol";
 
 interface IDIAOracleV2 {
     function getValue(
@@ -26,20 +26,17 @@ error ExistingAdmin(address account);
 error CannotRemoveLastOwner();
 error ChainAlreadyExists(uint32 chainId);
 
-
 // @title OracleTrigger
 /// @notice This contract manages interchain oracle requests and dispatching price updates.Whitelisted in Hyperlane
 /// @dev Provides access control for managing chains and secure dispatching mechanisms.
 contract OracleTrigger is
     AccessControlEnumerable,
-    ISpecifiesInterchainSecurityModule,
-    ReentrancyGuard
+     ReentrancyGuard
 {
     struct ChainConfig {
         address RecipientAddress;
     }
-    /// @notice Address of the Interchain Security Module (ISM).
-    IInterchainSecurityModule public interchainSecurityModule;
+   
 
     /// @notice Address of the mailbox contract responsible for interchain messaging.
     address private mailBox;
@@ -50,10 +47,8 @@ contract OracleTrigger is
     /// @notice Role identifier for contract owners.
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
-
     /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestReceipent.
     bytes32 public constant DISPATCHER_ROLE = keccak256("DISPATCHER_ROLE");
-
 
     /// @notice Address of the DIA oracle metadata contract.
     address public metadataContract;
@@ -66,7 +61,11 @@ contract OracleTrigger is
     /// @param chainId The chain ID being updated.
     /// @param oldRecipientAddress Old recipient address.
     /// @param recipientAddress New recipient address.
-    event ChainUpdated(uint32 indexed chainId, address oldRecipientAddress, address recipientAddress);
+    event ChainUpdated(
+        uint32 indexed chainId,
+        address oldRecipientAddress,
+        address recipientAddress
+    );
 
     /// @notice Emitted when a message is dispatched to a destination chain.
     /// @param chainId The destination chain ID.
@@ -103,8 +102,7 @@ contract OracleTrigger is
     event MailboxUpdated(address indexed newMailbox);
     /// @notice Emitted when the interchain security module (ISM) address is updated.
     /// @param newModule The new ISM address.
-    event InterchainSecurityModuleUpdated(address indexed newModule);
-
+ 
     /// @notice Emitted when the metadata contract address is updated.
     /// @param newMetadata The new metadata contract address.
     event MetadataContractUpdated(address indexed newMetadata);
@@ -130,7 +128,8 @@ contract OracleTrigger is
 
     /// @notice Contract constructor that initializes the contract and assigns the deployer as the first owner.
     constructor() {
-        _setupRole(OWNER_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(OWNER_ROLE, msg.sender);
     }
 
     /// @notice Adds a new chain recipient address.
@@ -140,14 +139,13 @@ contract OracleTrigger is
         uint32 chainId,
         address recipientAddress
     ) public onlyOwner validateAddress(recipientAddress) {
-    if (chains[chainId].RecipientAddress != address(0)) {
-        revert ChainAlreadyExists(chainId);
-    }
+        if (chains[chainId].RecipientAddress != address(0)) {
+            revert ChainAlreadyExists(chainId);
+        }
         chains[chainId] = ChainConfig(recipientAddress);
         emit ChainAdded(chainId, recipientAddress);
     }
 
-    
     /// @notice Updates the recipient address for a specific chain.
     /// @param chainId The chain ID to be updated.
     /// @param recipientAddress The new recipient address.
@@ -214,11 +212,7 @@ contract OracleTrigger is
             messageBody
         );
 
-        emit MessageDispatched(
-            _destinationDomain,
-            recipient,
-            messageId
-        );
+        emit MessageDispatched(_destinationDomain, recipient, messageId);
     }
 
     /// @notice Dispatches a message to a configured destination chain.
@@ -250,17 +244,6 @@ contract OracleTrigger is
     }
 
     /**
-     * @notice Sets the interchain security module.
-     * @param _ism The new ISM address.
-     */
-    function setInterchainSecurityModule(
-        address _ism
-    ) external onlyOwner validateAddress(_ism) {
-        interchainSecurityModule = IInterchainSecurityModule(_ism);
-        emit InterchainSecurityModuleUpdated(_ism);
-    }
-
-    /**
      * @notice Sets the mailbox address.
      * @param _mailbox The new mailbox address.
      */
@@ -274,9 +257,8 @@ contract OracleTrigger is
     /**
      * @notice Gets the mailbox address.
      */
-    function getMailBox(
-    ) external view returns    (address) {
-       return mailBox;
+    function getMailBox() external view returns (address) {
+        return mailBox;
     }
 
     /**
@@ -306,7 +288,8 @@ contract OracleTrigger is
         address _newOwner
     ) external validateAddress(_newOwner) onlyOwner {
         if (hasRole(OWNER_ROLE, _newOwner)) revert ExistingAdmin(_newOwner);
-        grantRole(OWNER_ROLE, _newOwner);
+        _grantRole(DEFAULT_ADMIN_ROLE, _newOwner);
+        _grantRole(OWNER_ROLE, _newOwner);
         emit OwnerAdded(_newOwner, msg.sender, block.timestamp);
     }
 
@@ -318,6 +301,8 @@ contract OracleTrigger is
     ) external validateAddress(_owner) onlyOwner {
         if (getRoleMemberCount(OWNER_ROLE) <= 1) revert CannotRemoveLastOwner();
         revokeRole(OWNER_ROLE, _owner);
+        revokeRole(DEFAULT_ADMIN_ROLE, _owner);
+
         emit OwnerRemoved(_owner, msg.sender, block.timestamp);
     }
 
@@ -342,7 +327,7 @@ contract OracleTrigger is
         return owners;
     }
 
-     /**
+    /**
      * @notice Add Dispatcher address.
      */
     function addDispatcher(address _dispatcher) external onlyOwner {
@@ -353,8 +338,14 @@ contract OracleTrigger is
      * @notice Remove Dispatcher address.
      */
     function removeDispatcher(address _dispatcher) external onlyOwner {
-         revokeRole(DISPATCHER_ROLE, _dispatcher);
+        revokeRole(DISPATCHER_ROLE, _dispatcher);
     }
 
-    
+    /**
+     * @notice Withdraw ETH to reover stuck funds
+     */
+    function withdrawETH(address payable recipient) external onlyOwner {
+        require(recipient != address(0), "Invalid recipient");
+        recipient.transfer(address(this).balance);
+    }
 }

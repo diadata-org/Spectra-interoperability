@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+pragma solidity 0.8.29;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -45,7 +45,6 @@ contract PushOracleReceiver is
      * @param value The numerical value associated with the key.
      */
     struct Data {
-        string key;
         uint128 timestamp;
         uint128 value;
     }
@@ -61,15 +60,22 @@ contract PushOracleReceiver is
     /// @notice Emitted when a call is received (currently unused).
     event ReceivedCall(address indexed caller, uint256 amount, string message);
 
+
+    event TrustedMailBoxUpdated(address indexed previousMailBox, address indexed newMailBox);
+
+    event InterchainSecurityModuleUpdated(address indexed previousISM, address indexed newISM);
+    
+    event PaymentHookUpdated(address indexed previousPaymentHook, address indexed newPaymentHook);
+
+
+
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
         if (_address == address(0)) revert ZeroAddress();
         _;
     }
 
-    function setTrustedMailBox(address _mailbox) external onlyOwner {
-        trustedMailBox = _mailbox;
-    }
+  
 
     /**
      * @notice Handles incoming interchain messages by decoding the payload and updating state.
@@ -97,7 +103,6 @@ contract PushOracleReceiver is
 
         // Update the stored oracle data.
         Data memory newData = Data({
-            key: key,
             timestamp: timestamp,
             value: value
         });
@@ -127,12 +132,19 @@ contract PushOracleReceiver is
      * @notice Sets the interchain security module.
      * @param _ism The address of the interchain security module.
      */
-    function setInterchainSecurityModule(address _ism) external onlyOwner {
+    function setInterchainSecurityModule(address _ism) external onlyOwner validateAddress(_ism) {
+        emit InterchainSecurityModuleUpdated(address(interchainSecurityModule), _ism);  
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-    function setPaymentHook(address payable _paymentHook) external onlyOwner {
+    function setPaymentHook(address payable _paymentHook) external onlyOwner validateAddress(_paymentHook) {
+        emit PaymentHookUpdated(paymentHook, _paymentHook);  
         paymentHook = _paymentHook;
+    }
+
+      function setTrustedMailBox(address _mailbox) external onlyOwner validateAddress(_mailbox) {
+        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);  
+        trustedMailBox = _mailbox;
     }
 
      
