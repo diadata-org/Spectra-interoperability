@@ -10,15 +10,27 @@ import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
 import {ProtocolFeeHook} from "./ProtocolFeeHook.sol";
 
 import {TypeCasts} from "./libs/TypeCasts.sol";
- // import "forge-std/console.sol";
 
 using TypeCasts for address;
 
-
-
 /**
  * @title PushOracleReceiver
- * @notice Handles incoming oracle data updates.Whitelisted in Hyperlane
+ * @notice Handles incoming oracle data updates and ensures security via Hyperlane.
+ * @dev Implements IMessageRecipient and ISpecifiesInterchainSecurityModule.
+ *
+ * ## Data Flow:
+ * - Go Feeder Service → OracleTrigger (reads price from metadata) → Hyperlane → PushOracleReceiver
+ *
+ * This contract receives and processes oracle updates from the DIA chain.
+ *
+ * ## Funding Mechanism:
+ * - The contract should hold enough balance to cover transaction fees for updates.
+ * - Each update requires two transactions: one on the DIA chain and another on the chain where PushOracleReceiver is deployed (Destination).
+ * - The contract deducts the fee for each  Destination transaction and transfers it to the ProtocolFeeHook.
+ *
+ * ## Security Constraints:
+ * - PushOracleReceiver processes messages only from the trusted mailbox.
+ * - The oracle trigger address must be whitelisted in the ISM (Interchain Security Module) of PushOracleReceiver.
  */
 contract PushOracleReceiver is
     Ownable,
@@ -31,16 +43,14 @@ contract PushOracleReceiver is
     /// @notice Address for the post-dispatch payment hook.
     address payable public paymentHook;
 
-    address public walletFactory;
-
     /// @notice only Message from this mailbox will be handled
     address public trustedMailBox;
 
+    /// @notice Error thrown when a zero address is provided where a valid address is required.
     error ZeroAddress();
 
     /**
      * @notice Structure representing an oracle data update.
-     * @param key The identifier for the data.
      * @param timestamp The timestamp when the data was recorded.
      * @param value The numerical value associated with the key.
      */
@@ -60,22 +70,29 @@ contract PushOracleReceiver is
     /// @notice Emitted when a call is received (currently unused).
     event ReceivedCall(address indexed caller, uint256 amount, string message);
 
+    /// @notice Emitted when the trusted mailbox address is updated.
+    event TrustedMailBoxUpdated(
+        address indexed previousMailBox,
+        address indexed newMailBox
+    );
 
-    event TrustedMailBoxUpdated(address indexed previousMailBox, address indexed newMailBox);
+    /// @notice Emitted when the interchain security module address is updated.
+    event InterchainSecurityModuleUpdated(
+        address indexed previousISM,
+        address indexed newISM
+    );
 
-    event InterchainSecurityModuleUpdated(address indexed previousISM, address indexed newISM);
-    
-    event PaymentHookUpdated(address indexed previousPaymentHook, address indexed newPaymentHook);
-
-
+    /// @notice Emitted when the payment hook address is updated.
+    event PaymentHookUpdated(
+        address indexed previousPaymentHook,
+        address indexed newPaymentHook
+    );
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
         if (_address == address(0)) revert ZeroAddress();
         _;
     }
-
-  
 
     /**
      * @notice Handles incoming interchain messages by decoding the payload and updating state.
@@ -102,52 +119,63 @@ contract PushOracleReceiver is
         }
 
         // Update the stored oracle data.
-        Data memory newData = Data({
-            timestamp: timestamp,
-            value: value
-        });
+        Data memory newData = Data({timestamp: timestamp, value: value});
         updates[key] = newData;
 
         emit ReceivedMessage(key, timestamp, value);
 
+        // Calculate the transaction fee based on gas used and gas price.
         uint256 gasPrice = tx.gasprice;
-
         uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
             gasPrice;
 
-        // console.log("gasPrice", gasPrice);
-
-        // Send the fee to the payment hook
-
+        // Transfer the fee to the payment hook.
         bool success;
         {
             (success, ) = paymentHook.call{value: fee}("");
         }
-        // console.log("address success", success);
 
         require(success, "Fee transfer failed");
     }
 
     /**
      * @notice Sets the interchain security module.
-     * @param _ism The address of the interchain security module.
+     * @dev Only the contract owner can call this function.
+     * @param _ism The address of the new interchain security module.
      */
-    function setInterchainSecurityModule(address _ism) external onlyOwner validateAddress(_ism) {
-        emit InterchainSecurityModuleUpdated(address(interchainSecurityModule), _ism);  
+    function setInterchainSecurityModule(
+        address _ism
+    ) external onlyOwner validateAddress(_ism) {
+        emit InterchainSecurityModuleUpdated(
+            address(interchainSecurityModule),
+            _ism
+        );
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-    function setPaymentHook(address payable _paymentHook) external onlyOwner validateAddress(_paymentHook) {
-        emit PaymentHookUpdated(paymentHook, _paymentHook);  
+    /**
+     * @notice Sets the payment hook address.
+     * @dev Only the contract owner can call this function.
+     * @param _paymentHook The address of the new payment hook.
+     */
+    function setPaymentHook(
+        address payable _paymentHook
+    ) external onlyOwner validateAddress(_paymentHook) {
+        emit PaymentHookUpdated(paymentHook, _paymentHook);
         paymentHook = _paymentHook;
     }
 
-      function setTrustedMailBox(address _mailbox) external onlyOwner validateAddress(_mailbox) {
-        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);  
+    /**
+     * @notice Sets the trusted mailbox address.
+     * @dev Only the contract owner can call this function.
+     * @param _mailbox The address of the new trusted mailbox.
+     */
+    function setTrustedMailBox(
+        address _mailbox
+    ) external onlyOwner validateAddress(_mailbox) {
+        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
         trustedMailBox = _mailbox;
     }
-
-     
 
     receive() external payable {}
 
