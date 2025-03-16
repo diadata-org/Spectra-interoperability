@@ -34,7 +34,7 @@ contract OracleRequestRecipient is
 
 
     /// @notice Address of the Oracle Trigger contract
-    address public oracleTriggerAddress;
+    address private oracleTriggerAddress;
 
     /// @notice Emitted when a valid oracle request update is received
     /// @param caller The address that sent the request
@@ -140,13 +140,7 @@ contract OracleRequestRecipient is
      recipient.transfer(address(this).balance);
     }
 
-    /**
-     * @notice Retrieves the current interchain security module address.
-     * @return Address of the ISM contract
-     */
-    function getInterchainSecurityModule() external view returns (address) {
-        return address(interchainSecurityModule);
-    }
+    
 
     /**
      * @notice Retrieves the current Oracle Trigger contract address.
