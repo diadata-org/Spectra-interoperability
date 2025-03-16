@@ -6,3 +6,4 @@ libs = ["node_modules"]
 solc_version = "0.8.26"     
 test = "test-foundry"
 gas_price = 10
+gas_reports = ["*"]
