@@ -14,20 +14,40 @@ interface IDIAOracleV2 {
 
 using TypeCasts for address;
 
+/// @notice Error thrown when a provided address is the zero address.
 error ZeroAddress();
+
+/// @notice Error thrown when the provided chain configuration is invalid.
 error InvalidChainConfig();
+
+/// @notice Error thrown when trying to interact with a chain that has not been configured.
+/// @param chainId The chain ID that is not configured.
 error ChainNotConfigured(uint32 chainId);
+
+
+/// @notice Error thrown when there is an issue retrieving a value from the oracle.
+/// @param key The oracle key that caused the error.
 error OracleError(string key);
 
+/// @notice Error thrown when an unauthorized account attempts to perform a restricted action.
+/// @param account The address of the unauthorized account.
 error NotAuthorized(address account);
+
+/// @notice Error thrown when trying to add an existing admin again.
+/// @param account The address of the existing admin.
 error ExistingAdmin(address account);
 
+/// @notice Error thrown when attempting to remove the last owner, which is not allowed.
 error CannotRemoveLastOwner();
+
+/// @notice Error thrown when trying to add a chain that already exists.
+/// @param chainId The chain ID that is already configured.
 error ChainAlreadyExists(uint32 chainId);
 
-// @title OracleTrigger
-/// @notice This contract manages interchain oracle requests and dispatching price updates.Whitelisted in Hyperlane
+/// @title OracleTrigger
+/// @notice Reads the latest oracle value from metadata and dispatches it to the desired chain.
 /// @dev Provides access control for managing chains and secure dispatching mechanisms.
+/// @dev Only addresses with the DISPATCHER_ROLE can call dispatch functions.
 contract OracleTrigger is
     AccessControlEnumerable,
      ReentrancyGuard
@@ -341,7 +361,7 @@ contract OracleTrigger is
     }
 
     /**
-     * @notice Withdraw ETH to reover stuck funds
+     * @notice Withdraw ETH to recover stuck funds
      */
     function withdrawETH(address payable recipient) external onlyOwner {
         require(recipient != address(0), "Invalid recipient");

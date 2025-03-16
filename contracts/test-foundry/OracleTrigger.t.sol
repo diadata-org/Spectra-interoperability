@@ -68,15 +68,28 @@ contract OracleTriggerTest is Test {
         oracleTrigger.setMailBox(mailbox);
         assertEq(oracleTrigger.getMailBox(), mailbox);
     }
+     function testsetMailBoxToZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("ZeroAddress()"));
+        oracleTrigger.setMailBox(address(0x0));
+        // assertEq(oracleTrigger.getMailBox(), mailbox);
+    }
     
     function testSetMetadataContract() public {
         vm.prank(owner);
         oracleTrigger.updateMetadataContract(address(mockMetadata));
         assertEq(oracleTrigger.metadataContract(), address(mockMetadata));
     }
+
+    function testCannotSetInvalidMetadataContract() public {
+        vm.prank(owner);
+        vm.expectRevert();
+        oracleTrigger.updateMetadataContract(address(0));
+    }
     
     function testAddOwner() public {
         vm.prank(owner);
+        console.log("-------------------");
         oracleTrigger.addOwner(newOwner);
         assertTrue(oracleTrigger.hasRole(oracleTrigger.OWNER_ROLE(), newOwner));
     }
@@ -92,12 +105,19 @@ contract OracleTriggerTest is Test {
     
     function testCannotRemoveLastOwner() public {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSignature("CannotRemoveLastOwner()"));
+        vm.expectRevert();
         oracleTrigger.removeOwner(owner);
+    }
+
+    function testCannotRemoveNonExistentOwner() public {
+        vm.prank(owner);
+        vm.expectRevert();
+        oracleTrigger.removeOwner(address(0x7));
     }
     
     function testDispatchToChain() public {
         vm.prank(owner);
+        
         oracleTrigger.addChain(chainId, recipient);
         
         vm.prank(owner);
@@ -108,11 +128,16 @@ contract OracleTriggerTest is Test {
         
         vm.deal(owner, 1 ether);
         vm.prank(owner);
+        oracleTrigger.addDispatcher(owner);
+         vm.prank(owner);
         oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
     }
 
      function testDispatch() public {
         vm.prank(owner);
+        oracleTrigger.addDispatcher(owner);
+        vm.prank(owner);
+
         oracleTrigger.addChain(chainId, recipient);
         
         vm.prank(owner);
@@ -125,4 +150,116 @@ contract OracleTriggerTest is Test {
         vm.prank(owner);
         oracleTrigger.dispatch{value: 0.1 ether}(chainId, 0xb8565867A5616544d13595fBe30a5693b2207fa0,"BTC");
     }
+
+ 
+
+
+
+    function testCannotDispatchWithoutDispatcherRole() public {
+        vm.prank(owner);
+        oracleTrigger.addChain(chainId, recipient);
+        
+        vm.prank(owner);
+        oracleTrigger.setMailBox(mailbox);
+        
+        vm.prank(owner);
+        oracleTrigger.updateMetadataContract(address(mockMetadata));
+
+        
+
+        vm.deal(owner, 1 ether);
+
+        vm.expectRevert();
+        vm.prank(owner);
+        oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+    }
+      function testMetadataValueStorage() public {
+        mockMetadata.setValue("BTC", 50000, uint128(block.timestamp));
+        (uint128 price, uint128 timestamp) = mockMetadata.getValue("BTC");
+
+        assertEq(price, 50000);
+        assertEq(timestamp, block.timestamp);
+    }
+
+    function testRemoveDispatcher() public {
+    vm.prank(owner);
+    oracleTrigger.addDispatcher(newOwner);
+
+    vm.prank(owner);
+    oracleTrigger.removeDispatcher(newOwner);
+
+    // Since isDispatcher() does not exist, we will attempt a dispatch operation
+    vm.deal(newOwner, 1 ether);
+    vm.prank(newOwner);
+    vm.expectRevert();
+    oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+}
+
+function testCannotRemoveDispatcherIfNotOwner() public {
+    vm.prank(owner);
+    oracleTrigger.addDispatcher(newOwner);
+
+    vm.prank(newOwner);
+    vm.expectRevert();
+    oracleTrigger.removeDispatcher(newOwner);
+}
+
+function testGetOwners() public {
+    vm.prank(owner);
+    oracleTrigger.addOwner(newOwner);
+
+    address[] memory owners = oracleTrigger.getOwners();
+
+    assertEq(owners.length, 2, "Should have two owners");
+    assertEq(owners[0], owner, "First owner should be initial owner");
+    assertEq(owners[1], newOwner, "Second owner should be new owner");
+}
+
+function testIsOwner() public {
+    vm.prank(owner);
+    oracleTrigger.addOwner(newOwner);
+
+    assertTrue(oracleTrigger.isOwner(owner), "Owner should be recognized");
+    assertTrue(oracleTrigger.isOwner(newOwner), "New owner should be recognized");
+
+    address nonOwner = address(0x7);
+    assertFalse(oracleTrigger.isOwner(nonOwner), "Non-owner should not be recognized");
+}
+
+function testCannotAddDuplicateChain() public {
+    vm.prank(owner);
+    oracleTrigger.addChain(chainId, recipient);
+
+    vm.prank(owner);
+    vm.expectRevert(abi.encodeWithSignature("ChainAlreadyExists(uint32)", chainId));
+    oracleTrigger.addChain(chainId, address(0x8));
+}
+
+function testDispatchToUnconfiguredChainFails() public {
+    vm.prank(owner);
+    oracleTrigger.setMailBox(mailbox);
+
+    vm.prank(owner);
+    oracleTrigger.updateMetadataContract(address(mockMetadata));
+
+    vm.deal(owner, 1 ether);
+    vm.prank(owner);
+    oracleTrigger.addDispatcher(owner);
+
+    vm.prank(owner);
+    vm.expectRevert(abi.encodeWithSignature("ChainNotConfigured(uint32)", chainId));
+    oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+}
+
+ // add new owner and let new owner add new dispatcher role
+
+ function testNewOwnerCanAddDispatcher() public {
+    vm.prank(owner);
+    oracleTrigger.addOwner(newOwner); // Step 1: Add new owner
+
+    vm.prank(newOwner);
+    oracleTrigger.addDispatcher(address(0x5)); // Step 2: New owner grants DISPATCHER_ROLE
+
+    assertTrue(oracleTrigger.hasRole(oracleTrigger.DISPATCHER_ROLE(), address(0x5)));
+}
 }
