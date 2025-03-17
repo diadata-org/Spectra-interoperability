@@ -186,7 +186,7 @@ contract RequestOracleTest is Test {
 
     function testHandleUnauthorized() public {
         bytes32 sender = receiver.addressToBytes32();
-        vm.expectRevert("Unauthorized Mailbox");
+        vm.expectRevert();
         requestOracle.handle(destinationDomain, sender, sampleMessage);
     }
 

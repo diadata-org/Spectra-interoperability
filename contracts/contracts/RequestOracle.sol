@@ -65,6 +65,11 @@ contract RequestOracle is
         address indexed newMailBox
     );
 
+    /// @notice Emitted when tokens are recovered
+    /// @param receiver The address of the receiver
+    /// @param amount The amount of tokens recovered
+    event TokensRecovered(address receiver, uint256 amount);
+
     /// @notice Event emitted when the interchain security module is updated.
     event InterchainSecurityModuleUpdated(
         address indexed previousISM,
@@ -82,6 +87,16 @@ contract RequestOracle is
 
     /// @notice Error thrown when an invalid address (zero address) is used.
     error ZeroAddress();
+
+    // @notice Thrown when the mailbox address is unauthorized
+    error UnauthorizedMailbox();
+
+    // @notice Thrown when there is no balance to withdraw
+    error NoBalanceToWithdraw();
+
+ 
+    // @notice Thrown when the fee transfer fails
+    error AmountTransferFailed();
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -136,21 +151,18 @@ contract RequestOracle is
         );
     }
 
-
     /**
      * @notice Handles received messages from the interchain mailbox.
-     * @param _origin The domain ID of the sender chain.
-     * @param _sender The sender address in bytes32 format.
+ 
      * @param _data The encoded oracle data received.
      */
     function handle(
-        uint32 _origin,
-        bytes32 _sender,
+        uint32 /* _origin */,
+        bytes32 /* _sender */,
         bytes calldata _data
     ) external payable virtual override {
         // check who is calling this
-        require(msg.sender == trustedMailBox, "Unauthorized Mailbox");
-
+        if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
             (string, uint128, uint128)
@@ -221,8 +233,14 @@ contract RequestOracle is
     /**
      * @notice Withdraw ETH to reover stuck funds
      */
-    function withdrawETH(address payable recipient) external onlyOwner {
-        require(recipient != address(0), "Invalid recipient");
-        recipient.transfer(address(this).balance);
+    function retrieveLostTokens(
+        address receiver
+    ) external onlyOwner validateAddress(receiver) {
+        uint256 balance = address(this).balance;
+        if (balance == 0) revert NoBalanceToWithdraw();
+
+        (bool success, ) = payable(receiver).call{value: balance}("");
+        if (!success) revert AmountTransferFailed();
+        emit TokensRecovered(receiver, balance);
     }
 }
