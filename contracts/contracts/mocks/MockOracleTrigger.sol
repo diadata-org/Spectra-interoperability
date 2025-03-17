@@ -1,6 +1,6 @@
 pragma solidity 0.8.29;
-import {IOracleTrigger} from "../interfaces/IOracleTrigger.sol";
 
+import {IOracleTrigger} from "../interfaces/oracle/IOracleTrigger.sol";
 
 contract MockOracleTrigger is IOracleTrigger {
     // Recorded parameters for verification.
