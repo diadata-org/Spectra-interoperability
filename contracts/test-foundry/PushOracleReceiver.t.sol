@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../contracts/PushOracleReceiver.sol";
 import "../contracts/ProtocolFeeHook.sol";
+import "../contracts/interfaces/oracle/IPushOracleReceiver.sol";
 
 import "../contracts/interfaces/IMailbox.sol";
 import "../contracts/interfaces/IInterchainSecurityModule.sol";
@@ -242,7 +243,7 @@ contract PushOracleReceiverTest is Test {
         console.log("Gas Price before handle():", tx.gasprice); // gas price is set in foundry.toml
 
         vm.prank(address(mailbox));
-        vm.expectRevert("Fee transfer failed");
+        vm.expectRevert(abi.encodeWithSelector(IPushOracleReceiver.AmountTransferFailed.selector));
 
         receiver.handle(destinationDomain, sender, data);
     }
@@ -281,7 +282,7 @@ function testRetrieveLostTokensUnauthorized() public {
 /// @notice Tests that withdrawETH reverts if recipient is address(0)
 function testRetrieveLostTokensRecipient() public {
     vm.prank(owner);
-    vm.expectRevert("Invalid receiver");
+    vm.expectRevert(abi.encodeWithSelector(IPushOracleReceiver.InvalidAddress.selector));
     receiver.retrieveLostTokens(payable(address(0)));
 }
 

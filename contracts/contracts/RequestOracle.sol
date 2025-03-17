@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -86,7 +86,7 @@ contract RequestOracle is
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
 
     /// @notice Error thrown when an invalid address (zero address) is used.
-    error ZeroAddress();
+    error InvalidAddress();
 
     // @notice Thrown when the mailbox address is unauthorized
     error UnauthorizedMailbox();
@@ -100,7 +100,7 @@ contract RequestOracle is
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
-        if (_address == address(0)) revert ZeroAddress();
+        if (_address == address(0)) revert InvalidAddress();
         _;
     }
 

@@ -1,17 +1,11 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
-import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
-import {IMailbox} from "./interfaces/IMailbox.sol";
-import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
-import {ProtocolFeeHook} from "./ProtocolFeeHook.sol";
-
-import {TypeCasts} from "./libs/TypeCasts.sol";
-
-using TypeCasts for address;
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IPushOracleReceiver } from "./interfaces/oracle/IPushOracleReceiver.sol";
+import { IInterchainSecurityModule } from "./interfaces/IInterchainSecurityModule.sol";
+import { ProtocolFeeHook } from "./ProtocolFeeHook.sol";
+import { TypeCasts } from "./libs/TypeCasts.sol";
 
 /**
  * @title PushOracleReceiver
@@ -32,84 +26,37 @@ using TypeCasts for address;
  * - PushOracleReceiver processes messages only from the trusted mailbox.
  * - The oracle trigger address must be whitelisted in the ISM (Interchain Security Module) of PushOracleReceiver.
  */
-contract PushOracleReceiver is
-    Ownable,
-    IMessageRecipient,
-    ISpecifiesInterchainSecurityModule
-{
-    /// @notice Reference to the interchain security module.
+contract PushOracleReceiver is IPushOracleReceiver, Ownable {
+    using TypeCasts for address;
+
+    /// @notice Reference to the interchain security module
     IInterchainSecurityModule public interchainSecurityModule;
 
-    /// @notice Address for the post-dispatch payment hook.
+    /// @notice Address for the post-dispatch payment hook
     address payable public paymentHook;
 
     /// @notice only Message from this mailbox will be handled
     address public trustedMailBox;
 
-
-    event TokensRecovered(address indexed recipient, uint256 amount);
-
-
-    /// @notice Error thrown when a zero address is provided where a valid address is required.
-    error ZeroAddress();
-
-    /**
-     * @notice Structure representing an oracle data update.
-     * @param timestamp The timestamp when the data was recorded.
-     * @param value The numerical value associated with the key.
-     */
-    struct Data {
-        uint128 timestamp;
-        uint128 value;
-    }
-
-    uint256 public gasUsedPerTx = 97440; // Default gas used
-
-    /// @notice Mapping of oracle data updates by key.
+    /// @notice Mapping of oracle data updates by key
     mapping(string => Data) public updates;
 
-    /// @notice Emitted when a new oracle data message is received.
-    event ReceivedMessage(string key, uint128 timestamp, uint128 value);
-
-    /// @notice Emitted when a call is received (currently unused).
-    event ReceivedCall(address indexed caller, uint256 amount, string message);
-
-    /// @notice Emitted when the trusted mailbox address is updated.
-    event TrustedMailBoxUpdated(
-        address indexed previousMailBox,
-        address indexed newMailBox
-    );
-
-    /// @notice Emitted when the interchain security module address is updated.
-    event InterchainSecurityModuleUpdated(
-        address indexed previousISM,
-        address indexed newISM
-    );
-
-    /// @notice Emitted when the payment hook address is updated.
-    event PaymentHookUpdated(
-        address indexed previousPaymentHook,
-        address indexed newPaymentHook
-    );
-
-    /// @notice Ensures that the provided address is not a zero address.
+    /// @notice Ensures that the provided address is not a zero address
     modifier validateAddress(address _address) {
-        if (_address == address(0)) revert ZeroAddress();
+        if (_address == address(0)) revert InvalidAddress();
         _;
     }
 
     /**
-     * @notice Handles incoming interchain messages by decoding the payload and updating state.
-     * @param _origin The origin domain identifier.
-     * @param _sender The sender's address (in bytes32 format).
-     * @param _data The encoded payload containing the oracle data.
+     * @dev See {IPushOracleReceiver-handle}.
      */
+    /* solhint-disable no-unused-vars */
     function handle(
         uint32 _origin,
         bytes32 _sender,
         bytes calldata _data
     ) external payable override validateAddress(paymentHook) {
-        require(msg.sender == trustedMailBox, "Unauthorized Mailbox");
+        if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
 
         // Decode the incoming data into its respective components.
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
@@ -122,8 +69,8 @@ contract PushOracleReceiver is
             return; // Ignore outdated data
         }
 
-        // Update the stored oracle data.
-        Data memory newData = Data({timestamp: timestamp, value: value});
+        // Update the stored oracle data
+        Data memory newData = Data({ timestamp: timestamp, value: value });
         updates[key] = newData;
 
         emit ReceivedMessage(key, timestamp, value);
@@ -136,16 +83,15 @@ contract PushOracleReceiver is
         // Transfer the fee to the payment hook.
         bool success;
         {
-            (success, ) = paymentHook.call{value: fee}("");
+            (success, ) = paymentHook.call{ value: fee }("");
         }
 
-        require(success, "Fee transfer failed");
+        if (!success) revert AmountTransferFailed();
     }
+    /* solhint-disable no-unused-vars */
 
     /**
-     * @notice Sets the interchain security module.
-     * @dev Only the contract owner can call this function.
-     * @param _ism The address of the new interchain security module.
+     * @dev See {IPushOracleReceiver-setInterchainSecurityModule}.
      */
     function setInterchainSecurityModule(
         address _ism
@@ -158,9 +104,7 @@ contract PushOracleReceiver is
     }
 
     /**
-     * @notice Sets the payment hook address.
-     * @dev Only the contract owner can call this function.
-     * @param _paymentHook The address of the new payment hook.
+     * @dev See {IPushOracleReceiver-setPaymentHook}.
      */
     function setPaymentHook(
         address payable _paymentHook
@@ -170,9 +114,7 @@ contract PushOracleReceiver is
     }
 
     /**
-     * @notice Sets the trusted mailbox address.
-     * @dev Only the contract owner can call this function.
-     * @param _mailbox The address of the new trusted mailbox.
+     * @dev See {IPushOracleReceiver-setTrustedMailBox}.
      */
     function setTrustedMailBox(
         address _mailbox
@@ -181,17 +123,17 @@ contract PushOracleReceiver is
         trustedMailBox = _mailbox;
     }
 
-
- /**
-     * @notice Withdraw ETH to reover stuck funds
+    /**
+     * @dev See {IPushOracleReceiver-retrieveLostTokens}.
      */
-    function retrieveLostTokens(address receiver) external onlyOwner {
-        require(receiver != address(0), "Invalid receiver");
+    function retrieveLostTokens(
+        address receiver
+    ) external onlyOwner validateAddress(receiver) {
         uint256 balance = address(this).balance;
-        require(balance > 0, "No balance to withdraw");
+        if (balance == 0) revert NoBalanceToWithdraw();
 
-        (bool success, ) = payable(receiver).call{value: balance}("");
-        require(success, "transfer failed");
+        (bool success, ) = payable(receiver).call{ value: balance }("");
+        if (!success) revert AmountTransferFailed();
         emit TokensRecovered(receiver, balance);
     }
     receive() external payable {}

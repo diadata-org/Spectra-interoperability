@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
-import {IOracleTrigger} from "./interfaces/IOracleTrigger.sol";
+import {IOracleTrigger} from "./interfaces/oracle/IOracleTrigger.sol";
 import {TypeCasts} from "./libs/TypeCasts.sol";
 
 import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
