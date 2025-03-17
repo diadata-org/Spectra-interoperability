@@ -56,9 +56,9 @@ contract OracleTrigger is
         _grantRole(OWNER_ROLE, msg.sender);
     }
 
-    /**
-     * @dev See {IOracleTrigger-addChain}.
-     */
+    /// @notice Adds a new chain to the configuration
+    /// @param chainId The chain ID of the new chain
+    /// @param recipientAddress The address of the recipient contract on the new chain
     function addChain(
         uint32 chainId,
         address recipientAddress
@@ -70,9 +70,9 @@ contract OracleTrigger is
         emit ChainAdded(chainId, recipientAddress);
     }
 
-    /**
-     * @dev See {IOracleTrigger-updateChain}.
-     */
+    /// @notice Updates the recipient address for a specific chain
+    /// @param chainId The chain ID of the chain to update
+    /// @param recipientAddress The new address of the recipient contract
     function updateChain(
         uint32 chainId,
         address recipientAddress
@@ -88,18 +88,17 @@ contract OracleTrigger is
         emit ChainUpdated(chainId, oldRecipientAddress, recipientAddress);
     }
 
-    /**
-     * @dev See {IOracleTrigger-viewChain}.
-     */
+    /// @notice Retrieves the recipient address for a specific chain
+    /// @param _chainId The chain ID of the chain to query
+    /// @return The address of the recipient contract on the specified chain
     function viewChain(
         uint32 _chainId
     ) public view validateChain(_chainId) returns (address) {
         return chains[_chainId];
     }
 
-    /**
-     * @dev See {IOracleTrigger-updateMetadataContract}.
-     */
+    /// @notice Updates the metadata contract address
+    /// @param newMetadata The new metadata contract address
     function updateMetadataContract(
         address newMetadata
     ) external onlyRole(OWNER_ROLE) validateAddress(newMetadata) {
@@ -164,9 +163,8 @@ contract OracleTrigger is
         emit MessageDispatched(_destinationDomain, recipientAddress, messageId);
     }
 
-    /**
-     * @dev See {IOracleTrigger-setMailBox}.
-     */
+    /// @notice Sets the mailbox contract address
+    /// @param _mailbox The new mailbox contract address
     function setMailBox(
         address _mailbox
     ) external onlyRole(OWNER_ROLE) validateAddress(_mailbox) {
@@ -174,9 +172,8 @@ contract OracleTrigger is
         emit MailboxUpdated(_mailbox);
     }
 
-    /**
-     * @dev See {IOracleTrigger-retrieveLostTokens}.
-     */
+    /// @notice Retrieves lost tokens
+    /// @param receiver The address of the receiver
     function retrieveLostTokens(
         address receiver
     ) external onlyRole(OWNER_ROLE) validateAddress(receiver) {

@@ -61,25 +61,6 @@ interface IOracleTrigger {
     /// @param amount The amount of tokens recovered
     event TokensRecovered(address receiver, uint256 amount);
 
-    /// @notice Adds a new chain to the configuration
-    /// @param chainId The chain ID of the new chain
-    /// @param recipientAddress The address of the recipient contract on the new chain
-    function addChain(uint32 chainId, address recipientAddress) external;
-
-    /// @notice Updates the recipient address for a specific chain
-    /// @param chainId The chain ID of the chain to update
-    /// @param recipientAddress The new address of the recipient contract
-    function updateChain(uint32 chainId, address recipientAddress) external;
-
-    /// @notice Retrieves the recipient address for a specific chain
-    /// @param _chainId The chain ID of the chain to query
-    /// @return The address of the recipient contract on the specified chain
-    function viewChain(uint32 _chainId) external view returns (address);
-
-    /// @notice Updates the metadata contract address
-    /// @param newMetadata The new metadata contract address
-    function updateMetadataContract(address newMetadata) external;
-
     /// @notice Dispatches a message to a destination chain
     /// @param _destinationDomain The destination chain ID
     /// @param key The key used to fetch the oracle value
@@ -97,14 +78,6 @@ interface IOracleTrigger {
         address _recipientAddress,
         string memory _key
     ) external payable;
-
-    /// @notice Sets the mailbox contract address
-    /// @param _mailbox The new mailbox contract address
-    function setMailBox(address _mailbox) external;
-
-    /// @notice Retrieves lost tokens
-    /// @param receiver The address of the receiver
-    function retrieveLostTokens(address receiver) external;
 
     /// @notice Retrieves the mailbox contract address
     /// @return The address of the mailbox contract
