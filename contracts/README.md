@@ -52,14 +52,11 @@ sequenceDiagram
 ### **Push-Based Oracle Flow**
 
 ```mermaid
-sequenceDiagram
-    participant User/SmartContract
-    participant RequestOracle
-    participant Hyperlane
-    participant OracleRequestRecipient
-    participant OracleTrigger
-    participant Hyperlane2
-    participant RequestOracleDest
+graph TD;
+    OffchainService-->OracleTrigger;
+    OracleTrigger-->Hyperlane;
+    Hyperlane-->PushOracleReceiver;
+    PushOracleReceiver-->UpdateStoredValue;
 
     User/SmartContract->>RequestOracle: Submit request
     RequestOracle->>Hyperlane: Forward request
