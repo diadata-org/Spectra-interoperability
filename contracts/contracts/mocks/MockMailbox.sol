@@ -1,9 +1,8 @@
 pragma solidity ^0.8.26;
 
-import {IMailbox} from "../interfaces/IMailbox.sol";
-import {IInterchainSecurityModule} from "../interfaces/IInterchainSecurityModule.sol";
-import {IPostDispatchHook} from "../interfaces/hooks/IPostDispatchHook.sol";
-
+import { IMailbox } from "../interfaces/IMailbox.sol";
+import { IInterchainSecurityModule } from "../interfaces/IInterchainSecurityModule.sol";
+import { IPostDispatchHook } from "../interfaces/hooks/IPostDispatchHook.sol";
 
 contract MockMailbox is IMailbox {
     function dispatch(

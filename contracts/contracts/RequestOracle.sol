@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
-import {Pausable} from "@openzeppelin/contracts/security/Pausable.sol";
+import { Pausable } from "@openzeppelin/contracts/security/Pausable.sol";
 
-import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
-import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
-import {IMailbox} from "./interfaces/IMailbox.sol";
-import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
-import {TypeCasts} from "./libs/TypeCasts.sol";
+import { IMessageRecipient } from "./interfaces/IMessageRecipient.sol";
+import { IInterchainSecurityModule, ISpecifiesInterchainSecurityModule } from "./interfaces/IInterchainSecurityModule.sol";
+import { IMailbox } from "./interfaces/IMailbox.sol";
+import { IPostDispatchHook } from "./interfaces/hooks/IPostDispatchHook.sol";
+import { TypeCasts } from "./libs/TypeCasts.sol";
 // import "forge-std/console.sol";
 
 using TypeCasts for address;
@@ -94,7 +94,6 @@ contract RequestOracle is
     // @notice Thrown when there is no balance to withdraw
     error NoBalanceToWithdraw();
 
- 
     // @notice Thrown when the fee transfer fails
     error AmountTransferFailed();
 
@@ -135,7 +134,7 @@ contract RequestOracle is
     {
         IPostDispatchHook hook = IPostDispatchHook(paymentHook);
 
-        messageId = _mailbox.dispatch{value: msg.value}(
+        messageId = _mailbox.dispatch{ value: msg.value }(
             _destinationDomain,
             receiver.addressToBytes32(),
             _messageBody,
@@ -167,7 +166,7 @@ contract RequestOracle is
             _data,
             (string, uint128, uint128)
         );
-        Data memory receivedData = Data({timestamp: timestamp, value: value});
+        Data memory receivedData = Data({ timestamp: timestamp, value: value });
 
         // Ensure the new timestamp is more recent
         if (updates[key].timestamp >= timestamp) {
@@ -239,7 +238,7 @@ contract RequestOracle is
         uint256 balance = address(this).balance;
         if (balance == 0) revert NoBalanceToWithdraw();
 
-        (bool success, ) = payable(receiver).call{value: balance}("");
+        (bool success, ) = payable(receiver).call{ value: balance }("");
         if (!success) revert AmountTransferFailed();
         emit TokensRecovered(receiver, balance);
     }

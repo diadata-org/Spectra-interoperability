@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
-import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
-import {IOracleTrigger} from "./interfaces/oracle/IOracleTrigger.sol";
-import {TypeCasts} from "./libs/TypeCasts.sol";
+import { IMessageRecipient } from "./interfaces/IMessageRecipient.sol";
+import { IOracleTrigger } from "./interfaces/oracle/IOracleTrigger.sol";
+import { TypeCasts } from "./libs/TypeCasts.sol";
 
-import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
+import { IInterchainSecurityModule, ISpecifiesInterchainSecurityModule } from "./interfaces/IInterchainSecurityModule.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 using TypeCasts for address;
@@ -105,7 +105,7 @@ contract OracleRequestRecipient is
 
         emit ReceivedCall(sender, key);
 
-        IOracleTrigger(oracleTriggerAddress).dispatch{value: msg.value}(
+        IOracleTrigger(oracleTriggerAddress).dispatch{ value: msg.value }(
             _origin,
             sender,
             key
@@ -202,7 +202,7 @@ contract OracleRequestRecipient is
         if (balance == 0) {
             revert NoBalanceToWithdraw();
         }
-        (bool success, ) = payable(receiver).call{value: balance}("");
+        (bool success, ) = payable(receiver).call{ value: balance }("");
         if (!success) {
             revert TransferFailed();
         }

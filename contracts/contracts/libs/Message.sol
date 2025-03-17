@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 pragma solidity 0.8.29;
 
-import {TypeCasts} from "./TypeCasts.sol";
+import { TypeCasts } from "./TypeCasts.sol";
 
 /**
  * @title Hyperlane Message Library

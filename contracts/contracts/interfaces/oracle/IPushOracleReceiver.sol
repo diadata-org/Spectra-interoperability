@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
-import {IMessageRecipient} from "../IMessageRecipient.sol";
-import {ISpecifiesInterchainSecurityModule} from "../IInterchainSecurityModule.sol";
+import { IMessageRecipient } from "../IMessageRecipient.sol";
+import { ISpecifiesInterchainSecurityModule } from "../IInterchainSecurityModule.sol";
 
-interface IPushOracleReceiver is  
+interface IPushOracleReceiver is
     IMessageRecipient,
-    ISpecifiesInterchainSecurityModule 
+    ISpecifiesInterchainSecurityModule
 {
     // @notice Thrown when the address is invalid
     error InvalidAddress();
@@ -30,7 +30,7 @@ interface IPushOracleReceiver is
     // @param timestamp The timestamp of the update
     // @param value The value of the update
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
- 
+
     // @notice Emitted when the trusted mailbox is updated
     // @param previousMailBox The previous mailbox address
     // @param newMailBox The new mailbox address
@@ -54,7 +54,6 @@ interface IPushOracleReceiver is
         address indexed previousPaymentHook,
         address indexed newPaymentHook
     );
-
 
     struct Data {
         uint128 timestamp;
@@ -85,7 +84,7 @@ interface IPushOracleReceiver is
      * @dev restricted to onlyOwner
      * @param _paymentHook The address of the new payment hook.
      */
-    function setPaymentHook( address payable _paymentHook) external;
+    function setPaymentHook(address payable _paymentHook) external;
 
     /**
      * @notice Sets the trusted mailbox address.
