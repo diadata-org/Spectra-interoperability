@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+pragma solidity 0.8.29;
 
 import {IInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
 import {Message} from "./libs/Message.sol";
