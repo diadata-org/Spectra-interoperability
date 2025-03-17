@@ -9,11 +9,9 @@ interface IOracleTrigger {
     /// @param chainId The chain ID that is not configured
     error ChainNotConfigured(uint32 chainId);
 
-
     /// @notice Error thrown when there is an issue retrieving a value from the oracle
     /// @param key The oracle key that caused the error
     error OracleError(string key);
-
 
     /// @notice Error thrown when trying to add a chain that already exists
     /// @param chainId The chain ID that is already configured
@@ -24,7 +22,7 @@ interface IOracleTrigger {
 
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
-        
+
     /// @notice Emitted when a new chain is added
     /// @param chainId The chain ID of the newly added chain
     /// @param recipientAddress Address of the recipient contract on the chain
@@ -53,7 +51,7 @@ interface IOracleTrigger {
     /// @notice Emitted when the mailbox contract address is updated
     /// @param newMailbox The new mailbox contract address
     event MailboxUpdated(address indexed newMailbox);
- 
+
     /// @notice Emitted when the metadata contract address is updated
     /// @param newMetadata The new metadata contract address
     event MetadataContractUpdated(address indexed newMetadata);
@@ -66,31 +64,21 @@ interface IOracleTrigger {
     /// @notice Adds a new chain to the configuration
     /// @param chainId The chain ID of the new chain
     /// @param recipientAddress The address of the recipient contract on the new chain
-    function addChain(
-        uint32 chainId,
-        address recipientAddress
-    ) external;
+    function addChain(uint32 chainId, address recipientAddress) external;
 
     /// @notice Updates the recipient address for a specific chain
     /// @param chainId The chain ID of the chain to update
     /// @param recipientAddress The new address of the recipient contract
-    function updateChain(
-        uint32 chainId,
-        address recipientAddress
-    ) external;
+    function updateChain(uint32 chainId, address recipientAddress) external;
 
     /// @notice Retrieves the recipient address for a specific chain
     /// @param _chainId The chain ID of the chain to query
     /// @return The address of the recipient contract on the specified chain
-    function viewChain(
-        uint32 _chainId
-    ) external view returns (address);
+    function viewChain(uint32 _chainId) external view returns (address);
 
     /// @notice Updates the metadata contract address
     /// @param newMetadata The new metadata contract address
-    function updateMetadataContract(
-        address newMetadata
-    ) external;
+    function updateMetadataContract(address newMetadata) external;
 
     /// @notice Dispatches a message to a destination chain
     /// @param _destinationDomain The destination chain ID
@@ -112,9 +100,7 @@ interface IOracleTrigger {
 
     /// @notice Sets the mailbox contract address
     /// @param _mailbox The new mailbox contract address
-    function setMailBox(
-        address _mailbox
-    ) external;
+    function setMailBox(address _mailbox) external;
 
     /// @notice Retrieves lost tokens
     /// @param receiver The address of the receiver
@@ -124,5 +110,3 @@ interface IOracleTrigger {
     /// @return The address of the mailbox contract
     function getMailBox() external view returns (address);
 }
-
-  

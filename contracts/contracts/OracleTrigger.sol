@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity 0.8.29;
 
-import {AccessControlEnumerable} from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import {IMailbox} from "./interfaces/IMailbox.sol";
-import {IOracleTrigger} from "./interfaces/oracle/IOracleTrigger.sol";
-import {TypeCasts} from "./libs/TypeCasts.sol";
- 
+import { AccessControlEnumerable } from "@openzeppelin/contracts/access/AccessControlEnumerable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import { IMailbox } from "./interfaces/IMailbox.sol";
+import { IOracleTrigger } from "./interfaces/oracle/IOracleTrigger.sol";
+import { TypeCasts } from "./libs/TypeCasts.sol";
+
 interface IDIAOracleV2 {
     function getValue(
         string memory key
@@ -46,8 +46,7 @@ contract OracleTrigger is
 
     /// @notice Ensures that the given chain is configured.
     modifier validateChain(uint32 _chainId) {
-        if (chains[_chainId] == address(0))
-            revert ChainNotConfigured(_chainId);
+        if (chains[_chainId] == address(0)) revert ChainNotConfigured(_chainId);
         _;
     }
 
@@ -64,7 +63,7 @@ contract OracleTrigger is
         uint32 chainId,
         address recipientAddress
     ) public onlyRole(OWNER_ROLE) validateAddress(recipientAddress) {
-        if (chains[chainId]!= address(0)) {
+        if (chains[chainId] != address(0)) {
             revert ChainAlreadyExists(chainId);
         }
         chains[chainId] = recipientAddress;
@@ -128,7 +127,7 @@ contract OracleTrigger is
 
         address recipient = chains[_destinationDomain];
 
-        bytes32 messageId = IMailbox(mailBox).dispatch{value: msg.value}(
+        bytes32 messageId = IMailbox(mailBox).dispatch{ value: msg.value }(
             _destinationDomain,
             recipient.addressToBytes32(),
             messageBody
@@ -156,7 +155,7 @@ contract OracleTrigger is
 
         bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
 
-        bytes32 messageId = IMailbox(mailBox).dispatch{value: msg.value}(
+        bytes32 messageId = IMailbox(mailBox).dispatch{ value: msg.value }(
             _destinationDomain,
             recipientAddress.addressToBytes32(),
             messageBody
@@ -178,13 +177,15 @@ contract OracleTrigger is
     /**
      * @dev See {IOracleTrigger-retrieveLostTokens}.
      */
-    function retrieveLostTokens(address receiver) external onlyRole(OWNER_ROLE) validateAddress(receiver) {
+    function retrieveLostTokens(
+        address receiver
+    ) external onlyRole(OWNER_ROLE) validateAddress(receiver) {
         uint256 balance = address(this).balance;
         if (balance == 0) revert NoBalanceToWithdraw();
 
-        (bool success, ) = payable(receiver).call{value: balance}("");
+        (bool success, ) = payable(receiver).call{ value: balance }("");
         if (!success) revert AmountTransferFailed();
-        
+
         emit TokensRecovered(receiver, balance);
     }
 
@@ -212,5 +213,5 @@ contract OracleTrigger is
         } catch {
             revert OracleError(key);
         }
-    }    
+    }
 }
