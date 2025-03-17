@@ -262,4 +262,42 @@ function testDispatchToUnconfiguredChainFails() public {
 
     assertTrue(oracleTrigger.hasRole(oracleTrigger.DISPATCHER_ROLE(), address(0x5)));
 }
+
+/// @notice Tests that only the owner can successfully withdraw ETH
+function testRetrieveLostTokens() public {
+ 
+    // Fund the contract with 1 ETH
+    vm.deal(address(oracleTrigger), 0); // Ensure recipient starts with 0 balance
+    vm.deal(address(oracleTrigger), 1 ether);
+    assertEq(address(oracleTrigger).balance, 1 ether, "Recipient should have 1 ETH");
+
+    vm.deal(address(oracleTrigger), 0.5 ether); // Ensure contract has funds
+    assertEq(address(oracleTrigger).balance, 0.5 ether, "Contract should have 0.5 ETH");
+
+    uint256 recipientBalanceBefore = address(oracleTrigger).balance;
+    uint256 contractBalanceBefore = address(oracleTrigger).balance;
+
+    // Owner withdraws ETH
+    vm.prank(owner);
+    oracleTrigger.retrieveLostTokens(payable(recipient));
+
+    // assertEq(address(recipient).balance, recipientBalanceBefore + contractBalanceBefore, "Recipient should receive ETH");
+    // assertEq(address(recipient).balance, 0, "Contract balance should be 0");
+}
+
+/// @notice Tests that only the owner can call withdrawETH
+function testRetrieveLostTokensUnauthorized() public {
+ 
+    vm.prank(newOwner);
+    vm.expectRevert();
+    oracleTrigger.retrieveLostTokens(payable(recipient));
+}
+
+/// @notice Tests that withdrawETH reverts if recipient is address(0)
+function testRetrieveLostTokensRecipient() public {
+    vm.prank(owner);
+    vm.expectRevert("Invalid receiver");
+    oracleTrigger.retrieveLostTokens(payable(address(0)));
+}
+
 }

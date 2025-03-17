@@ -205,7 +205,7 @@ function testRemoveFromWhitelistFail() public {
 }
 
 /// @notice Tests that only the owner can successfully withdraw ETH
-function testWithdrawETH() public {
+function testRetrieveLostTokens() public {
  
     // Fund the contract with 1 ETH
     vm.deal(address(recipient), 0); // Ensure recipient starts with 0 balance
@@ -220,25 +220,25 @@ function testWithdrawETH() public {
 
     // Owner withdraws ETH
     vm.prank(owner);
-    recipient.withdrawETH(payable(recipient));
+    recipient.retrieveLostTokens(payable(recipient));
 
     // assertEq(address(recipient).balance, recipientBalanceBefore + contractBalanceBefore, "Recipient should receive ETH");
     // assertEq(address(recipient).balance, 0, "Contract balance should be 0");
 }
 
 /// @notice Tests that only the owner can call withdrawETH
-function testWithdrawETHUnauthorized() public {
+function testRetrieveLostTokensUnauthorized() public {
  
     vm.prank(nonOwner);
     vm.expectRevert("Ownable: caller is not the owner");
-    recipient.withdrawETH(payable(recipient));
+    recipient.retrieveLostTokens(payable(recipient));
 }
 
 /// @notice Tests that withdrawETH reverts if recipient is address(0)
-function testWithdrawETHInvalidRecipient() public {
+function testRetrieveLostTokensRecipient() public {
     vm.prank(owner);
-    vm.expectRevert("Invalid recipient");
-    recipient.withdrawETH(payable(address(0)));
+    vm.expectRevert("Invalid receiver");
+    recipient.retrieveLostTokens(payable(address(0)));
 }
 
    

@@ -29,10 +29,6 @@ contract OracleRequestRecipient is
     /// @notice Address of the whitelisted RequestOracle
     mapping(uint32 => mapping(bytes32 => bool)) public whitelistedSenders;
 
-
-
-
-
     /// @notice Address of the Oracle Trigger contract
     address private oracleTriggerAddress;
 
@@ -41,12 +37,34 @@ contract OracleRequestRecipient is
     /// @param key The decoded key from the request data
     event ReceivedCall(address indexed caller, string key);
 
+    /// @notice Emitted when a sender's whitelist status is updated
+    /// @param origin The source chain ID
+    /// @param sender The sender's address in bytes32 format
+    /// @param status The new whitelist status (true for whitelisted, false otherwise)
+    event WhitelistUpdated(
+        uint32 indexed origin,
+        bytes32 indexed sender,
+        bool status
+    );
 
-    event WhitelistUpdated(uint32 indexed origin, bytes32 indexed sender, bool status);
+    /// @notice Emitted when the Oracle Trigger contract address is updated
+    /// @param oldAddress Previous Oracle Trigger contract address
+    /// @param newAddress New Oracle Trigger contract address
+    event OracleTriggerUpdated(
+        address indexed oldAddress,
+        address indexed newAddress
+    );
 
-    event OracleTriggerUpdated(address indexed oldAddress, address indexed newAddress);
+    /// @notice Emitted when the interchain security module (ISM) address is updated
+    /// @param previousISM Previous ISM contract address
+    /// @param newISM New ISM contract address
+    event InterchainSecurityModuleUpdated(
+        address indexed previousISM,
+        address indexed newISM
+    );
 
-    event InterchainSecurityModuleUpdated(address indexed previousISM, address indexed newISM);
+    event TokensRecovered(address indexed recipient, uint256 amount);
+
 
     /**
      * @notice Handles incoming oracle requests from the interchain network.
@@ -65,11 +83,13 @@ contract OracleRequestRecipient is
             oracleTriggerAddress != address(0),
             "Oracle trigger address not set"
         );
-        require(whitelistedSenders[_origin][_sender], "Sender not whitelisted for this origin");
+        require(
+            whitelistedSenders[_origin][_sender],
+            "Sender not whitelisted for this origin"
+        );
 
         address sender = address(uint160(uint256(_sender)));
 
- 
         require(
             msg.sender == IOracleTrigger(oracleTriggerAddress).getMailBox(),
             "Unauthorized caller"
@@ -79,26 +99,46 @@ contract OracleRequestRecipient is
 
         emit ReceivedCall(sender, key);
 
-         IOracleTrigger(oracleTriggerAddress).dispatch{value: msg.value}(_origin, sender, key);
-
+        IOracleTrigger(oracleTriggerAddress).dispatch{value: msg.value}(
+            _origin,
+            sender,
+            key
+        );
     }
 
+     /**
+     * @notice Adds a sender to the whitelist for a given origin chain.
+     * @dev Only callable by the contract owner.
+     * @param _origin The source chain ID
+     * @param _sender The sender address in bytes32 format
+     */
 
-     function addToWhitelist(uint32 _origin, bytes32 _sender) onlyOwner external {
+    function addToWhitelist(
+        uint32 _origin,
+        bytes32 _sender
+    ) external onlyOwner {
         require(_sender != bytes32(0), "Invalid sender address");
         require(!whitelistedSenders[_origin][_sender], "Already whitelisted");
-        
+
         whitelistedSenders[_origin][_sender] = true;
         emit WhitelistUpdated(_origin, _sender, true);
+    }
 
-     }
+     /**
+     * @notice Removes a sender from the whitelist for a given origin chain.
+     * @dev Only callable by the contract owner.
+     * @param _origin The source chain ID
+     * @param _sender The sender address in bytes32 format
+     */
 
-    function removeFromWhitelist(uint32 _origin, bytes32 _sender) onlyOwner external {
+    function removeFromWhitelist(
+        uint32 _origin,
+        bytes32 _sender
+    ) external onlyOwner {
         require(_sender != bytes32(0), "Invalid sender address");
         whitelistedSenders[_origin][_sender] = false;
         emit WhitelistUpdated(_origin, _sender, false);
-
-     }
+    }
 
     /**
      * @notice Sets the interchain security module (ISM) address.
@@ -107,7 +147,10 @@ contract OracleRequestRecipient is
      */
     function setInterchainSecurityModule(address _ism) external onlyOwner {
         require(_ism != address(0), "Invalid ISM address");
-        emit InterchainSecurityModuleUpdated(address(interchainSecurityModule), _ism);
+        emit InterchainSecurityModuleUpdated(
+            address(interchainSecurityModule),
+            _ism
+        );
 
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
@@ -129,18 +172,20 @@ contract OracleRequestRecipient is
     /**
      * @notice Allow ETH transfers to the contract this is to recover funds if something fails in handle.
      */
-    receive() external payable {
-     }
+    receive() external payable {}
 
     /**
-    * @notice Withdraw ETH to reover stuck funds 
+     * @notice Withdraw ETH to reover stuck funds
      */
-    function withdrawETH(address payable recipient) external onlyOwner {
-    require(recipient != address(0), "Invalid recipient");
-     recipient.transfer(address(this).balance);
-    }
+      function retrieveLostTokens(address receiver) external onlyOwner {
+        require(receiver != address(0), "Invalid receiver");
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No balance to withdraw");
 
-    
+        (bool success, ) = payable(receiver).call{value: balance}("");
+        require(success, "transfer failed");
+        emit TokensRecovered(receiver, balance);
+    }
 
     /**
      * @notice Retrieves the current Oracle Trigger contract address.

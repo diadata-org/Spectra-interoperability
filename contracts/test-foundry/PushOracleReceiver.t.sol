@@ -247,4 +247,43 @@ contract PushOracleReceiverTest is Test {
         receiver.handle(destinationDomain, sender, data);
     }
 
+
+    /// @notice Tests that only the owner can successfully withdraw ETH
+function testRetrieveLostTokens() public {
+ 
+    // Fund the contract with 1 ETH
+    vm.deal(address(receiver), 0); // Ensure recipient starts with 0 balance
+    vm.deal(address(receiver), 1 ether);
+    assertEq(address(receiver).balance, 1 ether, "Recipient should have 1 ETH");
+
+    vm.deal(address(receiver), 0.5 ether); // Ensure contract has funds
+    assertEq(address(receiver).balance, 0.5 ether, "Contract should have 0.5 ETH");
+
+    uint256 recipientBalanceBefore = address(receiver).balance;
+    uint256 contractBalanceBefore = address(receiver).balance;
+
+    // Owner withdraws ETH
+    vm.prank(owner);
+    receiver.retrieveLostTokens(payable(owner));
+
+    // assertEq(address(recipient).balance, recipientBalanceBefore + contractBalanceBefore, "Recipient should receive ETH");
+    // assertEq(address(recipient).balance, 0, "Contract balance should be 0");
+}
+
+/// @notice Tests that only the owner can call withdrawETH
+function testRetrieveLostTokensUnauthorized() public {
+ 
+    vm.prank(user);
+    vm.expectRevert("Ownable: caller is not the owner");
+    receiver.retrieveLostTokens(payable(owner));
+}
+
+/// @notice Tests that withdrawETH reverts if recipient is address(0)
+function testRetrieveLostTokensRecipient() public {
+    vm.prank(owner);
+    vm.expectRevert("Invalid receiver");
+    receiver.retrieveLostTokens(payable(address(0)));
+}
+
+
 }

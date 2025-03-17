@@ -46,6 +46,10 @@ contract PushOracleReceiver is
     /// @notice only Message from this mailbox will be handled
     address public trustedMailBox;
 
+
+    event TokensRecovered(address indexed recipient, uint256 amount);
+
+
     /// @notice Error thrown when a zero address is provided where a valid address is required.
     error ZeroAddress();
 
@@ -177,6 +181,19 @@ contract PushOracleReceiver is
         trustedMailBox = _mailbox;
     }
 
+
+ /**
+     * @notice Withdraw ETH to reover stuck funds
+     */
+    function retrieveLostTokens(address receiver) external onlyOwner {
+        require(receiver != address(0), "Invalid receiver");
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No balance to withdraw");
+
+        (bool success, ) = payable(receiver).call{value: balance}("");
+        require(success, "transfer failed");
+        emit TokensRecovered(receiver, balance);
+    }
     receive() external payable {}
 
     fallback() external payable {}

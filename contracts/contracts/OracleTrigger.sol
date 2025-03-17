@@ -44,6 +44,10 @@ error CannotRemoveLastOwner();
 /// @param chainId The chain ID that is already configured.
 error ChainAlreadyExists(uint32 chainId);
 
+
+event TokensRecovered(address indexed recipient, uint256 amount);
+
+
 /// @title OracleTrigger
 /// @notice Reads the latest oracle value from metadata and dispatches it to the desired chain.
 /// @dev Provides access control for managing chains and secure dispatching mechanisms.
@@ -363,9 +367,15 @@ contract OracleTrigger is
     /**
      * @notice Withdraw ETH to recover stuck funds
      */
-    function withdrawETH(address payable recipient) external onlyOwner {
-        require(recipient != address(0), "Invalid recipient");
-        recipient.transfer(address(this).balance);
+     
+      function retrieveLostTokens(address receiver) external onlyOwner {
+        require(receiver != address(0), "Invalid receiver");
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No balance to withdraw");
+
+        (bool success, ) = payable(receiver).call{value: balance}("");
+        require(success, "transfer failed");
+        emit TokensRecovered(receiver, balance);
     }
 
     
