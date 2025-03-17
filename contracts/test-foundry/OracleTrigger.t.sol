@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 import "forge-std/Test.sol";
 import "forge-std/console.sol";
 import "../contracts/OracleTrigger.sol";
-
+import "../contracts/interfaces/oracle/IOracleTrigger.sol";
 contract MockMetadata is IDIAOracleV2 {
     mapping(string => uint128) public values;
     mapping(string => uint128) public timestamps;
@@ -78,7 +78,7 @@ contract OracleTriggerTest is Test {
 
     function testsetMailBoxToZeroAddress() public {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSignature("ZeroAddress()"));
+        vm.expectRevert(abi.encodeWithSelector(IOracleTrigger.InvalidAddress.selector));
         oracleTrigger.setMailBox(address(0x0));
         // assertEq(oracleTrigger.getMailBox(), mailbox);
     }
@@ -317,7 +317,7 @@ contract OracleTriggerTest is Test {
     /// @notice Tests that withdrawETH reverts if recipient is address(0)
     function testRetrieveLostTokensRecipient() public {
         vm.prank(owner);
-        vm.expectRevert("Invalid receiver");
+        vm.expectRevert(abi.encodeWithSelector(IOracleTrigger.InvalidAddress.selector));
         oracleTrigger.retrieveLostTokens(payable(address(0)));
     }
 }

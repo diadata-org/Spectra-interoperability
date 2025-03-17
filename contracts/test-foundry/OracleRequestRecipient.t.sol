@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../contracts/OracleRequestRecipient.sol";
 import "../contracts/RequestOracle.sol";
 
-import "../contracts/interfaces/IOracleTrigger.sol";
+import "../contracts/interfaces/oracle/IOracleTrigger.sol";
 import "../contracts/interfaces/IInterchainSecurityModule.sol";
 
 /**
@@ -73,8 +73,9 @@ contract OracleRequestRecipientTest is Test {
         recipient.setInterchainSecurityModule(mockISM);
     }
 
-      function testFailSetInterchainSecurityModuleNonOwner() public {
+      function test_RevertSetInterchainSecurityModuleNonOwner() public {
         vm.prank(nonOwner);
+        vm.expectRevert("Ownable: caller is not the owner");
         recipient.setInterchainSecurityModule(mockISM);
     }
 
