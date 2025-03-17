@@ -33,39 +33,7 @@ In **RequestBasedOracle**, users initiate an Oracle update request on the destin
 ### 4. **ProtocolFeeHook** (Destination Chain)
 - For RequestBasedOracle, it collects fees upfront.
 - For PushOracle, PushOracleReceiver contract must have sufficient funds to receive updates, and the fees are redirected to PaymentHook at the time of update.
-
-## Workflow
-### **Push-Based Oracle Flow**
-```mermaid
-sequenceDiagram
-    participant Offchain Service
-    participant OracleTrigger
-    participant Hyperlane
-    participant PushOracleReceiver
-
-    Offchain Service->>OracleTrigger: Fetch latest prices
-    OracleTrigger->>Hyperlane: Send updates
-    Hyperlane->>PushOracleReceiver: Deliver updates
-    PushOracleReceiver->>: Process updates
-```
-
-### **Push-Based Oracle Flow**
-
-```mermaid
-graph TD;
-    OffchainService-->OracleTrigger;
-    OracleTrigger-->Hyperlane;
-    Hyperlane-->PushOracleReceiver;
-    PushOracleReceiver-->UpdateStoredValue;
-
-    User/SmartContract->>RequestOracle: Submit request
-    RequestOracle->>Hyperlane: Forward request
-    Hyperlane->>OracleRequestRecipient: Deliver request
-    OracleRequestRecipient->>OracleTrigger: Fetch price
-    OracleTrigger->>Hyperlane2: Send update
-    Hyperlane2->>RequestOracleDest: Deliver update
-    RequestOracleDest->>: Process update
-```
+ 
 
 
 ## Permissions
