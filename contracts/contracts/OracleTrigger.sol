@@ -143,11 +143,7 @@ contract OracleTrigger is
         _;
     }
 
-    /// @notice Ensures that only contract owners can execute the function.
-    modifier onlyOwner() {
-        if (!hasRole(OWNER_ROLE, msg.sender)) revert NotAuthorized(msg.sender);
-        _;
-    }
+    
 
     /// @notice Contract constructor that initializes the contract and assigns the deployer as the first owner.
     constructor() {
@@ -161,7 +157,7 @@ contract OracleTrigger is
     function addChain(
         uint32 chainId,
         address recipientAddress
-    ) public onlyOwner validateAddress(recipientAddress) {
+    ) public onlyRole(OWNER_ROLE) validateAddress(recipientAddress) {
         if (chains[chainId].RecipientAddress != address(0)) {
             revert ChainAlreadyExists(chainId);
         }
@@ -177,7 +173,7 @@ contract OracleTrigger is
         address recipientAddress
     )
         public
-        onlyOwner
+        onlyRole(OWNER_ROLE)
         validateAddress(recipientAddress)
         validateChain(chainId)
     {
@@ -199,7 +195,7 @@ contract OracleTrigger is
     /// @param newMetadata The new metadata contract address.
     function updateMetadataContract(
         address newMetadata
-    ) external onlyOwner validateAddress(newMetadata) {
+    ) external onlyRole(OWNER_ROLE) validateAddress(newMetadata) {
         metadataContract = newMetadata;
         emit MetadataContractUpdated(newMetadata);
     }
@@ -272,7 +268,7 @@ contract OracleTrigger is
      */
     function setMailBox(
         address _mailbox
-    ) external onlyOwner validateAddress(_mailbox) {
+    ) external onlyRole(OWNER_ROLE) validateAddress(_mailbox) {
         mailBox = _mailbox;
         emit MailboxUpdated(_mailbox);
     }
@@ -304,71 +300,12 @@ contract OracleTrigger is
         }
     }
 
-    /**
-     * @notice Adds an owner.
-     */
-    function addOwner(
-        address _newOwner
-    ) external validateAddress(_newOwner) onlyOwner {
-        if (hasRole(OWNER_ROLE, _newOwner)) revert ExistingAdmin(_newOwner);
-        _grantRole(DEFAULT_ADMIN_ROLE, _newOwner);
-        _grantRole(OWNER_ROLE, _newOwner);
-        emit OwnerAdded(_newOwner, msg.sender, block.timestamp);
-    }
-
-    /**
-     * @notice Removes an owner but ensures at least one remains.
-     */
-    function removeOwner(
-        address _owner
-    ) external validateAddress(_owner) onlyOwner {
-        if (getRoleMemberCount(OWNER_ROLE) <= 1) revert CannotRemoveLastOwner();
-        revokeRole(OWNER_ROLE, _owner);
-        revokeRole(DEFAULT_ADMIN_ROLE, _owner);
-
-        emit OwnerRemoved(_owner, msg.sender, block.timestamp);
-    }
-
-    /**
-     * @notice Checks if an address is an owner.
-     */
-    function isOwner(address _account) external view returns (bool) {
-        return hasRole(OWNER_ROLE, _account);
-    }
-
-    /**
-     * @notice Returns a list of all owners.
-     */
-    function getOwners() external view returns (address[] memory) {
-        uint256 ownerCount = getRoleMemberCount(OWNER_ROLE);
-        address[] memory owners = new address[](ownerCount);
-
-        for (uint256 i = 0; i < ownerCount; i++) {
-            owners[i] = getRoleMember(OWNER_ROLE, i);
-        }
-
-        return owners;
-    }
-
-    /**
-     * @notice Add Dispatcher address.
-     */
-    function addDispatcher(address _dispatcher) external onlyOwner {
-        grantRole(DISPATCHER_ROLE, _dispatcher);
-    }
-
-    /**
-     * @notice Remove Dispatcher address.
-     */
-    function removeDispatcher(address _dispatcher) external onlyOwner {
-        revokeRole(DISPATCHER_ROLE, _dispatcher);
-    }
 
     /**
      * @notice Withdraw ETH to recover stuck funds
      */
      
-      function retrieveLostTokens(address receiver) external onlyOwner {
+      function retrieveLostTokens(address receiver) external onlyRole(OWNER_ROLE) {
         require(receiver != address(0), "Invalid receiver");
         uint256 balance = address(this).balance;
         require(balance > 0, "No balance to withdraw");
