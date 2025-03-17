@@ -46,12 +46,12 @@ sequenceDiagram
     Offchain Service->>OracleTrigger: Fetch latest prices
     OracleTrigger->>Hyperlane: Send updates
     Hyperlane->>PushOracleReceiver: Deliver updates
-    PushOracleReceiver-->>: Process updates
+    PushOracleReceiver->>: Process updates
 ```
 
 ### **Push-Based Oracle Flow**
 
-```
+```mermaid
 sequenceDiagram
     participant User/SmartContract
     participant RequestOracle
@@ -67,7 +67,7 @@ sequenceDiagram
     OracleRequestRecipient->>OracleTrigger: Fetch price
     OracleTrigger->>Hyperlane2: Send update
     Hyperlane2->>RequestOracleDest: Deliver update
-    RequestOracleDest-->>: Process update
+    RequestOracleDest->>: Process update
 ```
 
 
