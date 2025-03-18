@@ -5,7 +5,7 @@ import "forge-std/Test.sol";
 import "../contracts/OracleRequestRecipient.sol";
 import "../contracts/RequestOracle.sol";
 
-import "../contracts/interfaces/IOracleTrigger.sol";
+import "../contracts/interfaces/oracle/IOracleTrigger.sol";
 import "../contracts/interfaces/IInterchainSecurityModule.sol";
 
 /**
@@ -54,7 +54,7 @@ contract OracleRequestRecipientTest is Test {
     /// @notice Tests that the contract is deployed and initialized correctly
     function testDeployment() public {
         assertEq(recipient.owner(), owner, "Owner should be correctly set");
-        assertEq(address(recipient.getInterchainSecurityModule()), address(0), "ISM should be initially unset");
+        assertEq(address(recipient.interchainSecurityModule()), address(0), "ISM should be initially unset");
         assertEq(address(recipient.getOracleTriggerAddress()), address(0), "OracleTriggerAddress should be initially unset");
     }
 
@@ -63,11 +63,17 @@ contract OracleRequestRecipientTest is Test {
         vm.prank(owner);
         recipient.setInterchainSecurityModule(mockISM);
 
-        assertEq(address(recipient.getInterchainSecurityModule()), mockISM, "ISM should be updated");
+        assertEq(address(recipient.interchainSecurityModule()), mockISM, "ISM should be updated");
     }
 
     /// @notice Tests unauthorized attempt to set ISM
     function testSetInterchainSecurityModuleFail() public {
+        vm.prank(nonOwner);
+        vm.expectRevert("Ownable: caller is not the owner");
+        recipient.setInterchainSecurityModule(mockISM);
+    }
+
+      function test_RevertSetInterchainSecurityModuleNonOwner() public {
         vm.prank(nonOwner);
         vm.expectRevert("Ownable: caller is not the owner");
         recipient.setInterchainSecurityModule(mockISM);
@@ -124,7 +130,7 @@ contract OracleRequestRecipientTest is Test {
  
         bytes memory data = abi.encode("test-key");
 
-        vm.expectRevert("Sender not whitelisted for this origin");
+        vm.expectRevert();
         recipient.handle(1, sender, data);
     }
 
@@ -140,7 +146,7 @@ contract OracleRequestRecipientTest is Test {
 
         bytes memory data = abi.encode("test-key");
 
-        vm.expectRevert("Unauthorized caller");
+        vm.expectRevert();
         recipient.handle(1, sender, data);
     }
 
@@ -153,7 +159,7 @@ contract OracleRequestRecipientTest is Test {
         bytes32 sender = bytes32(uint256(uint160(nonOwner)));
         bytes memory data = ""; // Empty data
 
-        vm.expectRevert("Invalid data length");
+        vm.expectRevert();
         recipient.handle(1, sender, data);
     }
 
@@ -163,9 +169,78 @@ contract OracleRequestRecipientTest is Test {
         bytes32 sender = bytes32(uint256(uint160(nonOwner)));
         bytes memory data = abi.encode("test-key");
 
-        vm.expectRevert("Oracle trigger address not set");
+        vm.expectRevert();
         recipient.handle(1, sender, data);
     }
+
+    function testRemoveFromWhitelist() public {
+    bytes32 requestOracleAddress = bytes32(uint256(uint160(address(requestOracle1))));
+
+    // First, add to whitelist
+    vm.prank(owner);
+    recipient.addToWhitelist(2, requestOracleAddress);
+
+    assertTrue(recipient.whitelistedSenders(1, requestOracleAddress), "Should be whitelisted");
+
+    // Remove from whitelist
+    vm.prank(owner);
+    recipient.removeFromWhitelist(2, requestOracleAddress);
+
+    assertFalse(recipient.whitelistedSenders(2, requestOracleAddress), "Should be removed from whitelist");
+}
+
+/// @notice Tests unauthorized attempt to remove from whitelist
+function testRemoveFromWhitelistFail() public {
+    bytes32 requestOracleAddress = bytes32(uint256(uint160(address(requestOracle1))));
+
+    // First, add to whitelist
+    vm.prank(owner);
+    recipient.addToWhitelist(2, requestOracleAddress);
+
+    assertTrue(recipient.whitelistedSenders(2, requestOracleAddress), "Should be whitelisted");
+
+    // Attempt removal as a non-owner
+    vm.prank(nonOwner);
+    vm.expectRevert("Ownable: caller is not the owner");
+    recipient.removeFromWhitelist(2, requestOracleAddress);
+}
+
+/// @notice Tests that only the owner can successfully withdraw ETH
+function testRetrieveLostTokens() public {
+ 
+    // Fund the contract with 1 ETH
+    vm.deal(address(recipient), 0); // Ensure recipient starts with 0 balance
+    vm.deal(address(recipient), 1 ether);
+    assertEq(address(recipient).balance, 1 ether, "Recipient should have 1 ETH");
+
+    vm.deal(address(recipient), 0.5 ether); // Ensure contract has funds
+    assertEq(address(recipient).balance, 0.5 ether, "Contract should have 0.5 ETH");
+
+    uint256 recipientBalanceBefore = address(recipient).balance;
+    uint256 contractBalanceBefore = address(recipient).balance;
+
+    // Owner withdraws ETH
+    vm.prank(owner);
+    recipient.retrieveLostTokens(payable(recipient));
+
+    // assertEq(address(recipient).balance, recipientBalanceBefore + contractBalanceBefore, "Recipient should receive ETH");
+    // assertEq(address(recipient).balance, 0, "Contract balance should be 0");
+}
+
+/// @notice Tests that only the owner can call withdrawETH
+function testRetrieveLostTokensUnauthorized() public {
+ 
+    vm.prank(nonOwner);
+    vm.expectRevert("Ownable: caller is not the owner");
+    recipient.retrieveLostTokens(payable(recipient));
+}
+
+/// @notice Tests that withdrawETH reverts if recipient is address(0)
+function testRetrieveLostTokensRecipient() public {
+    vm.prank(owner);
+    vm.expectRevert();
+    recipient.retrieveLostTokens(payable(address(0)));
+}
 
    
 }

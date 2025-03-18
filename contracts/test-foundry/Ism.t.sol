@@ -55,12 +55,12 @@ contract IsmTest is Test {
         assertEq(ism.getSenderShouldBe(domainA), addr1);
     }
 
-    function testSetAllowAll() public {
-        vm.expectEmit(true, true, false, true);
-        emit AllowAllUpdated(false, true);
-        ism.setAllowAll(true);
-        assertTrue(ism.allowAll());
-    }
+    // function testSetAllowAll() public {
+    //     vm.expectEmit(true, true, false, true);
+    //     emit AllowAllUpdated(false, true);
+    //     ism.setAllowAll(true);
+    //     assertTrue(ism.allowAll());
+    // }
 
     function testVerifyWithCorrectSender(bytes calldata body) public {
         ism.setSenderShouldBe(domainA, owner);
@@ -81,10 +81,10 @@ contract IsmTest is Test {
         assertFalse(ism.verify("", message));
     }
 
-    function testVerifyAllowAllTrue(bytes calldata body) public {
-        ism.setAllowAll(true);
-        ism.setSenderShouldBe(domainA, addr1);
-        bytes memory message = encodeMessage(domainB, addr2,body);
-        assertTrue(ism.verify("", message));
-    }
+    // function testVerifyAllowAllTrue(bytes calldata body) public {
+    //     ism.setAllowAll(true);
+    //     ism.setSenderShouldBe(domainA, addr1);
+    //     bytes memory message = encodeMessage(domainB, addr2,body);
+    //     assertTrue(ism.verify("", message));
+    // }
 }

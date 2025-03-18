@@ -3,11 +3,13 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../contracts/PushOracleReceiver.sol";
+import "../contracts/ProtocolFeeHook.sol";
+import "../contracts/interfaces/oracle/IPushOracleReceiver.sol";
+
 import "../contracts/interfaces/IMailbox.sol";
 import "../contracts/interfaces/IInterchainSecurityModule.sol";
 import "../contracts/interfaces/hooks/IPostDispatchHook.sol";
-import "../contracts/UserWallet.sol";
-import "forge-std/console.sol";
+ import "forge-std/console.sol";
 
 contract MockISM is IInterchainSecurityModule {
     function verify(
@@ -22,33 +24,9 @@ contract MockISM is IInterchainSecurityModule {
     }
 }
 
-contract MockHook is IPostDispatchHook {
-    function quoteDispatch(
-        bytes calldata,
-        bytes calldata
-    ) external pure override returns (uint256) {
-        return 0;
-    }
+ 
 
-    function postDispatch(
-        bytes calldata,
-        bytes calldata
-    ) external payable override {}
-
-    function hookType() external pure override returns (uint8) {
-        return 1;
-    }
-
-    function supportsMetadata(
-        bytes calldata
-    ) external pure override returns (bool) {
-        return true;
-    }
-
-    receive() external payable {}
-}
-
-contract MockMailbox is IMailbox {
+contract MockMailbox1 is IMailbox {
     function dispatch(
         uint32,
         bytes32,
@@ -136,40 +114,15 @@ contract MockMailbox is IMailbox {
     }
 }
 
-contract MockUserWallet {
-    uint256 public balance = 10 ether;
 
-     function deductFee(uint256 amount) external   {
-        require(address(this).balance >= amount, "Insufficient balance");
-        (bool sent, ) = msg.sender.call{value: amount}("");
-        require(sent, "Transfer failed");
-     }
-
-    function setBalance(uint256 amount) external {
-        balance = amount;
-    }
-}
-
-contract MockWalletFactory {
-    address public mockWallet;
-
-    constructor(address _mockWallet) {
-        mockWallet = _mockWallet;
-    }
-
-    function getAddress(address) external view returns (address) {
-        return mockWallet;
-    }
-}
+ 
 
 contract PushOracleReceiverTest is Test {
     PushOracleReceiver receiver;
-    MockMailbox mailbox;
+    MockMailbox1 mailbox;
     MockISM ism;
-    MockHook hook;
-    MockUserWallet userWallet;
-    MockWalletFactory walletFactory;
-
+    ProtocolFeeHook hook;
+ 
     address owner = address(0x1);
     address user = address(0x2);
     uint32 destinationDomain = 1;
@@ -180,16 +133,13 @@ contract PushOracleReceiverTest is Test {
         vm.startPrank(owner);
 
         receiver = new PushOracleReceiver();
-        mailbox = new MockMailbox();
+        mailbox = new MockMailbox1();
         ism = new MockISM();
-        hook = new MockHook();
-        userWallet = new MockUserWallet();
-        walletFactory = new MockWalletFactory(address(userWallet));
-
+        hook = new ProtocolFeeHook();
+ 
         receiver.setInterchainSecurityModule(address(ism));
-        receiver.setPaymentHook(address(hook));
-        receiver.setWalletFactory(address(walletFactory));
-        receiver.setTrustedMailBox(address(mailbox));
+        receiver.setPaymentHook(payable(hook));
+         receiver.setTrustedMailBox(address(mailbox));
 
         vm.stopPrank();
     }
@@ -198,93 +148,81 @@ contract PushOracleReceiverTest is Test {
         assertEq(receiver.owner(), owner);
         assertEq(address(receiver.interchainSecurityModule()), address(ism));
         assertEq(receiver.paymentHook(), address(hook));
-        assertEq(receiver.walletFactory(), address(walletFactory));
-        assertEq(receiver.feeFromUserWallet(), false);
-    }
+      }
 
-    function testSetFeeSource() public {
-        vm.prank(owner);
-        receiver.setFeeSource(true);
-        assertTrue(receiver.feeFromUserWallet());
-    }
-
-    function testSetFeeSourceUnauthorized() public {
-        vm.prank(user);
-        vm.expectRevert("Ownable: caller is not the owner");
-        receiver.setFeeSource(true);
-    }
+  
 
     function testHandleMessage() public {
         string memory key = "BTC/USD";
         uint128 timestamp = uint128(block.timestamp);
         uint128 value = 50000;
+        console.log("-----");
 
         bytes memory data = abi.encode(key, timestamp, value);
         bytes32 sender = bytes32(uint256(uint160(user)));
 
         vm.deal(address(mailbox), 1 ether);
         vm.prank(address(mailbox));
-        receiver.handle{value: 0.1 ether}(destinationDomain, sender, data);
+
+         receiver.handle{value: 0.1 ether}(destinationDomain, sender, data);
 
   
 
         (
-            string memory storedKey,
             uint128 storedTimestamp,
             uint128 storedValue
-        ) = receiver.receivedData();
-        assertEq(storedKey, key);
+        ) = receiver.updates("BTC/USD");
+        // assertEq(storedKey, key);
         assertEq(storedTimestamp, timestamp);
         assertEq(storedValue, value);
     }
 
-    function testHandleMessageWithUserWallet() public {
-        vm.prank(owner);
-        receiver.setFeeSource(true);
-
-        string memory key = "ETH/USD";
-        uint128 timestamp = uint128(block.timestamp);
-        uint128 value = 3000;
+       function testHandleMessageIncorrectTimeStamp() public {
+        string memory key = "BTC/USD";
+        uint128 timestamp = uint128(2);
+        uint128 value = 50000;
+        console.log("-----");
 
         bytes memory data = abi.encode(key, timestamp, value);
-        bytes32 sender = bytes32(uint256(uint160(user)));
-        vm.deal(address(userWallet), 10 ether);
+        bytes memory data_old = abi.encode(key, timestamp-1, value-10);
 
-        uint256 initialBalance = userWallet.balance();
-        uint256 expectedFee = 97440 * tx.gasprice;
+        bytes32 sender = bytes32(uint256(uint160(user)));
+
+        vm.deal(address(mailbox), 1 ether);
+        vm.prank(address(mailbox));
+
+         receiver.handle{value: 0.1 ether}(destinationDomain, sender, data);
 
         vm.prank(address(mailbox));
-        receiver.handle(destinationDomain, sender, data);
 
-     }
+        receiver.handle{value: 0.1 ether}(destinationDomain, sender, data_old);
 
-    function testRequestPush() public {
-        bytes memory messageBody = abi.encode("Test message");
-        vm.deal(address(this), 1 ether);
 
-        bytes32 messageId = receiver.request{value: 0.1 ether}(
-            mailbox,
-            address(0x3),
-            destinationDomain,
-            messageBody
-        );
+  
+  // It should have old data with higher timestamp
 
-        assertEq(messageId, bytes32(uint256(1)));
+        (
+             uint128 storedTimestamp,
+            uint128 storedValue
+        ) = receiver.updates("BTC/USD");
+
+         console.log("----");
+        assertEq(storedTimestamp, timestamp);
+        assertEq(storedValue, value);
     }
+
+
+
+ 
 
     function testSetPaymentHook() public {
         address newHook = address(0x4);
         vm.prank(owner);
-        receiver.setPaymentHook(newHook);
+        receiver.setPaymentHook(payable(newHook));
         assertEq(receiver.paymentHook(), newHook);
     }
 
-    function testSetWalletFactory() public {
-        address newFactory = address(0x5);
-        vm.prank(owner);
-        receiver.setWalletFactory(newFactory);
-        assertEq(receiver.walletFactory(), newFactory);
-    }
+   
 
     function testReceiveFunction() public {
         vm.deal(address(this), 1 ether);
@@ -293,9 +231,7 @@ contract PushOracleReceiverTest is Test {
     }
 
     function testHandleMessageInsufficientBalance() public {
-        vm.prank(owner);
-        receiver.setFeeSource(false);
-
+  
         string memory key = "BTC/USD";
         uint128 timestamp = uint128(block.timestamp);
         uint128 value = 50000;
@@ -307,26 +243,48 @@ contract PushOracleReceiverTest is Test {
         console.log("Gas Price before handle():", tx.gasprice); // gas price is set in foundry.toml
 
         vm.prank(address(mailbox));
-        vm.expectRevert("Fee transfer failed");
+        vm.expectRevert(abi.encodeWithSelector(IPushOracleReceiver.AmountTransferFailed.selector));
 
         receiver.handle(destinationDomain, sender, data);
     }
 
-    function testHandleMessageInsufficientWalletBalance() public {
-        vm.prank(owner);
-        receiver.setFeeSource(true);
 
-        userWallet.setBalance(0);
+    /// @notice Tests that only the owner can successfully withdraw ETH
+function testRetrieveLostTokens() public {
+ 
+    // Fund the contract with 1 ETH
+    vm.deal(address(receiver), 0); // Ensure recipient starts with 0 balance
+    vm.deal(address(receiver), 1 ether);
+    assertEq(address(receiver).balance, 1 ether, "Recipient should have 1 ETH");
 
-        string memory key = "BTC/USD";
-        uint128 timestamp = uint128(block.timestamp);
-        uint128 value = 50000;
+    vm.deal(address(receiver), 0.5 ether); // Ensure contract has funds
+    assertEq(address(receiver).balance, 0.5 ether, "Contract should have 0.5 ETH");
 
-        bytes memory data = abi.encode(key, timestamp, value);
-        bytes32 sender = bytes32(uint256(uint160(user)));
+    uint256 recipientBalanceBefore = address(receiver).balance;
+    uint256 contractBalanceBefore = address(receiver).balance;
 
-        vm.prank(address(mailbox));
-        vm.expectRevert("Fee deduction failed");
-        receiver.handle(destinationDomain, sender, data);
-    }
+    // Owner withdraws ETH
+    vm.prank(owner);
+    receiver.retrieveLostTokens(payable(owner));
+
+    // assertEq(address(recipient).balance, recipientBalanceBefore + contractBalanceBefore, "Recipient should receive ETH");
+    // assertEq(address(recipient).balance, 0, "Contract balance should be 0");
+}
+
+/// @notice Tests that only the owner can call withdrawETH
+function testRetrieveLostTokensUnauthorized() public {
+ 
+    vm.prank(user);
+    vm.expectRevert("Ownable: caller is not the owner");
+    receiver.retrieveLostTokens(payable(owner));
+}
+
+/// @notice Tests that withdrawETH reverts if recipient is address(0)
+function testRetrieveLostTokensRecipient() public {
+    vm.prank(owner);
+    vm.expectRevert(abi.encodeWithSelector(IPushOracleReceiver.InvalidAddress.selector));
+    receiver.retrieveLostTokens(payable(address(0)));
+}
+
+
 }

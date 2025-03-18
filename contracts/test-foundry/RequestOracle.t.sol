@@ -101,12 +101,18 @@ contract RequestOracleTest is Test {
         requestOracle.setInterchainSecurityModule(
             address(interchainSecurityModule)
         );
-                vm.prank(owner);
+        vm.prank(owner);
 
         requestOracle.setTrustedMailBox(address(mailbox));
 
         vm.prank(owner);
         requestOracle.setPaymentHook(address(paymentHook));
+    }
+
+    function testSetTrustedMailBoxUnauthorized() public {
+        address newMailBox = address(0x999);
+        vm.expectRevert("Ownable: caller is not the owner");
+        requestOracle.setTrustedMailBox(newMailBox);
     }
 
     function testDeployment() public {
@@ -118,11 +124,9 @@ contract RequestOracleTest is Test {
     }
 
     function testRequestOracle() public {
-  
         vm.prank(owner);
         vm.deal(owner, 10 ether); // Give owner some ETH
 
- 
         bytes32 messageId = requestOracle.request{value: 5 ether}(
             mailbox,
             receiver,
@@ -136,7 +140,6 @@ contract RequestOracleTest is Test {
     function testHandleMessage() public {
         bytes32 sender = receiver.addressToBytes32();
 
-
         vm.prank(address(mailbox));
         requestOracle.handle(destinationDomain, sender, sampleMessage);
 
@@ -146,13 +149,11 @@ contract RequestOracleTest is Test {
         );
 
         (
-            string memory storedKey,
-            uint128 storedTimestamp,
+             uint128 storedTimestamp,
             uint128 storedValue
         ) = requestOracle.updates(key);
 
-        assertEq(storedKey, key);
-        assertEq(storedTimestamp, timestamp);
+         assertEq(storedTimestamp, timestamp);
         assertEq(storedValue, value);
     }
 
@@ -182,4 +183,47 @@ contract RequestOracleTest is Test {
         (bool sent, ) = address(requestOracle).call{value: 1 ether}("");
         assertTrue(sent);
     }
+
+    function testHandleUnauthorized() public {
+        bytes32 sender = receiver.addressToBytes32();
+        vm.expectRevert();
+        requestOracle.handle(destinationDomain, sender, sampleMessage);
+    }
+
+    function testPauseContract() public {
+        vm.prank(owner);
+        requestOracle.pauseContract();
+
+        assertTrue(requestOracle.paused());
+
+        vm.expectRevert("Pausable: paused");
+        requestOracle.request(
+            mailbox,
+            receiver,
+            destinationDomain,
+            sampleMessage
+        );
+    }
+    function testUnpauseContract() public {
+    vm.prank(owner);
+    requestOracle.pauseContract();
+    assertTrue(requestOracle.paused(), "Contract should be paused");
+
+    vm.prank(owner);
+    requestOracle.unpauseContract();
+    assertFalse(requestOracle.paused(), "Contract should be unpaused");
+
+    // Ensure that `request` function works after unpausing
+    vm.prank(owner);
+    vm.deal(owner, 10 ether);
+    
+    bytes32 messageId = requestOracle.request{value: 5 ether}(
+        mailbox,
+        receiver,
+        destinationDomain,
+        sampleMessage
+    );
+
+    assertTrue(messageId != bytes32(0), "Request should succeed after unpausing");
+}
 }

@@ -1,181 +1,141 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+// SPDX-License-Identifier: GPL-3.0
+pragma solidity 0.8.29;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-import {IMessageRecipient} from "./interfaces/IMessageRecipient.sol";
-import {IInterchainSecurityModule, ISpecifiesInterchainSecurityModule} from "./interfaces/IInterchainSecurityModule.sol";
-import {IMailbox} from "./interfaces/IMailbox.sol";
-import {IPostDispatchHook} from "./interfaces/hooks/IPostDispatchHook.sol";
-import {TypeCasts} from "./libs/TypeCasts.sol";
-import "./UserWallet.sol";
- 
-using TypeCasts for address;
-
-interface IUserWalletFactory {
-    function getAddress(address owner) external view returns (address);
-}
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IPushOracleReceiver } from "./interfaces/oracle/IPushOracleReceiver.sol";
+import { IInterchainSecurityModule } from "./interfaces/IInterchainSecurityModule.sol";
+import { ProtocolFeeHook } from "./ProtocolFeeHook.sol";
+import { TypeCasts } from "./libs/TypeCasts.sol";
 
 /**
  * @title PushOracleReceiver
- * @notice Handles incoming oracle data updates.Whitelisted in Hyperlane
+ * @notice Handles incoming oracle data updates and ensures security via Hyperlane.
+ * @dev Implements IMessageRecipient and ISpecifiesInterchainSecurityModule.
+ *
+ * ## Data Flow:
+ * - Go Feeder Service → OracleTrigger (reads price from metadata) → Hyperlane → PushOracleReceiver
+ *
+ * This contract receives and processes oracle updates from the DIA chain.
+ *
+ * ## Funding Mechanism:
+ * - The contract should hold enough balance to cover transaction fees for updates.
+ * - Each update requires two transactions: one on the DIA chain and another on the chain where PushOracleReceiver is deployed (Destination).
+ * - The contract deducts the fee for each  Destination transaction and transfers it to the ProtocolFeeHook.
+ *
+ * ## Security Constraints:
+ * - PushOracleReceiver processes messages only from the trusted mailbox.
+ * - The oracle trigger address must be whitelisted in the ISM (Interchain Security Module) of PushOracleReceiver.
  */
-contract PushOracleReceiver is
-    Ownable,
-    IMessageRecipient,
-    ISpecifiesInterchainSecurityModule
-{
-    /// @notice Reference to the interchain security module.
+contract PushOracleReceiver is IPushOracleReceiver, Ownable {
+    using TypeCasts for address;
+
+    /// @notice Reference to the interchain security module
     IInterchainSecurityModule public interchainSecurityModule;
 
-    /// @notice Address for the post-dispatch payment hook.
-    address public paymentHook;
-
-    bool public feeFromUserWallet;
-    address public walletFactory;
+    /// @notice Address for the post-dispatch payment hook
+    address payable public paymentHook;
 
     /// @notice only Message from this mailbox will be handled
     address public trustedMailBox;
 
-    /**
-     * @notice Structure representing an oracle data update.
-     * @param key The identifier for the data.
-     * @param timestamp The timestamp when the data was recorded.
-     * @param value The numerical value associated with the key.
-     */
-    struct Data {
-        string key;
-        uint128 timestamp;
-        uint128 value;
-    }
-
-    uint256 public gasUsedPerTx = 97440; // Default gas used
-
-    /// @notice The most recent oracle data received.
-    Data public receivedData;
-
-    /// @notice Mapping of oracle data updates by key.
+    /// @notice Mapping of oracle data updates by key
     mapping(string => Data) public updates;
 
-    /// @notice Emitted when a new oracle data message is received.
-    event ReceivedMessage(string key, uint128 timestamp, uint128 value);
-
-    /// @notice Emitted when a call is received (currently unused).
-    event ReceivedCall(address indexed caller, uint256 amount, string message);
-
-    function setFeeSource(bool _feeFromUserWallet) external onlyOwner {
-        feeFromUserWallet = _feeFromUserWallet;
+    /// @notice Ensures that the provided address is not a zero address
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert InvalidAddress();
+        _;
     }
 
     /**
-     * @notice Dispatches an interchain message via the provided mailbox.
-     * @param _mailbox The mailbox contract used to dispatch the message.
-     * @param receiver The address of the message recipient.
-     * @param _destinationDomain The destination domain identifier.
-     * @param _messageBody The body of the message.
-     * @return messageId The unique identifier of the dispatched message.
+     * @dev See {IPushOracleReceiver-handle}.
      */
-    function request(
-        IMailbox _mailbox,
-        address receiver,
-        uint32 _destinationDomain,
-        bytes calldata _messageBody
-    ) external payable returns (bytes32 messageId) {
-        IPostDispatchHook hook = IPostDispatchHook(paymentHook);
-        return
-            _mailbox.dispatch{value: msg.value}(
-                _destinationDomain,
-                receiver.addressToBytes32(),
-                _messageBody,
-                "", // No additional data
-                hook
-            );
-    }
-
-    function setTrustedMailBox(address _mailbox) external onlyOwner {
-        trustedMailBox = _mailbox;
-    }
-
-    /**
-     * @notice Handles incoming interchain messages by decoding the payload and updating state.
-     * @param _origin The origin domain identifier.
-     * @param _sender The sender's address (in bytes32 format).
-     * @param _data The encoded payload containing the oracle data.
-     */
+    /* solhint-disable no-unused-vars */
     function handle(
         uint32 _origin,
         bytes32 _sender,
         bytes calldata _data
-    ) external payable override {
-        require(msg.sender == trustedMailBox, "Unauthorized Mailbox");
+    ) external payable override validateAddress(paymentHook) {
+        if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
+
         // Decode the incoming data into its respective components.
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
             (string, uint128, uint128)
         );
 
-        // Update the stored oracle data.
-        Data memory newData = Data({
-            key: key,
-            timestamp: timestamp,
-            value: value
-        });
-        receivedData = newData;
+        // Ensure the new timestamp is more recent
+        if (updates[key].timestamp >= timestamp) {
+            return; // Ignore outdated data
+        }
+
+        // Update the stored oracle data
+        Data memory newData = Data({ timestamp: timestamp, value: value });
         updates[key] = newData;
 
         emit ReceivedMessage(key, timestamp, value);
 
+        // Calculate the transaction fee based on gas used and gas price.
         uint256 gasPrice = tx.gasprice;
-        uint256 fee = gasUsedPerTx * gasPrice;
+        uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
+            gasPrice;
 
-        // console.log("feeFromUserWallet", feeFromUserWallet);
-        // console.log("gasPrice", gasPrice);
-
-        if (feeFromUserWallet) {
-            address userWallet = IUserWalletFactory(walletFactory).getAddress(
-                address(uint160(uint256(_sender)))
-            );
-
-            try UserWallet(payable(userWallet)).deductFee(fee) {} catch {
-                revert("Fee deduction failed");
-            }
-        }
-
-        // Send the fee to the payment hook
-
+        // Transfer the fee to the payment hook.
         bool success;
         {
-            (success, ) = paymentHook.call{value: fee}("");
+            (success, ) = paymentHook.call{ value: fee }("");
         }
-        // console.log("address success", success);
 
-        require(success, "Fee transfer failed");
+        if (!success) revert AmountTransferFailed();
     }
+    /* solhint-disable no-unused-vars */
 
     /**
-     * @notice Sets Gas used by update tx.
-     * @param _gasUsedPerTx Gas Used.
+     * @dev See {IPushOracleReceiver-setInterchainSecurityModule}.
      */
-    function setGasUsedPerTx(uint256 _gasUsedPerTx) external onlyOwner {
-        gasUsedPerTx = _gasUsedPerTx;
-    }
-
-    /**
-     * @notice Sets the interchain security module.
-     * @param _ism The address of the interchain security module.
-     */
-    function setInterchainSecurityModule(address _ism) external onlyOwner {
+    function setInterchainSecurityModule(
+        address _ism
+    ) external onlyOwner validateAddress(_ism) {
+        emit InterchainSecurityModuleUpdated(
+            address(interchainSecurityModule),
+            _ism
+        );
         interchainSecurityModule = IInterchainSecurityModule(_ism);
     }
 
-    function setPaymentHook(address _paymentHook) external onlyOwner {
+    /**
+     * @dev See {IPushOracleReceiver-setPaymentHook}.
+     */
+    function setPaymentHook(
+        address payable _paymentHook
+    ) external onlyOwner validateAddress(_paymentHook) {
+        emit PaymentHookUpdated(paymentHook, _paymentHook);
         paymentHook = _paymentHook;
     }
 
-    function setWalletFactory(address _walletFactory) external onlyOwner {
-        walletFactory = _walletFactory;
+    /**
+     * @dev See {IPushOracleReceiver-setTrustedMailBox}.
+     */
+    function setTrustedMailBox(
+        address _mailbox
+    ) external onlyOwner validateAddress(_mailbox) {
+        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
+        trustedMailBox = _mailbox;
     }
 
+    /**
+     * @dev See {IPushOracleReceiver-retrieveLostTokens}.
+     */
+    function retrieveLostTokens(
+        address receiver
+    ) external onlyOwner validateAddress(receiver) {
+        uint256 balance = address(this).balance;
+        if (balance == 0) revert NoBalanceToWithdraw();
+
+        (bool success, ) = payable(receiver).call{ value: balance }("");
+        if (!success) revert AmountTransferFailed();
+        emit TokensRecovered(receiver, balance);
+    }
     receive() external payable {}
 
     fallback() external payable {}

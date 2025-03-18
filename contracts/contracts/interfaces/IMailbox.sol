@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-pragma solidity >=0.8.0;
+pragma solidity 0.8.29;
 
-import {IInterchainSecurityModule} from "./IInterchainSecurityModule.sol";
-import {IPostDispatchHook} from "./hooks/IPostDispatchHook.sol";
+import { IInterchainSecurityModule } from "./IInterchainSecurityModule.sol";
+import { IPostDispatchHook } from "./hooks/IPostDispatchHook.sol";
 
 interface IMailbox {
     // ============ Events ============
