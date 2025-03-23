@@ -88,6 +88,14 @@ contract OracleTrigger is
         emit ChainUpdated(chainId, oldRecipientAddress, recipientAddress);
     }
 
+    /// @notice Delete chain from config
+    /// @param _chainId The chain ID of the chain to query
+    function deleteChain(
+        uint32 _chainId
+    ) public onlyRole(OWNER_ROLE) validateChain(_chainId) {
+        delete chains[_chainId];
+    }
+
     /// @notice Retrieves the recipient address for a specific chain
     /// @param _chainId The chain ID of the chain to query
     /// @return The address of the recipient contract on the specified chain
