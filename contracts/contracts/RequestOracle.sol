@@ -88,6 +88,9 @@ contract RequestOracle is
     /// @notice Error thrown when an invalid address (zero address) is used.
     error InvalidAddress();
 
+    /// @notice Error thrown when an ISM is not set (zero address) is used.
+    error InvalidISMAddress();
+
     // @notice Thrown when the mailbox address is unauthorized
     error UnauthorizedMailbox();
 
@@ -162,6 +165,9 @@ contract RequestOracle is
     ) external payable virtual override {
         // check who is calling this
         if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
+        if (address(interchainSecurityModule) == address(0))
+            revert InvalidISMAddress();
+
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
             (string, uint128, uint128)

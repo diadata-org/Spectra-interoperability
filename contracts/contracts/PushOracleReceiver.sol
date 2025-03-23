@@ -41,6 +41,9 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
     /// @notice Mapping of oracle data updates by key
     mapping(string => Data) public updates;
 
+    /// @notice Error thrown when an ISM is not set (zero address) is used.
+    error InvalidISMAddress();
+
     /// @notice Ensures that the provided address is not a zero address
     modifier validateAddress(address _address) {
         if (_address == address(0)) revert InvalidAddress();
@@ -57,6 +60,8 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
         bytes calldata _data
     ) external payable override validateAddress(paymentHook) {
         if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
+        if (address(interchainSecurityModule) == address(0))
+            revert InvalidISMAddress();
 
         // Decode the incoming data into its respective components.
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
