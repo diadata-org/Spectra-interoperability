@@ -16,8 +16,14 @@ interface IProtocolFeeHook is IPostDispatchHook {
     // @notice Thrown when there is no balance to withdraw
     error NoBalanceToWithdraw();
 
+    // @notice Thrown when the mailbox address is unauthorized
+    error UnauthorizedMailbox();
+
     // @notice Thrown when the fee transfer fails
     error FeeTransferFailed();
+
+    /// @notice Error thrown when an invalid address (zero address) is used.
+    error InvalidAddress();
 
     // @notice Emitted when a dispatch fee is paid
     // @param requiredFee The required fee
@@ -27,6 +33,14 @@ interface IProtocolFeeHook is IPostDispatchHook {
         uint256 requiredFee,
         uint256 actualFee,
         bytes32 messageId
+    );
+
+    // @notice Emitted when the trusted mailbox is updated
+    // @param previousMailBox The previous mailbox address
+    // @param newMailBox The new mailbox address
+    event TrustedMailBoxUpdated(
+        address indexed previousMailBox,
+        address indexed newMailBox
     );
 
     // @notice Emitted when the gas used per tx is updated
