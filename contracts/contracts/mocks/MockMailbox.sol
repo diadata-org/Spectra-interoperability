@@ -87,6 +87,10 @@ contract MockMailbox is IMailbox {
         return 1;
     }
 
+    function processor(bytes32 _id) external view returns (address) {
+        return address(0x999);
+    }
+
     function latestDispatchedId() external pure returns (bytes32) {
         return bytes32(0);
     }

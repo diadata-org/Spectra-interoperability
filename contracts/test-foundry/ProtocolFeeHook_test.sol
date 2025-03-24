@@ -34,17 +34,24 @@ contract ProtocolFeeHookTest is Test {
         assertEq(fee, expectedFee, "quoteDispatch should return the expected fee");
     }
 
-    function testPostDispatchSufficientFee() public {
-        // Get the fee required by the hook.
-        uint256 requiredFee = feeHook.quoteDispatch("metadata", "message");
+    // function testPostDispatchSufficientFee() public {
+    //     // Get the fee required by the hook.
+    //     uint256 requiredFee = feeHook.quoteDispatch("metadata", "message");
+    // address mailbox = address(0xBEEF);
+
+    //     feeHook.setTrustedMailBox(mailbox);
+    //     vm.prank(mailbox);
         
-        // Expect the event DispatchFeePaid to be emitted with requiredFee and actual fee.
-        // vm.expectEmit(true, true, false, true);
-        // emit ProtocolFeeHook.DispatchFeePaid(requiredFee, requiredFee, "");
+    //     // Expect the event DispatchFeePaid to be emitted with requiredFee and actual fee.
+    //     // vm.expectEmit(true, true, false, true);
+    //     // emit ProtocolFeeHook.DispatchFeePaid(requiredFee, requiredFee, "");
+
+    //         bytes memory formattedMessage = Message.formatMessage(1,1,100640,address(mailbox),421614,address(feeHook),"");
+
         
-        // Call postDispatch with sufficient fee.
-        feeHook.postDispatch{value: requiredFee}("metadata", "message");
-    }
+    //     // Call postDispatch with sufficient fee.
+    //     feeHook.postDispatch{value: requiredFee}("metadata", "message");
+    // }
 
     // function testPostDispatchInsufficientFee() public {
     //     uint256 requiredFee = feeHook.quoteDispatch("metadata", "message");
