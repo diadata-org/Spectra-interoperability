@@ -36,21 +36,25 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
         return true;
     }
 
+    modifier validateMessageOnce(bytes calldata _message) {
+        bytes32 messageId = _message.id();
+        require(!messageValidated[messageId], "MessageAlreadyValidated");
+        _;
+        messageValidated[messageId] = true;
+    }
+
     function postDispatch(
         bytes calldata metadata,
         bytes calldata message
-    ) external payable override {
-        if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
-
+    ) external payable override validateMessageOnce(message) {
         bytes32 messageId = message.id();
-        if (messageValidated[messageId]) revert MessageAlreadyValidated();
+        if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
 
         uint256 requiredFee = quoteDispatch(metadata, message);
 
         if (msg.value < requiredFee) revert InsufficientFeePaid();
 
         emit DispatchFeePaid(requiredFee, msg.value, messageId);
-        messageValidated[messageId] = true;
     }
 
     function quoteDispatch(
