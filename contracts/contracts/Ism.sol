@@ -5,6 +5,8 @@ import { IInterchainSecurityModule } from "./interfaces/IInterchainSecurityModul
 import { Message } from "./libs/Message.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
 
+import { IMailbox } from "./interfaces/IMailbox.sol";
+
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 using TypeCasts for address;
@@ -18,7 +20,8 @@ contract Ism is IInterchainSecurityModule, Ownable {
     /// @notice Expected senders per origin domain. This can be OracleTrigger or RequestOracle contract address
     mapping(uint32 => mapping(address => bool)) private senderShouldBe;
 
-    /// @notice Flag that, when set to true, allows all messages to pass verification.
+    /// @notice Address of the trusted mailbox.
+    address public trustedMailBox;
 
     /// @notice Emitted when the expected sender address is updated.
     /// @param originDomain origin chain address.
@@ -30,16 +33,17 @@ contract Ism is IInterchainSecurityModule, Ownable {
         address indexed newSender
     );
 
+    /// @notice Event emitted when the trusted mailbox is updated.
+    event TrustedMailBoxUpdated(
+        address indexed previousMailBox,
+        address indexed newMailBox
+    );
+
     /// @notice Emitted when a sender is added for an origin domain.
     event SenderAdded(uint32 indexed originDomain, address indexed sender);
 
     /// @notice Emitted when a sender is removed for an origin domain.
     event SenderRemoved(uint32 indexed originDomain, address indexed sender);
-
-    /// @notice Emitted when the allowAll flag is updated.
-    /// @param previousValue The previous value of allowAll.
-    /// @param newValue The new value of allowAll.
-    event AllowAllUpdated(bool previousValue, bool newValue);
 
     error NoChangeInSenderAddress();
 
@@ -47,6 +51,14 @@ contract Ism is IInterchainSecurityModule, Ownable {
 
     error SenderAlreadyExists();
     error SenderDoesNotExist();
+
+    error InvalidAddress();
+
+    /// @notice Ensures that the provided address is not a zero address.
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert InvalidAddress();
+        _;
+    }
 
     /// @notice Check if an address is a valid sender for a given origin domain.
     function isSenderAllowed(
@@ -81,7 +93,6 @@ contract Ism is IInterchainSecurityModule, Ownable {
     }
 
     /// @notice Verifies a message based on the sender address.
-    /// @dev If allowAll is true, the message always passes verification.
     /// @param /* unused */
     /// @param _message The encoded message data from which the sender address is extracted.
     /// @return True if the message is verified, false otherwise.
@@ -91,6 +102,15 @@ contract Ism is IInterchainSecurityModule, Ownable {
     ) public view returns (bool) {
         uint32 originDomain = Message.origin(_message);
         address sender = Message.senderAddress(_message);
-        return senderShouldBe[originDomain][sender]; // Allow if sender is in the allowed list
+
+        return senderShouldBe[originDomain][sender];
+    }
+
+    /// @notice Sets the trusted mailbox address.
+    function setTrustedMailBox(
+        address _mailbox
+    ) external onlyOwner validateAddress(_mailbox) {
+        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
+        trustedMailBox = _mailbox;
     }
 }
