@@ -96,8 +96,6 @@ contract OracleRequestRecipient is
     error ProtocolFeeHookNotSet();
     error AmountTransferFailed();
 
-    
-
     /**
      * @notice Handles incoming oracle requests from the interchain network.
      * @dev Ensures only authorized senders can invoke this function and prevents reentrancy attacks.
@@ -109,14 +107,7 @@ contract OracleRequestRecipient is
         uint32 _origin,
         bytes32 _sender,
         bytes calldata _data
-    )
-        external
-        payable
-        virtual
-        override
-        nonReentrant
-     {
-
+    ) external payable virtual override nonReentrant {
         if (_data.length == 0) revert EmptyOracleRequestData();
         if (oracleTriggerAddress == address(0)) revert OracleTriggerNotSet();
 
@@ -125,7 +116,6 @@ contract OracleRequestRecipient is
 
         address sender = address(uint160(uint256(_sender)));
 
- 
         if (msg.sender != IOracleTrigger(oracleTriggerAddress).getMailBox()) {
             revert UnauthorizedCaller(msg.sender);
         }
@@ -135,7 +125,7 @@ contract OracleRequestRecipient is
         emit ReceivedCall(sender, key);
 
         if (feeEnabled) {
-                    if (paymentHook == address(0)) revert ProtocolFeeHookNotSet();
+            if (paymentHook == address(0)) revert ProtocolFeeHookNotSet();
 
             uint256 gasPrice = tx.gasprice;
             uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
@@ -261,10 +251,7 @@ contract OracleRequestRecipient is
      * @dev restricted to onlyOwner
      * @param _paymentHook The address of the new payment hook.
      */
-    function setPaymentHook(
-        address payable _paymentHook
-    ) external onlyOwner   {
-        
+    function setPaymentHook(address payable _paymentHook) external onlyOwner {
         emit PaymentHookUpdated(paymentHook, _paymentHook);
         paymentHook = _paymentHook;
     }

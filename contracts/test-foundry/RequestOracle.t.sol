@@ -127,8 +127,9 @@ contract RequestOracleTest is Test {
         vm.prank(owner);
         vm.deal(owner, 10 ether); // Give owner some ETH
 
+        requestOracle.addToWhitelist(destinationDomain, receiver);
+
         bytes32 messageId = requestOracle.request{value: 5 ether}(
-            mailbox,
             receiver,
             destinationDomain,
             sampleMessage
@@ -198,7 +199,6 @@ contract RequestOracleTest is Test {
 
         vm.expectRevert("Pausable: paused");
         requestOracle.request(
-            mailbox,
             receiver,
             destinationDomain,
             sampleMessage
@@ -216,9 +216,10 @@ contract RequestOracleTest is Test {
     // Ensure that `request` function works after unpausing
     vm.prank(owner);
     vm.deal(owner, 10 ether);
+
+    requestOracle.addToWhitelist(destinationDomain, receiver);
     
     bytes32 messageId = requestOracle.request{value: 5 ether}(
-        mailbox,
         receiver,
         destinationDomain,
         sampleMessage
