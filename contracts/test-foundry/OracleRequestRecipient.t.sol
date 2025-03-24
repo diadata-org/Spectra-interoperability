@@ -99,9 +99,18 @@ contract OracleRequestRecipientTest is Test {
         // Setup: Set OracleTriggerAddress and mock Mailbox address
         vm.prank(owner);
         recipient.setOracleTriggerAddress(mockOracleTrigger);
+        
+
+ 
+        vm.prank(owner);
+
+        recipient.setFeeEnabled(false);
+ 
+
 
         // Expect call to `dispatch` on the mock OracleTrigger contract
         vm.mockCall(mockOracleTrigger, abi.encodeWithSelector(IOracleTrigger.getMailBox.selector), abi.encode(mockMailbox));
+
 
         // Mock sender verification
         vm.prank(mockMailbox);
@@ -112,7 +121,7 @@ contract OracleRequestRecipientTest is Test {
         vm.expectEmit(true, false, false, true);
         emit OracleRequestRecipient.ReceivedCall(address(requestOracle1), "test-key");
 
-        // Call the handle function
+         // Call the handle function
         recipient.handle(1, sender, data);
     }
 
