@@ -102,9 +102,7 @@ contract OracleRequestRecipientTest is Test {
         
 
  
-        vm.prank(owner);
-
-        recipient.setFeeEnabled(false);
+ 
  
 
 

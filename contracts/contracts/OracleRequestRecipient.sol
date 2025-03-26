@@ -6,7 +6,6 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IMessageRecipient } from "./interfaces/IMessageRecipient.sol";
 import { IOracleTrigger } from "./interfaces/oracle/IOracleTrigger.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
-import { ProtocolFeeHook } from "./ProtocolFeeHook.sol";
 
 import { IInterchainSecurityModule, ISpecifiesInterchainSecurityModule } from "./interfaces/IInterchainSecurityModule.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
@@ -33,9 +32,6 @@ contract OracleRequestRecipient is
     /// @notice Address of the whitelisted RequestOracle
     mapping(uint32 => mapping(bytes32 => bool)) public whitelistedSenders;
 
-    /// @notice Toggle for enabling/disabling the fee
-    bool private feeEnabled = false;
-
     /// @notice Address of the Oracle Trigger contract
     address private oracleTriggerAddress;
 
@@ -54,14 +50,6 @@ contract OracleRequestRecipient is
         bool status
     );
 
-    // @notice Emitted when the payment hook is updated
-    // @param previousPaymentHook The previous payment hook address
-    // @param newPaymentHook The new payment hook address
-    event PaymentHookUpdated(
-        address indexed previousPaymentHook,
-        address indexed newPaymentHook
-    );
-
     /// @notice Emitted when the Oracle Trigger contract address is updated
     /// @param oldAddress Previous Oracle Trigger contract address
     /// @param newAddress New Oracle Trigger contract address
@@ -78,7 +66,6 @@ contract OracleRequestRecipient is
         address indexed newISM
     );
 
-    event FeeStatusUpdated(bool enabled);
 
     event TokensRecovered(address indexed recipient, uint256 amount);
 
@@ -93,8 +80,6 @@ contract OracleRequestRecipient is
     error InvalidReceiver();
     error NoBalanceToWithdraw();
     error TransferFailed();
-    error ProtocolFeeHookNotSet();
-    error AmountTransferFailed();
 
     /**
      * @notice Handles incoming oracle requests from the interchain network.
@@ -123,19 +108,6 @@ contract OracleRequestRecipient is
         string memory key = abi.decode(_data, (string));
 
         emit ReceivedCall(sender, key);
-
-        if (feeEnabled) {
-            if (paymentHook == address(0)) revert ProtocolFeeHookNotSet();
-
-            uint256 gasPrice = tx.gasprice;
-            uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
-                gasPrice;
-
-            // Transfer the fee to the payment hook.
-            bool success;
-            (success, ) = paymentHook.call{ value: fee }("");
-            if (!success) revert AmountTransferFailed();
-        }
 
         IOracleTrigger(oracleTriggerAddress).dispatch{ value: msg.value }(
             _origin,
@@ -239,21 +211,6 @@ contract OracleRequestRecipient is
             revert TransferFailed();
         }
         emit TokensRecovered(receiver, balance);
-    }
-
-    function setFeeEnabled(bool _enabled) external onlyOwner {
-        feeEnabled = _enabled;
-        emit FeeStatusUpdated(_enabled);
-    }
-
-    /**
-     * @notice Sets the payment hook address
-     * @dev restricted to onlyOwner
-     * @param _paymentHook The address of the new payment hook.
-     */
-    function setPaymentHook(address payable _paymentHook) external onlyOwner {
-        emit PaymentHookUpdated(paymentHook, _paymentHook);
-        paymentHook = _paymentHook;
     }
 
     /**
