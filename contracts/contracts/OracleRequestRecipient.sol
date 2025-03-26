@@ -23,8 +23,7 @@ contract OracleRequestRecipient is
     ISpecifiesInterchainSecurityModule,
     ReentrancyGuard
 {
-    /// @notice Address for the post-dispatch payment hook
-    address payable public paymentHook;
+
 
     /// @notice Address of the interchain security module (ISM)
     IInterchainSecurityModule public interchainSecurityModule;
