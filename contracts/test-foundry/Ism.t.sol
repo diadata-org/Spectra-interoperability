@@ -91,6 +91,36 @@ contract IsmTest is Test {
         bytes memory message = encodeMessage(domainB, addr1,body);
         assertFalse(ism.verify("", message));
     }
+
+    function testValidateAddressRevertsOnZeroAddress() public {
+    vm.expectRevert(Ism.InvalidAddress.selector);
+    ism.setTrustedMailBox(address(0));
+}
+
+function testAddSenderShouldBeRevertsIfAlreadyExists() public {
+    ism.addSenderShouldBe(domainA, addr1);
+
+    // Attempt to add the same sender again
+    vm.expectRevert(Ism.SenderAlreadyExists.selector);
+    ism.addSenderShouldBe(domainA, addr1);
+}
+
+function testRemoveSenderShouldBeRevertsIfNotExists() public {
+    vm.expectRevert(Ism.SenderDoesNotExist.selector);
+    ism.removeSenderShouldBe(domainA, addr1);
+}
+function testRemoveSenderShouldBeWorks() public {
+    ism.addSenderShouldBe(domainA, addr1);
+
+    // Ensure the sender was added
+    assertTrue(ism.isSenderAllowed(domainA, addr1));
+
+    // Remove the sender
+    ism.removeSenderShouldBe(domainA, addr1);
+
+    // Ensure the sender was removed
+    assertFalse(ism.isSenderAllowed(domainA, addr1));
+}
  
 
     

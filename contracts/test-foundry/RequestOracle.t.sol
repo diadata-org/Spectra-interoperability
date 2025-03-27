@@ -79,6 +79,8 @@ contract RequestOracleTest is Test {
     using TypeCasts for address;
 
     RequestOracle public requestOracle;
+    RequestOracle public requestOracleInvalidIsm;
+
     MockMailbox public mailbox;
     MockInterchainSecurityModule public interchainSecurityModule;
     MockPostDispatchHook public paymentHook;
@@ -92,6 +94,7 @@ contract RequestOracleTest is Test {
     function setUp() public {
         vm.prank(owner);
         requestOracle = new RequestOracle();
+        requestOracleInvalidIsm = new RequestOracle();
 
         mailbox = new MockMailbox();
         interchainSecurityModule = new MockInterchainSecurityModule();
@@ -104,6 +107,9 @@ contract RequestOracleTest is Test {
         vm.prank(owner);
 
         requestOracle.setTrustedMailBox(address(mailbox));
+
+        requestOracleInvalidIsm.setTrustedMailBox(address(mailbox));
+        requestOracleInvalidIsm.setPaymentHook(address(paymentHook));
 
         vm.prank(owner);
         requestOracle.setPaymentHook(address(paymentHook));
@@ -129,7 +135,7 @@ contract RequestOracleTest is Test {
 
         requestOracle.addToWhitelist(destinationDomain, receiver);
 
-        bytes32 messageId = requestOracle.request{value: 5 ether}(
+        bytes32 messageId = requestOracle.request{ value: 5 ether }(
             receiver,
             destinationDomain,
             sampleMessage
@@ -149,12 +155,11 @@ contract RequestOracleTest is Test {
             (string, uint128, uint128)
         );
 
-        (
-             uint128 storedTimestamp,
-            uint128 storedValue
-        ) = requestOracle.updates(key);
+        (uint128 storedTimestamp, uint128 storedValue) = requestOracle.updates(
+            key
+        );
 
-         assertEq(storedTimestamp, timestamp);
+        assertEq(storedTimestamp, timestamp);
         assertEq(storedValue, value);
     }
 
@@ -181,7 +186,7 @@ contract RequestOracleTest is Test {
 
     function testReceiveEther() public {
         vm.deal(address(this), 1 ether);
-        (bool sent, ) = address(requestOracle).call{value: 1 ether}("");
+        (bool sent, ) = address(requestOracle).call{ value: 1 ether }("");
         assertTrue(sent);
     }
 
@@ -191,6 +196,20 @@ contract RequestOracleTest is Test {
         requestOracle.handle(destinationDomain, sender, sampleMessage);
     }
 
+    function testHandleNotWhitelisted() public {
+        vm.prank(owner);
+
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "ReceiverNotWhitelisted(address,uint32)",
+                receiver,
+                destinationDomain
+            )
+        );
+
+        requestOracle.request(receiver, destinationDomain, sampleMessage);
+    }
+
     function testPauseContract() public {
         vm.prank(owner);
         requestOracle.pauseContract();
@@ -198,33 +217,161 @@ contract RequestOracleTest is Test {
         assertTrue(requestOracle.paused());
 
         vm.expectRevert("Pausable: paused");
-        requestOracle.request(
+        requestOracle.request(receiver, destinationDomain, sampleMessage);
+    }
+
+    function testUnpauseContract() public {
+        vm.prank(owner);
+        requestOracle.pauseContract();
+        assertTrue(requestOracle.paused(), "Contract should be paused");
+
+        vm.prank(owner);
+        requestOracle.unpauseContract();
+        assertFalse(requestOracle.paused(), "Contract should be unpaused");
+
+        // Ensure that `request` function works after unpausing
+        vm.prank(owner);
+        vm.deal(owner, 10 ether);
+
+        requestOracle.addToWhitelist(destinationDomain, receiver);
+
+        bytes32 messageId = requestOracle.request{ value: 5 ether }(
             receiver,
             destinationDomain,
             sampleMessage
         );
+
+        assertTrue(
+            messageId != bytes32(0),
+            "Request should succeed after unpausing"
+        );
     }
-    function testUnpauseContract() public {
-    vm.prank(owner);
-    requestOracle.pauseContract();
-    assertTrue(requestOracle.paused(), "Contract should be paused");
 
-    vm.prank(owner);
-    requestOracle.unpauseContract();
-    assertFalse(requestOracle.paused(), "Contract should be unpaused");
+    function testRetrieveLostTokensFailsIfNoBalance() public {
+        vm.startPrank(owner);
+        vm.expectRevert(RequestOracle.NoBalanceToWithdraw.selector);
+        requestOracle.retrieveLostTokens(address(owner));
+        vm.stopPrank();
+    }
+    function testRetrieveLostTokens_TransferFailed() public {
+        NonPayableReceiver pr = new NonPayableReceiver();
 
-    // Ensure that `request` function works after unpausing
-    vm.prank(owner);
-    vm.deal(owner, 10 ether);
+        vm.deal(address(requestOracle), 1 ether);
+        vm.expectRevert(RequestOracle.AmountTransferFailed.selector);
+        vm.prank(owner);
 
-    requestOracle.addToWhitelist(destinationDomain, receiver);
-    
-    bytes32 messageId = requestOracle.request{value: 5 ether}(
-        receiver,
-        destinationDomain,
-        sampleMessage
-    );
+        requestOracle.retrieveLostTokens(address(pr));
+    }
 
-    assertTrue(messageId != bytes32(0), "Request should succeed after unpausing");
+    function testRetrieveLostTokens() public {
+        // Fund the contract with 1 ETH
+        vm.deal(address(requestOracle), 1 ether);
+        assertEq(
+            address(requestOracle).balance,
+            1 ether,
+            "Recipient should have 1 ETH"
+        );
+
+        // Owner withdraws ETH
+        vm.prank(owner);
+        vm.expectEmit(true, true, false, true);
+        emit RequestOracle.TokensRecovered(owner, 1 ether);
+        requestOracle.retrieveLostTokens(payable(owner));
+    }
+
+    function test_addToWhitelist_RevertsOnZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("InvalidAddress()"));
+        requestOracle.addToWhitelist(1, address(0x0));
+    }
+
+    function test_addToWhitelist_RevertsIfAlreadyWhitelisted() public {
+        address validReceiver = address(0x321);
+        vm.prank(owner);
+        requestOracle.addToWhitelist(1, validReceiver);
+
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSignature(
+                "AlreadyWhitelisted(address,uint32)",
+                validReceiver,
+                1
+            )
+        );
+        requestOracle.addToWhitelist(1, validReceiver);
+    }
+
+    function test_removeFromWhitelist_RevertsOnZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSignature("InvalidAddress()"));
+        requestOracle.removeFromWhitelist(1, address(0x0));
+    }
+
+    function testHandleMessageInvalisISM() public {
+        bytes32 sender = receiver.addressToBytes32();
+
+        vm.prank(address(mailbox));
+        vm.expectRevert(abi.encodeWithSignature("InvalidISMAddress()"));
+        requestOracleInvalidIsm.handle(
+            destinationDomain,
+            sender,
+            sampleMessage
+        );
+    }
+
+    function testHandleStaleMessage() public {
+        bytes32 sender = receiver.addressToBytes32();
+
+        vm.prank(address(mailbox));
+        requestOracle.handle(destinationDomain, sender, sampleMessage);
+
+        // send stake message
+        vm.prank(address(mailbox));
+
+        requestOracle.handle(
+            destinationDomain,
+            sender,
+            abi.encode("BTC", uint128(1700000000), uint128(41000))
+        );
+
+        // No updates in value
+
+        (string memory key, uint128 timestamp, uint128 value) = abi.decode(
+            sampleMessage,
+            (string, uint128, uint128)
+        );
+
+        (uint128 storedTimestamp, uint128 storedValue) = requestOracle.updates(
+            key
+        );
+
+        assertEq(storedTimestamp, timestamp);
+        assertEq(storedValue, value);
+    }
+
+    function test_removeFromWhitelist_Success() public {
+        uint32 origin = 1;
+        address receiver = address(0x123);
+
+        // Add to whitelist first
+        vm.prank(owner);
+        requestOracle.addToWhitelist(origin, receiver);
+        assertTrue(requestOracle.whitelistedReceivers(origin, receiver));
+
+        // Remove from whitelist and check event
+        vm.prank(owner);
+        vm.expectEmit(true, true, false, true);
+        emit RequestOracle.WhitelistUpdated(origin, receiver, false);
+
+        requestOracle.removeFromWhitelist(origin, receiver);
+
+        // Confirm removal
+        assertFalse(requestOracle.whitelistedReceivers(origin, receiver));
+    }
 }
+
+contract NonPayableReceiver {
+    fallback() external payable {
+        revert("Cannot receive ETH");
+    }
 }
