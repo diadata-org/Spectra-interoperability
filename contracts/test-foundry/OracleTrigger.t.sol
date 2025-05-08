@@ -78,7 +78,9 @@ contract OracleTriggerTest is Test {
 
     function testsetMailBoxToZeroAddress() public {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(IOracleTrigger.InvalidAddress.selector));
+        vm.expectRevert(
+            abi.encodeWithSelector(IOracleTrigger.InvalidAddress.selector)
+        );
         oracleTrigger.setMailBox(address(0x0));
         // assertEq(oracleTrigger.getMailBox(), mailbox);
     }
@@ -136,7 +138,24 @@ contract OracleTriggerTest is Test {
         oracleTrigger.grantRole(keccak256("DISPATCHER_ROLE"), owner);
 
         vm.prank(owner);
-        oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+        oracleTrigger.dispatchToChain{ value: 0.1 ether }(chainId, "BTC");
+    }
+
+    function testDispatchToChainWithoutMetadata() public {
+        vm.prank(owner);
+
+        oracleTrigger.addChain(chainId, recipient);
+
+        vm.prank(owner);
+        oracleTrigger.setMailBox(mailbox);
+
+        vm.deal(owner, 1 ether);
+        vm.prank(owner);
+        oracleTrigger.grantRole(keccak256("DISPATCHER_ROLE"), owner);
+
+        vm.prank(owner);
+        vm.expectRevert();
+        oracleTrigger.dispatchToChain{ value: 0.1 ether }(chainId, "BTC");
     }
 
     function testDispatch() public {
@@ -155,7 +174,7 @@ contract OracleTriggerTest is Test {
 
         vm.deal(owner, 1 ether);
         vm.prank(owner);
-        oracleTrigger.dispatch{value: 0.1 ether}(
+        oracleTrigger.dispatch{ value: 0.1 ether }(
             chainId,
             0xb8565867A5616544d13595fBe30a5693b2207fa0,
             "BTC"
@@ -176,7 +195,7 @@ contract OracleTriggerTest is Test {
 
         vm.expectRevert();
         vm.prank(owner);
-        oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+        oracleTrigger.dispatchToChain{ value: 0.1 ether }(chainId, "BTC");
     }
 
     function testMetadataValueStorage() public {
@@ -198,7 +217,7 @@ contract OracleTriggerTest is Test {
         vm.deal(newOwner, 1 ether);
         vm.prank(newOwner);
         vm.expectRevert();
-        oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+        oracleTrigger.dispatchToChain{ value: 0.1 ether }(chainId, "BTC");
     }
 
     function testCannotRemoveDispatcherIfNotOwner() public {
@@ -248,7 +267,7 @@ contract OracleTriggerTest is Test {
         vm.expectRevert(
             abi.encodeWithSignature("ChainNotConfigured(uint32)", chainId)
         );
-        oracleTrigger.dispatchToChain{value: 0.1 ether}(chainId, "BTC");
+        oracleTrigger.dispatchToChain{ value: 0.1 ether }(chainId, "BTC");
     }
 
     // add new owner and let new owner add new dispatcher role
@@ -275,8 +294,6 @@ contract OracleTriggerTest is Test {
             oracleTrigger.hasRole(keccak256("DISPATCHER_ROLE"), address(0x5))
         );
     }
-
-  
 
     /// @notice Tests that only the owner can successfully withdraw ETH
     function testRetrieveLostTokens() public {
@@ -317,7 +334,58 @@ contract OracleTriggerTest is Test {
     /// @notice Tests that withdrawETH reverts if recipient is address(0)
     function testRetrieveLostTokensRecipient() public {
         vm.prank(owner);
-        vm.expectRevert(abi.encodeWithSelector(IOracleTrigger.InvalidAddress.selector));
+        vm.expectRevert(
+            abi.encodeWithSelector(IOracleTrigger.InvalidAddress.selector)
+        );
         oracleTrigger.retrieveLostTokens(payable(address(0)));
+    }
+
+    function testDeleteChainFailsIfNotConfigured() public {
+        vm.startPrank(owner);
+        vm.expectRevert();
+        oracleTrigger.deleteChain(chainId);
+        vm.stopPrank();
+    }
+
+    //  function testGetOracleValueRevertsIfMetadataNotSet() public {
+    //             vm.startPrank(owner);
+
+    //     vm.expectRevert(IOracleTrigger.InvalidAddress.selector);
+    //     oracleTrigger.dispatchToChain("TEST");
+    // }
+
+    function testRetrieveLostTokensFailsIfNoBalance() public {
+        vm.startPrank(owner);
+        vm.expectRevert(IOracleTrigger.NoBalanceToWithdraw.selector);
+        oracleTrigger.retrieveLostTokens(address(owner));
+        vm.stopPrank();
+    }
+    function testRetrieveLostTokens_TransferFailed() public {
+        NonPayableReceiver receiver = new NonPayableReceiver();
+
+        vm.deal(address(oracleTrigger), 1 ether);
+        vm.expectRevert(IOracleTrigger.AmountTransferFailed.selector);
+        vm.prank(owner);
+
+        oracleTrigger.retrieveLostTokens(address(receiver));
+    }
+
+    function test_deleteChain_Success() public {
+        vm.startPrank(owner);
+
+        oracleTrigger.addChain(1, recipient);
+        assertEq(oracleTrigger.viewChain(1), recipient);
+
+        oracleTrigger.deleteChain(1);
+        vm.expectRevert();
+        oracleTrigger.viewChain(1);
+
+        vm.stopPrank();
+    }
+}
+
+contract NonPayableReceiver {
+    fallback() external payable {
+        revert("Cannot receive ETH");
     }
 }

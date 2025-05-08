@@ -38,6 +38,9 @@ contract RequestOracle is
     /// @notice Interchain security module instance.
     IInterchainSecurityModule public interchainSecurityModule;
 
+    /// @notice Address of the whitelisted Receivers
+    mapping(uint32 => mapping(address => bool)) public whitelistedReceivers;
+
     /// @notice Address of the payment hook contract.
     address public paymentHook;
 
@@ -85,8 +88,14 @@ contract RequestOracle is
     /// @notice Event emitted when an oracle message is received.
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
 
+    /// @notice Event emitted when an stale oracle message is received.
+    event ReceivedStaleMessage(string key, uint128 timestamp, uint128 value);
+
     /// @notice Error thrown when an invalid address (zero address) is used.
     error InvalidAddress();
+
+    /// @notice Error thrown when an ISM is not set (zero address) is used.
+    error InvalidISMAddress();
 
     // @notice Thrown when the mailbox address is unauthorized
     error UnauthorizedMailbox();
@@ -96,6 +105,12 @@ contract RequestOracle is
 
     // @notice Thrown when the fee transfer fails
     error AmountTransferFailed();
+
+    // @notice Thrown while adding existing whitelist
+    error AlreadyWhitelisted(address receiver, uint32 origin);
+
+    // @notice Receiver Not Whitelisted
+    error ReceiverNotWhitelisted(address receiver, uint32 origin);
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -112,17 +127,25 @@ contract RequestOracle is
         uint256 value
     );
 
+    /// @notice Emitted when a sender's whitelist status is updated
+    /// @param origin The source chain ID
+    /// @param receiver The receiver's address
+    /// @param status The new whitelist status (true for whitelisted, false otherwise)
+    event WhitelistUpdated(
+        uint32 indexed origin,
+        address indexed receiver,
+        bool status
+    );
+
     /**
      * @notice Sends a request to a receiver on another chain.
-     * @param _mailbox The mailbox contract responsible for dispatching messages.
-     * @param receiver The receiver address on the destination chain.
+     * @param _receiver The receiver address on the destination chain.
      * @param _destinationDomain The domain ID of the destination chain.
      * @param _messageBody The encoded message payload.
      * @return messageId The ID of the dispatched message.
      */
     function request(
-        IMailbox _mailbox,
-        address receiver,
+        address _receiver,
         uint32 _destinationDomain,
         bytes calldata _messageBody
     )
@@ -132,18 +155,21 @@ contract RequestOracle is
         validateAddress(paymentHook)
         returns (bytes32 messageId)
     {
+        if (!whitelistedReceivers[_destinationDomain][_receiver])
+            revert ReceiverNotWhitelisted(_receiver, _destinationDomain);
+
         IPostDispatchHook hook = IPostDispatchHook(paymentHook);
 
-        messageId = _mailbox.dispatch{ value: msg.value }(
+        messageId = IMailbox(trustedMailBox).dispatch{ value: msg.value }(
             _destinationDomain,
-            receiver.addressToBytes32(),
+            _receiver.addressToBytes32(),
             _messageBody,
             bytes(""),
             hook
         );
         emit RequestSent(
             msg.sender,
-            receiver,
+            _receiver,
             _destinationDomain,
             messageId,
             msg.value
@@ -162,6 +188,9 @@ contract RequestOracle is
     ) external payable virtual override {
         // check who is calling this
         if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
+        if (address(interchainSecurityModule) == address(0))
+            revert InvalidISMAddress();
+
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
             (string, uint128, uint128)
@@ -170,6 +199,7 @@ contract RequestOracle is
 
         // Ensure the new timestamp is more recent
         if (updates[key].timestamp >= timestamp) {
+            emit ReceivedStaleMessage(key, timestamp, value);
             return; // Ignore outdated data
         }
 
@@ -241,5 +271,46 @@ contract RequestOracle is
         (bool success, ) = payable(receiver).call{ value: balance }("");
         if (!success) revert AmountTransferFailed();
         emit TokensRecovered(receiver, balance);
+    }
+
+    /**
+     * @notice Adds a sender to the whitelist for a given origin chain.
+     * @dev Only callable by the contract owner.
+     * @param _origin The source chain ID
+     * @param _receiver The receiver address
+     */
+
+    function addToWhitelist(
+        uint32 _origin,
+        address _receiver
+    ) external onlyOwner {
+        if (_receiver == address(0)) {
+            revert InvalidAddress();
+        }
+
+        if (whitelistedReceivers[_origin][_receiver]) {
+            revert AlreadyWhitelisted(_receiver, _origin);
+        }
+
+        whitelistedReceivers[_origin][_receiver] = true;
+        emit WhitelistUpdated(_origin, _receiver, true);
+    }
+
+    /**
+     * @notice Removes a sender from the whitelist for a given origin chain.
+     * @dev Only callable by the contract owner.
+     * @param _origin The source chain ID
+     * @param _receiver The receiver address
+     */
+
+    function removeFromWhitelist(
+        uint32 _origin,
+        address _receiver
+    ) external onlyOwner {
+        if (_receiver == address(0)) {
+            revert InvalidAddress();
+        }
+        whitelistedReceivers[_origin][_receiver] = false;
+        emit WhitelistUpdated(_origin, _receiver, false);
     }
 }

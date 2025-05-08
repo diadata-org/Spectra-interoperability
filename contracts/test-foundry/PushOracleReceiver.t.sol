@@ -112,6 +112,12 @@ contract MockMailbox1 is IMailbox {
     function latestDispatchedId() external pure returns (bytes32) {
         return bytes32(0);
     }
+
+      function processor(bytes32 _id) external view returns (address){
+            return address(0x99);
+        }
+
+    
 }
 
 
@@ -119,6 +125,8 @@ contract MockMailbox1 is IMailbox {
 
 contract PushOracleReceiverTest is Test {
     PushOracleReceiver receiver;
+        PushOracleReceiver receiverWithoutISM;
+
     MockMailbox1 mailbox;
     MockISM ism;
     ProtocolFeeHook hook;
@@ -133,6 +141,8 @@ contract PushOracleReceiverTest is Test {
         vm.startPrank(owner);
 
         receiver = new PushOracleReceiver();
+        receiverWithoutISM = new PushOracleReceiver();
+
         mailbox = new MockMailbox1();
         ism = new MockISM();
         hook = new ProtocolFeeHook();
@@ -141,8 +151,14 @@ contract PushOracleReceiverTest is Test {
         receiver.setPaymentHook(payable(hook));
          receiver.setTrustedMailBox(address(mailbox));
 
+
+            receiverWithoutISM.setPaymentHook(payable(hook));
+         receiverWithoutISM.setTrustedMailBox(address(mailbox));
+
         vm.stopPrank();
     }
+
+
 
     function testInitialState() public {
         assertEq(receiver.owner(), owner);
@@ -150,14 +166,72 @@ contract PushOracleReceiverTest is Test {
         assertEq(receiver.paymentHook(), address(hook));
       }
 
+   
+
+      function test_setTrustedMailBox_RevertsIfZeroAddress() public {
+    vm.startPrank(owner);
+    vm.expectRevert(IPushOracleReceiver.InvalidAddress.selector);
+    receiver.setTrustedMailBox(address(0));
+}
+
+function test_setPaymentHook_RevertsIfZeroAddress() public {
+    vm.startPrank(owner);
+    vm.expectRevert(IPushOracleReceiver.InvalidAddress.selector);
+    receiver.setPaymentHook(payable(address(0)));
+}
+
+function test_setInterchainSecurityModule_RevertsIfZeroAddress() public {
+    vm.startPrank(owner);
+    vm.expectRevert(IPushOracleReceiver.InvalidAddress.selector);
+    receiver.setInterchainSecurityModule(address(0));
+}
+
+
+
+ function testHandleMessageNoISM() public {
+        string memory key = "BTC/USD";
+        uint128 timestamp = uint128(block.timestamp);
+        uint128 value = 50000;
+ 
+        bytes memory data = abi.encode(key, timestamp, value);
+        bytes32 sender = bytes32(uint256(uint160(user)));
+
+        vm.deal(address(mailbox), 1 ether);
+        vm.prank(address(mailbox));
+         vm.expectRevert(PushOracleReceiver.InvalidISMAddress.selector);
+         receiverWithoutISM.handle{value: 0.1 ether}(destinationDomain, sender, data);
+
+  
+
+      
+    }
+
+     function testHandleMessageUnAuthorizedMailbox() public {
+        string memory key = "BTC/USD";
+        uint128 timestamp = uint128(block.timestamp);
+        uint128 value = 50000;
+ 
+        bytes memory data = abi.encode(key, timestamp, value);
+        bytes32 sender = bytes32(uint256(uint160(user)));
+
+        vm.deal(address(0x1), 1 ether);
+        vm.prank(address(0x1));
+         vm.expectRevert(IPushOracleReceiver.UnauthorizedMailbox.selector);
+         receiverWithoutISM.handle{value: 0.1 ether}(destinationDomain, sender, data);
+
+  
+
+      
+    }
+      
+
   
 
     function testHandleMessage() public {
         string memory key = "BTC/USD";
         uint128 timestamp = uint128(block.timestamp);
         uint128 value = 50000;
-        console.log("-----");
-
+ 
         bytes memory data = abi.encode(key, timestamp, value);
         bytes32 sender = bytes32(uint256(uint160(user)));
 
@@ -286,5 +360,28 @@ function testRetrieveLostTokensRecipient() public {
     receiver.retrieveLostTokens(payable(address(0)));
 }
 
+    function testRetrieveLostTokensFailsIfNoBalance() public {
+        vm.startPrank(owner);
+        vm.expectRevert(IPushOracleReceiver.NoBalanceToWithdraw.selector);
+        receiver.retrieveLostTokens(address(owner));
+        vm.stopPrank();
+    }
+    function testRetrieveLostTokens_TransferFailed() public {
+        NonPayableReceiver pr = new NonPayableReceiver();
 
+     vm.deal(address(receiver), 1 ether);  
+    vm.expectRevert(IPushOracleReceiver.AmountTransferFailed.selector);
+    vm.prank(owner);
+
+    receiver.retrieveLostTokens(address(pr));
+}
+
+
+
+}
+
+contract NonPayableReceiver {
+    fallback() external payable {
+        revert("Cannot receive ETH");
+    }
 }

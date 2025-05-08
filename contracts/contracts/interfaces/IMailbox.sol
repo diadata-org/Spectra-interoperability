@@ -106,4 +106,6 @@ interface IMailbox {
     function recipientIsm(
         address recipient
     ) external view returns (IInterchainSecurityModule module);
+
+    function processor(bytes32 _id) external view returns (address);
 }

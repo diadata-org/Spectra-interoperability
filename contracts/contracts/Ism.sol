@@ -5,6 +5,8 @@ import { IInterchainSecurityModule } from "./interfaces/IInterchainSecurityModul
 import { Message } from "./libs/Message.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
 
+import { IMailbox } from "./interfaces/IMailbox.sol";
+
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 using TypeCasts for address;
@@ -15,11 +17,11 @@ using TypeCasts for address;
 contract Ism is IInterchainSecurityModule, Ownable {
     uint8 public constant override moduleType = uint8(Types.NULL);
 
-    /// @notice Expected sender address for message verification. This can be OracleTrigger or RequestOracle contract address
-    mapping(uint32 => address) private senderShouldBe;
+    /// @notice Expected senders per origin domain. This can be OracleTrigger or RequestOracle contract address
+    mapping(uint32 => mapping(address => bool)) private senderShouldBe;
 
-    /// @notice Flag that, when set to true, allows all messages to pass verification.
-    bool public allowAll;
+    /// @notice Address of the trusted mailbox.
+    address public trustedMailBox;
 
     /// @notice Emitted when the expected sender address is updated.
     /// @param originDomain origin chain address.
@@ -31,55 +33,66 @@ contract Ism is IInterchainSecurityModule, Ownable {
         address indexed newSender
     );
 
-    /// @notice Emitted when the allowAll flag is updated.
-    /// @param previousValue The previous value of allowAll.
-    /// @param newValue The new value of allowAll.
-    event AllowAllUpdated(bool previousValue, bool newValue);
+    /// @notice Event emitted when the trusted mailbox is updated.
+    event TrustedMailBoxUpdated(
+        address indexed previousMailBox,
+        address indexed newMailBox
+    );
+
+    /// @notice Emitted when a sender is added for an origin domain.
+    event SenderAdded(uint32 indexed originDomain, address indexed sender);
+
+    /// @notice Emitted when a sender is removed for an origin domain.
+    event SenderRemoved(uint32 indexed originDomain, address indexed sender);
 
     error NoChangeInSenderAddress();
 
     error NoChangeInValue();
 
-    /// @notice Retrieves the expected sender address for verification.
-    /// @return The address expected to send valid messages.
-    function getSenderShouldBe(
-        uint32 _originDomain
-    ) external view returns (address) {
-        return senderShouldBe[_originDomain];
+    error SenderAlreadyExists();
+    error SenderDoesNotExist();
+
+    error InvalidAddress();
+
+    /// @notice Ensures that the provided address is not a zero address.
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert InvalidAddress();
+        _;
     }
 
-    /// @notice Sets the expected sender address for message verification.
-    /// @dev Only callable by the owner.
-    /// @param _originDomain Origin chain id.
-    /// @param _sender The new expected sender address.
-    function setSenderShouldBe(
+    /// @notice Check if an address is a valid sender for a given origin domain.
+    function isSenderAllowed(
+        uint32 _originDomain,
+        address _sender
+    ) external view returns (bool) {
+        return senderShouldBe[_originDomain][_sender];
+    }
+
+    /// @notice Add a sender for a specific origin domain.
+    function addSenderShouldBe(
         uint32 _originDomain,
         address _sender
     ) external onlyOwner {
-        if (senderShouldBe[_originDomain] == _sender) {
-            revert NoChangeInSenderAddress();
+        if (senderShouldBe[_originDomain][_sender]) {
+            revert SenderAlreadyExists();
         }
-        emit SenderShouldBeUpdated(
-            _originDomain,
-            senderShouldBe[_originDomain],
-            _sender
-        );
-        senderShouldBe[_originDomain] = _sender;
+        senderShouldBe[_originDomain][_sender] = true;
+        emit SenderAdded(_originDomain, _sender);
     }
 
-    /// @notice Sets the flag to allow all messages to pass verification.
-    /// @dev Only callable by the owner.
-    /// @param _allowAll Boolean value to enable or disable the allowAll flag.
-    function setAllowAll(bool _allowAll) external onlyOwner {
-        if (allowAll == _allowAll) {
-            revert NoChangeInValue();
+    /// @notice Remove a sender for a specific origin domain.
+    function removeSenderShouldBe(
+        uint32 _originDomain,
+        address _sender
+    ) external onlyOwner {
+        if (!senderShouldBe[_originDomain][_sender]) {
+            revert SenderDoesNotExist();
         }
-        emit AllowAllUpdated(allowAll, _allowAll);
-        allowAll = _allowAll;
+        delete senderShouldBe[_originDomain][_sender];
+        emit SenderRemoved(_originDomain, _sender);
     }
 
     /// @notice Verifies a message based on the sender address.
-    /// @dev If allowAll is true, the message always passes verification.
     /// @param /* unused */
     /// @param _message The encoded message data from which the sender address is extracted.
     /// @return True if the message is verified, false otherwise.
@@ -87,12 +100,17 @@ contract Ism is IInterchainSecurityModule, Ownable {
         bytes calldata,
         bytes calldata _message
     ) public view returns (bool) {
-        if (allowAll) {
-            return true;
-        } else {
-            uint32 originDomain = Message.origin(_message);
-            return
-                senderShouldBe[originDomain] == Message.senderAddress(_message);
-        }
+        uint32 originDomain = Message.origin(_message);
+        address sender = Message.senderAddress(_message);
+
+        return senderShouldBe[originDomain][sender];
+    }
+
+    /// @notice Sets the trusted mailbox address.
+    function setTrustedMailBox(
+        address _mailbox
+    ) external onlyOwner validateAddress(_mailbox) {
+        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
+        trustedMailBox = _mailbox;
     }
 }

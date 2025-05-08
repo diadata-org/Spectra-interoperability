@@ -16,10 +16,18 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
 
     uint256 public gasUsedPerTx = 97440; // Default gas used
 
+    /// @notice only Message from this mailbox will be handled
+    address public trustedMailBox;
+
     mapping(bytes32 messageId => bool validated) public messageValidated;
 
     function hookType() external pure override returns (uint8) {
         return uint8(Types.PROTOCOL_FEE);
+    }
+
+    modifier validateAddress(address _address) {
+        if (_address == address(0)) revert InvalidAddress();
+        _;
     }
 
     function supportsMetadata(
@@ -28,19 +36,25 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
         return true;
     }
 
+    modifier validateMessageOnce(bytes calldata _message) {
+        bytes32 messageId = _message.id();
+        require(!messageValidated[messageId], "MessageAlreadyValidated");
+        _;
+        messageValidated[messageId] = true;
+    }
+
     function postDispatch(
         bytes calldata metadata,
         bytes calldata message
-    ) external payable override {
+    ) external payable override validateMessageOnce(message) {
         bytes32 messageId = message.id();
-        if (messageValidated[messageId]) revert MessageAlreadyValidated();
+        if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
 
         uint256 requiredFee = quoteDispatch(metadata, message);
 
         if (msg.value < requiredFee) revert InsufficientFeePaid();
 
         emit DispatchFeePaid(requiredFee, msg.value, messageId);
-        messageValidated[messageId] = true;
     }
 
     function quoteDispatch(
@@ -65,6 +79,13 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
         (bool success, ) = payable(feeRecipient).call{ value: balance }("");
         if (!success) revert FeeTransferFailed();
         emit FeesWithdrawn(feeRecipient, balance);
+    }
+
+    function setTrustedMailBox(
+        address _mailbox
+    ) external onlyOwner validateAddress(_mailbox) {
+        emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
+        trustedMailBox = _mailbox;
     }
 
     receive() external payable {}

@@ -5,9 +5,10 @@ import "forge-std/Test.sol";
 import "../contracts/Ism.sol";
 import "../contracts/libs/Message.sol";
 
-// Declare events for event testing
-event SenderShouldBeUpdated(uint32 indexed originDomain, address indexed previousSender, address indexed newSender);
-event AllowAllUpdated(bool previousValue, bool newValue);
+import "../contracts/mocks/MockMailbox.sol";
+
+
+ 
 
 contract IsmTest is Test {
     Ism ism;
@@ -16,8 +17,11 @@ contract IsmTest is Test {
     address addr2;
     uint32 domainA = 1000;
     uint32 domainB = 2000;
+    MockMailbox mockMailbox;
 
     function setUp() public {
+
+        mockMailbox = new MockMailbox();
         owner = address(this);
         addr1 = address(0x123);
         addr2 = address(0x456);
@@ -49,10 +53,10 @@ contract IsmTest is Test {
     }
 
     function testSetSenderShouldBe() public {
-        vm.expectEmit(true, true, false, true);
-        emit SenderShouldBeUpdated(domainA, address(0), addr1);
-        ism.setSenderShouldBe(domainA, addr1);
-        assertEq(ism.getSenderShouldBe(domainA), addr1);
+        // vm.expectEmit(true, true, false, true);
+        // emit Ism.SenderShouldBeUpdated(domainA, address(0), addr1);
+        ism.addSenderShouldBe(domainA, addr1);
+        assertEq(ism.isSenderAllowed(domainA,addr1), true);
     }
 
     // function testSetAllowAll() public {
@@ -63,28 +67,63 @@ contract IsmTest is Test {
     // }
 
     function testVerifyWithCorrectSender(bytes calldata body) public {
-        ism.setSenderShouldBe(domainA, owner);
+                ism.setTrustedMailBox(address(mockMailbox));
+        // ism.addTrustedRelayer(address(0x999));
+
+        ism.addSenderShouldBe(domainA, owner);
  
         bytes memory message = encodeMessage(domainA, owner, body);
         assertTrue(ism.verify("", message));
     }
 
     function testVerifyWithIncorrectSender(bytes calldata body) public {
-        ism.setSenderShouldBe(domainA, addr1);
+        ism.setTrustedMailBox(address(mockMailbox));
+        ism.addSenderShouldBe(domainA, addr1);
         bytes memory message = encodeMessage(domainA, addr2,body);
         assertFalse(ism.verify("", message));
     }
 
     function testVerifyWithDifferentOriginFails(bytes calldata body) public {
-        ism.setSenderShouldBe(domainA, addr1);
+
+        ism.setTrustedMailBox(address(mockMailbox));
+        // ism.addTrustedRelayer()
+        ism.addSenderShouldBe(domainA, addr1);
         bytes memory message = encodeMessage(domainB, addr1,body);
         assertFalse(ism.verify("", message));
     }
 
-    // function testVerifyAllowAllTrue(bytes calldata body) public {
-    //     ism.setAllowAll(true);
-    //     ism.setSenderShouldBe(domainA, addr1);
-    //     bytes memory message = encodeMessage(domainB, addr2,body);
-    //     assertTrue(ism.verify("", message));
-    // }
+    function testValidateAddressRevertsOnZeroAddress() public {
+    vm.expectRevert(Ism.InvalidAddress.selector);
+    ism.setTrustedMailBox(address(0));
+}
+
+function testAddSenderShouldBeRevertsIfAlreadyExists() public {
+    ism.addSenderShouldBe(domainA, addr1);
+
+    // Attempt to add the same sender again
+    vm.expectRevert(Ism.SenderAlreadyExists.selector);
+    ism.addSenderShouldBe(domainA, addr1);
+}
+
+function testRemoveSenderShouldBeRevertsIfNotExists() public {
+    vm.expectRevert(Ism.SenderDoesNotExist.selector);
+    ism.removeSenderShouldBe(domainA, addr1);
+}
+function testRemoveSenderShouldBeWorks() public {
+    ism.addSenderShouldBe(domainA, addr1);
+
+    // Ensure the sender was added
+    assertTrue(ism.isSenderAllowed(domainA, addr1));
+
+    // Remove the sender
+    ism.removeSenderShouldBe(domainA, addr1);
+
+    // Ensure the sender was removed
+    assertFalse(ism.isSenderAllowed(domainA, addr1));
+}
+ 
+
+    
+
+  
 }

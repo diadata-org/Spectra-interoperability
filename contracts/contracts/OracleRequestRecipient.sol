@@ -23,6 +23,8 @@ contract OracleRequestRecipient is
     ISpecifiesInterchainSecurityModule,
     ReentrancyGuard
 {
+
+
     /// @notice Address of the interchain security module (ISM)
     IInterchainSecurityModule public interchainSecurityModule;
 
@@ -62,6 +64,7 @@ contract OracleRequestRecipient is
         address indexed previousISM,
         address indexed newISM
     );
+
 
     event TokensRecovered(address indexed recipient, uint256 amount);
 

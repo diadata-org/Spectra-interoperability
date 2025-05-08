@@ -99,7 +99,6 @@ async function main() {
     console.log("sender",addressToBytes32(oracleRequestorAddress))
   try{
     let messageTx = await OracleUpdateRecipient.request(
-      mailbox,
       diaRecipient,
       destinationDomain,
       messageBody,
