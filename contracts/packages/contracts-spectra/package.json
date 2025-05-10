@@ -1,7 +1,12 @@
 {
-  "name": "spectra-interoperability",
-  "description": "Spectra Cross-chain Protocol",
+  "name": "@dia-data/contracts-spectra",
+  "version": "1.0.0",
+  "files": [
+    "*"
+  ],
+  "license": "GPL-3.0",
   "author": "DIA Data",
+  "description": "Spectra Cross-chain Protocol Smart Contract Suite",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/diadata-org/Spectra-interoperability.git"
@@ -10,13 +15,6 @@
     "url": "https://github.com/diadata-org/Spectra-interoperability/issues"
   },
   "homepage": "https://github.com/diadata-org/Spectra-interoperability#readme",
-  "version": "1.0.0",
-  "scripts": {
-    "test": "forge test --contracts 'contracts/**/*.sol'",
-    "test:coverage": "forge coverage --contracts 'contracts/**/*.sol'",
-    "prettier": "npx prettier --write --plugin=prettier-plugin-solidity 'contracts/**/*.sol'",
-    "lint": "npx solhint 'contracts/**/*.sol'"
-  },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^3.0.8",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",

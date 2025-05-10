@@ -1,13 +1,12 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 
-
 const accounts = process.env.PRIVATE_KEY
   ? [`0x${process.env.PRIVATE_KEY}`]
   : [];
 
 const config: HardhatUserConfig = {
-  solidity: "0.8.26",
+  solidity: "0.8.29",
   networks: {
     hardhat: {
       // accounts: [secret],
@@ -33,7 +32,8 @@ const config: HardhatUserConfig = {
     },
     alfajores: {
       chainId: 44787,
-      url: process.env.AKFAJORES_RPC || "https://alfajores-forno.celo-testnet.org",
+      url:
+        process.env.AKFAJORES_RPC || "https://alfajores-forno.celo-testnet.org",
       accounts,
     },
     sepolia: {
@@ -43,29 +43,39 @@ const config: HardhatUserConfig = {
     },
     fuji: {
       chainId: 43113,
-      url: process.env.SEPOLIA_RPC || "https://avalanche-fuji.blockpi.network/v1/rpc/public",
+      url:
+        process.env.SEPOLIA_RPC ||
+        "https://avalanche-fuji.blockpi.network/v1/rpc/public",
       accounts,
     },
     diadata_testnet: {
       chainId: 23104,
-      url: process.env.DIADATA__TESTNET_RPC || "https://rpc-static-violet-vicuna-qhcog2uell.t.conduit.xyz",
+      url:
+        process.env.DIADATA__TESTNET_RPC ||
+        "https://rpc-static-violet-vicuna-qhcog2uell.t.conduit.xyz",
       accounts,
     },
     bsctestnet: {
       chainId: 97,
-      url: process.env.BSC__TESTNET_RPC || "https://bsc-testnet-rpc.publicnode.com",
+      url:
+        process.env.BSC__TESTNET_RPC ||
+        "https://bsc-testnet-rpc.publicnode.com",
       accounts,
     },
     base_sepolia: {
-        chainId: 84532,
-        url: process.env.BASE_SEPOLIA__TESTNET_RPC || "https://base-sepolia-rpc.publicnode.com",
-        accounts,
+      chainId: 84532,
+      url:
+        process.env.BASE_SEPOLIA__TESTNET_RPC ||
+        "https://base-sepolia-rpc.publicnode.com",
+      accounts,
     },
     arbi_sepolia: {
       chainId: 421614,
-      url: process.env.ARBI_SEPOLIA__TESTNET_RPC || "https://arbitrum-sepolia-rpc.publicnode.com",
-      accounts,      
-    }
+      url:
+        process.env.ARBI_SEPOLIA__TESTNET_RPC ||
+        "https://arbitrum-sepolia-rpc.publicnode.com",
+      accounts,
+    },
   },
 };
 
