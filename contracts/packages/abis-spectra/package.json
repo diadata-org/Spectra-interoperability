@@ -1,0 +1,18 @@
+{
+  "name": "@dia-data/abis-spectra",
+  "version": "1.0.0",
+  "files": [
+    "*"
+  ],
+  "license": "GPL-3.0",
+  "author": "DIA Data",
+  "description": "Spectra Cross-chain Protocol Contract ABIs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diadata-org/Spectra-interoperability.git"
+  },
+  "bugs": {
+    "url": "https://github.com/diadata-org/Spectra-interoperability/issues"
+  },
+  "homepage": "https://github.com/diadata-org/Spectra-interoperability#readme"
+}
