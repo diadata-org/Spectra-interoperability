@@ -2,6 +2,14 @@
   "name": "spectra-interoperability",
   "description": "Spectra Cross-chain Protocol",
   "author": "DIA Data",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/diadata-org/Spectra-interoperability.git"
+  },
+  "bugs": {
+    "url": "https://github.com/diadata-org/Spectra-interoperability/issues"
+  },
+  "homepage": "https://github.com/diadata-org/Spectra-interoperability#readme",
   "version": "1.0.0",
   "scripts": {
     "test": "forge test --contracts 'contracts/**/*.sol'",
