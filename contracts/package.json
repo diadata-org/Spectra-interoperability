@@ -1,5 +1,5 @@
 {
-  "name": "spectra-interoperability",
+  "name": "@dia-data/contracts-spectra",
   "description": "Spectra Cross-chain Protocol",
   "author": "DIA Data",
   "repository": {
