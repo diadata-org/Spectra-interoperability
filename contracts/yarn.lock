@@ -620,10 +620,10 @@
     deep-eql "^4.0.1"
     ordinal "^1.0.3"
 
-"@nomicfoundation/hardhat-ethers@^3.0.0", "@nomicfoundation/hardhat-ethers@^3.0.4":
-  version "3.0.6"
-  resolved "https://registry.npmjs.org/@nomicfoundation/hardhat-ethers/-/hardhat-ethers-3.0.6.tgz"
-  integrity sha512-/xzkFQAaHQhmIAYOQmvHBPwL+NkwLzT9gRZBsgWUYeV+E6pzXsBQsHfRYbAZ3XEYare+T7S+5Tg/1KDJgepSkA==
+"@nomicfoundation/hardhat-ethers@^3.0.0", "@nomicfoundation/hardhat-ethers@^3.0.4", "@nomicfoundation/hardhat-ethers@^3.0.8":
+  version "3.0.8"
+  resolved "https://registry.npmjs.org/@nomicfoundation/hardhat-ethers/-/hardhat-ethers-3.0.8.tgz"
+  integrity sha512-zhOZ4hdRORls31DTOqg+GmEZM0ujly8GGIuRY7t7szEk2zW/arY1qDug/py8AEktT00v5K+b6RvbVog+va51IA==
   dependencies:
     debug "^4.1.1"
     lodash.isequal "^4.5.0"
@@ -633,16 +633,17 @@
   resolved "https://registry.npmjs.org/@nomicfoundation/hardhat-ignition-ethers/-/hardhat-ignition-ethers-0.15.5.tgz"
   integrity sha512-W6s1QN9CFxzSVZS6w9Jcj3WLaK32z2FP5MxNU2OKY1Fn9ZzLr+miXbUbWYuRHl6dxrrl6sE8cv33Cybv19pmCg==
 
-"@nomicfoundation/hardhat-ignition@^0.15.5":
-  version "0.15.5"
-  resolved "https://registry.npmjs.org/@nomicfoundation/hardhat-ignition/-/hardhat-ignition-0.15.5.tgz"
-  integrity sha512-Y5nhFXFqt4owA6Ooag8ZBFDF2RAZElMXViknVIsi3m45pbQimS50ti6FU8HxfRkDnBARa40CIn7UGV0hrelzDw==
+"@nomicfoundation/hardhat-ignition@^0.15.10", "@nomicfoundation/hardhat-ignition@^0.15.5":
+  version "0.15.11"
+  resolved "https://registry.npmjs.org/@nomicfoundation/hardhat-ignition/-/hardhat-ignition-0.15.11.tgz"
+  integrity sha512-OXebmK9FCMwwbb4mIeHBbVFFicAGgyGKJT2zrONrpixrROxrVs6KEi1gzsiN25qtQhCQePt8BTjjYrgy86Dfxg==
   dependencies:
-    "@nomicfoundation/ignition-core" "^0.15.5"
-    "@nomicfoundation/ignition-ui" "^0.15.5"
+    "@nomicfoundation/ignition-core" "^0.15.11"
+    "@nomicfoundation/ignition-ui" "^0.15.11"
     chalk "^4.0.0"
     debug "^4.3.2"
     fs-extra "^10.0.0"
+    json5 "^2.2.3"
     prompts "^2.4.2"
 
 "@nomicfoundation/hardhat-network-helpers@^1.0.0":
@@ -672,10 +673,10 @@
     table "^6.8.0"
     undici "^5.14.0"
 
-"@nomicfoundation/ignition-core@^0.15.5":
-  version "0.15.5"
-  resolved "https://registry.npmjs.org/@nomicfoundation/ignition-core/-/ignition-core-0.15.5.tgz"
-  integrity sha512-FgvuoIXhakRSP524JzNQ4BviyzBBKpsFaOWubPZ4XACLT4/7vGqlJ/7DIn0D2NL2anQ2qs98/BNBY9WccXUX1Q==
+"@nomicfoundation/ignition-core@^0.15.10", "@nomicfoundation/ignition-core@^0.15.11", "@nomicfoundation/ignition-core@^0.15.5":
+  version "0.15.11"
+  resolved "https://registry.npmjs.org/@nomicfoundation/ignition-core/-/ignition-core-0.15.11.tgz"
+  integrity sha512-PeYKRlrQ0koT72yRnlyyG66cXMFiv5X/cIB8hBFPl3ekeg5tPXcHAgs/VZhOsgwEox4ejphTtItLESb1IDBw0w==
   dependencies:
     "@ethersproject/address" "5.6.1"
     "@nomicfoundation/solidity-analyzer" "^0.1.1"
@@ -687,10 +688,10 @@
     lodash "4.17.21"
     ndjson "2.0.0"
 
-"@nomicfoundation/ignition-ui@^0.15.5":
-  version "0.15.5"
-  resolved "https://registry.npmjs.org/@nomicfoundation/ignition-ui/-/ignition-ui-0.15.5.tgz"
-  integrity sha512-ZcE4rIn10qKahR4OqS8rl8NM2Fbg2QYiBXgMgj74ZI0++LlCcZgB5HyaBbX+lsnKHjTXtjYD3b+2mtg7jFbAMQ==
+"@nomicfoundation/ignition-ui@^0.15.11":
+  version "0.15.11"
+  resolved "https://registry.npmjs.org/@nomicfoundation/ignition-ui/-/ignition-ui-0.15.11.tgz"
+  integrity sha512-VPOVl5xqCKhYCyPOQlposx+stjCwqXQ+BCs5lnw/f2YUfgII+G5Ye0JfHiJOfCJGmqyS03WertBslcj9zQg50A==
 
 "@nomicfoundation/solidity-analyzer-darwin-arm64@0.1.2":
   version "0.1.2"
@@ -1961,6 +1962,11 @@ dir-glob@^3.0.1:
   dependencies:
     path-type "^4.0.0"
 
+dotenv@^16.4.7:
+  version "16.5.0"
+  resolved "https://registry.npmjs.org/dotenv/-/dotenv-16.5.0.tgz"
+  integrity sha512-m/C+AwOAr9/W1UOIZUo232ejMNnJAJtYQjUbHoNTBNTJSvqzzDh7vnrei3o3r3m9blf6ZoDkvcw0VmozNRFJxg==
+
 elliptic@^6.5.2, elliptic@^6.5.4, elliptic@6.5.4:
   version "6.5.4"
   resolved "https://registry.npmjs.org/elliptic/-/elliptic-6.5.4.tgz"
@@ -3045,6 +3051,11 @@ json-stringify-safe@^5.0.1:
   version "5.0.1"
   resolved "https://registry.npmjs.org/json-stringify-safe/-/json-stringify-safe-5.0.1.tgz"
   integrity sha512-ZClg6AaYvamvYEE82d3Iyd3vSSIjQ+odgjaTzRuO3s7toCdFKczob2i0zCh7JE8kWn17yvAWhUVxvqGwUalsRA==
+
+json5@^2.2.3:
+  version "2.2.3"
+  resolved "https://registry.npmjs.org/json5/-/json5-2.2.3.tgz"
+  integrity sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==
 
 jsonfile@^4.0.0:
   version "4.0.0"

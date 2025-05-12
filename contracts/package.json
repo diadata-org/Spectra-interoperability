@@ -12,6 +12,7 @@
   "homepage": "https://github.com/diadata-org/Spectra-interoperability#readme",
   "version": "1.0.0",
   "scripts": {
+    "compile": "npx hardhat compile",
     "test": "forge test --contracts 'contracts/**/*.sol'",
     "test:coverage": "forge coverage --contracts 'contracts/**/*.sol'",
     "prettier": "npx prettier --write --plugin=prettier-plugin-solidity 'contracts/**/*.sol'",
