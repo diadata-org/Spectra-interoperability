@@ -1,0 +1,21 @@
+# Folders
+/artifacts
+/cache
+/contracts/example
+/contracts/mocks
+/lib
+/scripts
+/test
+/test-foundry
+/typechain-types
+
+# Files
+.gitignore
+.prettierignore
+.prettierrc
+.solhint.json
+foundry.toml
+hardhat.config.ts
+remappings.txt
+tsconfig.json
+yarn.lock
