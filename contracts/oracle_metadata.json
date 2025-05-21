@@ -1,0 +1,36 @@
+{
+  "10640": {
+    "MetadataContract": "0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6",
+    "MailBox": "0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a"
+  },
+  "100640": {
+    "MetadataContract": "0x0087342f5f4c7AB23a37c045c3EF710749527c88",
+    "MailBox": "0x16cD72271498bcaD5aeB9f2D785bA82dC5AfA5E2"
+  },
+  "11155420": {
+    "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
+  },
+  "84532": {
+    "MailBox": "0x6966b0E55883d49BFB24539356a2f8A673E02039"
+  },
+  "421614": {
+    "MailBox": "0x598facE78a4302f11E3de0bee1894Da0b2Cb71F8"
+  },
+  "11155111":{
+    "MailBox":"0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766"
+  },
+  "1301":{
+    "MailBox":"0xDDcFEcF17586D08A5740B7D91735fcCE3dfe3eeD"
+  },
+  "1050":{
+    "MetadataContract":"0x5eeB8c00CD8F189f62c9BAD352C0C474429F8A27",
+    "MailBox":"0xa016e5E7Ce70E78ba7B914299B3c2d44f69Ad392"
+  },
+  "42161":{
+    "MailBox":"0x979Ca5202784112f4738403dBec5D0F3B9daabB9"
+  },
+  "130":{
+    "MailBox":"0x3a464f746D23Ab22155710f44dB16dcA53e0775E"
+  }
+  
+}
