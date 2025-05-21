@@ -5,34 +5,34 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-async function main() {
-    const source = process.env.SOURCE === "true";
-    const destination = process.env.DESTINATION === "true";
+let gasSummary = [];
 
+async function main() {
+    const destination = process.env.DESTINATION === "true";
     const [deployer] = await ethers.getSigners();
     const chainId = (await deployer.provider.getNetwork()).chainId.toString();
-    console.log("Deploying contracts on chain:", chainId);
-
-    if (source) {
-        await deploySourceContracts(chainId);
-    } else if (destination) {
-        await deployDestinationContracts(chainId);
+    
+    if (!destination) {
+        console.log("Deploying contracts on DIA Oracle chain:", chainId);
+        await deploySourceContracts(chainId, deployer);
     } else {
-        console.error("Please set SOURCE or DESTINATION environment variable to true");
-        process.exit(1);
+        console.log("Deploying contracts on Destination chain:", chainId);
+        await deployDestinationContracts(chainId, deployer);
     }
+    
+    printGasSummary();
 }
 
-async function deploySourceContracts(chainId) {
-    const oracleTrigger = await deployContract("OracleTrigger");
-    const ism = await deployContract("Ism");
-    const oracleRequestRecipient = await deployContract("OracleRequestRecipient");
+async function deploySourceContracts(chainId, deployer) {
+    const oracleTrigger = await deployContract("OracleTrigger", deployer);
+    const ism = await deployContract("Ism", deployer);
+    const oracleRequestRecipient = await deployContract("OracleRequestRecipient", deployer);
 
-    // Read metadata contract address and mailbox from oracle_metadata.json
     const metadataFilePath = path.resolve("./oracle_metadata.json");
     let metadata = {};
     if (fs.existsSync(metadataFilePath)) {
         metadata = JSON.parse(fs.readFileSync(metadataFilePath, "utf8"));
+        
     }
     
     if (metadata[chainId]) {
@@ -40,104 +40,99 @@ async function deploySourceContracts(chainId) {
         const metadataContractAddress = metadata[chainId].MetadataContract || "";
         
         if (mailboxAddress) {
-            console.log(`Updating MailBox in OracleTrigger to: ${mailboxAddress}`);
-            await (await oracleTrigger.setMailBox(mailboxAddress)).wait();
+            await executeTransaction(oracleTrigger.setMailBox, [mailboxAddress], "Set MailBox in OracleTrigger", deployer);
         }
         
         if (metadataContractAddress) {
-            console.log(`Updating MetadataContract in OracleTrigger to: ${metadataContractAddress}`);
-            await (await oracleTrigger.updateMetadataContract(metadataContractAddress)).wait();
+            await executeTransaction(oracleTrigger.updateMetadataContract, [metadataContractAddress], "Update MetadataContract in OracleTrigger", deployer);
         }
-    }else{
-        console.log(`Metadata Not Found`)
+    } else {
+        console.log(`Metadata Not Found`);
     }
-    
+
+    await verifyContract("OracleTrigger", oracleTrigger.target);
+    await verifyContract("Ism", ism.target);
+    await verifyContract("OracleRequestRecipient", oracleRequestRecipient.target);
+
+
     updateDeployedContracts(chainId, "source", {
         OracleTrigger: oracleTrigger.target,
         Ism: ism.target,
         OracleRequestRecipient: oracleRequestRecipient.target
     });
-
-    await verifyContract("OracleTrigger", oracleTrigger.target);
-    await verifyContract("Ism", ism.target);
-    await verifyContract("OracleRequestRecipient", oracleRequestRecipient.target);
 }
 
-async function deployDestinationContracts(chainId) {
-    const ism = await deployContract("Ism");
-    const requestOracle = await deployContract("RequestOracle");
-    const pushOracleReceiver = await deployContract("PushOracleReceiver");
-    const protocolFeeHook = await  deployContract("ProtocolFeeHook");
+async function deployDestinationContracts(chainId, deployer) {
+    const ism = await deployContract("Ism", deployer);
+    const requestOracle = await deployContract("RequestOracle", deployer);
+    const pushOracleReceiver = await deployContract("PushOracleReceiver", deployer);
+    const protocolFeeHook = await deployContract("ProtocolFeeHook", deployer);
 
 
-    console.log(`Updating ISM in to setSenderShouldBe to: ${ism.target}`);
-    await (await ism.setSenderShouldBe(100640,"0x4aAd43d11eE6858FE8ffb4fbd81b4746560AE6dF")).wait();
-
-    
-
-    console.log(`Updating ISM in RequestOracle to: ${ism.target}`);
-    await (await requestOracle.setInterchainSecurityModule(ism.target)).wait();
-
-    console.log(`Updating ProtocolFeeHook in RequestOracle to: ${protocolFeeHook.target}`);
-    await (await requestOracle.setPaymentHook(protocolFeeHook.target)).wait();
+    await executeTransaction(requestOracle.setInterchainSecurityModule, [ism.target], "Set ISM in RequestOracle", deployer);
+    await executeTransaction(requestOracle.setPaymentHook, [protocolFeeHook.target], "Set ProtocolFeeHook in RequestOracle", deployer);
+    await executeTransaction(pushOracleReceiver.setInterchainSecurityModule, [ism.target], "Set ISM in PushOracleReceiver", deployer);
+    await executeTransaction(pushOracleReceiver.setPaymentHook, [protocolFeeHook.target], "Set ProtocolFeeHook in PushOracleReceiver", deployer);
 
 
-    console.log(`Updating ISM in pushOracleReceiver to: ${ism.target}`);
-    await (await pushOracleReceiver.setInterchainSecurityModule(ism.target)).wait();
-
-    console.log(`Updating ProtocolFeeHook in pushOracleReceiver to: ${protocolFeeHook.target}`);
-    await (await pushOracleReceiver.setPaymentHook(protocolFeeHook.target)).wait();
-
-
-    const metadataFilePath = path.resolve("./oracle_metadata.json");
-    let metadata = {};
-    if (fs.existsSync(metadataFilePath)) {
-        metadata = JSON.parse(fs.readFileSync(metadataFilePath, "utf8"));
-    }
-
-    if (metadata[chainId]) {
-        const mailboxAddress = metadata[chainId].MailBox || "";
-         
-        if (mailboxAddress) {
-            console.log(`Updating MailBox in RequestOracle to: ${mailboxAddress}`);
-            await (await requestOracle.setTrustedMailBox(mailboxAddress)).wait();
-
-            console.log(`Updating MailBox in pushOracleReceiver to: ${mailboxAddress}`);
-            await (await pushOracleReceiver.setTrustedMailBox(mailboxAddress)).wait();
-        }
-        
-        
-    }else{
-        console.log(`Metadata Not Found for chain`, chainId)
-    }
+    await verifyContract("Ism", ism.target);
+    await verifyContract("RequestOracle", requestOracle.target);
+    await verifyContract("PushOracleReceiver", pushOracleReceiver.target);
+    await verifyContract("ProtocolFeeHook", protocolFeeHook.target);
 
 
- 
-    
     updateDeployedContracts(chainId, "destination", {
         Ism: ism.target,
         RequestOracle: requestOracle.target,
         PushOracleReceiver: pushOracleReceiver.target,
         ProtocolFeeHook:protocolFeeHook.target,
     });
-    
-    await verifyContract("Ism", ism.target);
-    await verifyContract("RequestOracle", requestOracle.target);
-    await verifyContract("PushOracleReceiver", pushOracleReceiver.target);
 }
 
-async function deployContract(contractName) {
-    console.log(`Deploying ${contractName}`);
-
+async function deployContract(contractName, deployer) {
+    console.log(`Deploying ${contractName}...`);
     const ContractFactory = await ethers.getContractFactory(contractName);
-    console.log(`Deploying ..  ${contractName}`);
-
     const contract = await ContractFactory.deploy();
-    console.log(`Deploying .. ..  ${contractName}`);
+    const receipt = await contract.deploymentTransaction().wait();
+    
+    const gasUsed = BigInt(receipt.gasUsed);
+    const gasPrice = BigInt(receipt.gasPrice);
+    const totalCost = gasUsed * gasPrice;
 
-    await contract.waitForDeployment();
-    console.log(`${contractName} deployed at:`, contract.target);
+
+    
+    
+    gasSummary.push({ action: `Deploy ${contractName}`, gasUsed, gasPrice, totalCost });
+    
+    console.log(`${contractName} deployed at: ${contract.target} (Gas Used: ${gasUsed}, Cost: ${ethers.formatEther(totalCost)} ETH)`);
     return contract;
+}
+
+async function executeTransaction(method, args, action, deployer) {
+    const tx = await method(...args);
+    const receipt = await tx.wait();
+    
+    const gasUsed = BigInt(receipt.gasUsed);
+    const gasPrice = BigInt(receipt.gasPrice);
+    const totalCost = gasUsed * gasPrice;
+    
+    gasSummary.push({ action, gasUsed, gasPrice, totalCost });
+    
+    console.log(`${action} completed. Gas Used: ${gasUsed}, Cost: ${ethers.formatEther(totalCost)} ETH`);
+}
+
+function printGasSummary() {
+    console.log("\nGas Usage Summary:");
+    console.log("-------------------------------------------------------------------------------");
+    console.log("| Action                             | Gas Used | Gas Price (Gwei) | Cost (ETH) | Simulated Cost (ETH @ 0.0013) |");
+    console.log("-------------------------------------------------------------------------------");
+    
+    gasSummary.forEach(({ action, gasUsed, gasPrice, totalCost }) => {
+        const simulatedCost = gasUsed * BigInt(1300000000); // 0.0013 ETH = 1.3 Gwei = 1.3 * 10^9 wei
+        console.log(`| ${action.padEnd(35)} | ${gasUsed.toString().padEnd(9)} | ${ethers.formatUnits(gasPrice, "gwei").padEnd(16)} | ${ethers.formatEther(totalCost).padEnd(10)} | ${ethers.formatEther(simulatedCost).padEnd(10)} |`);
+    });
+
+    console.log("-------------------------------------------------------------------------------");
 }
 
 function updateDeployedContracts(chainId, type, contractAddresses) {
@@ -156,14 +151,16 @@ function updateDeployedContracts(chainId, type, contractAddresses) {
     console.log("Updated contract addresses in deployed_contracts.json");
 }
 
+
 async function verifyContract(contractName, contractAddress) {
     console.log(`Verifying ${contractName}...`);
     try {
         await run("verify:verify", { address: contractAddress, constructorArguments: [] });
         console.log(`${contractName} verified`);
     } catch (error) {
-        console.error(`${contractName} verification failed:`, error);
+        console.error(`${contractName} verification failed:`, error.message);
     }
 }
+
 
 main().catch(console.error);
