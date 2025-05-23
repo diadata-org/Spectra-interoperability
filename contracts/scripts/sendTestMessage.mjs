@@ -12,7 +12,7 @@ import {
 const { ethers } = pkg;
 
 async function main() {
-  let destinationDomain = 100640;
+  let destinationDomain = 1050;
 
   let chainId = process.env.CHAIN_ID;
   const network = await ethers.provider.getNetwork();
@@ -58,7 +58,22 @@ async function main() {
     // unichain sepolia
     "1301":{
       "MailBox":"0xDDcFEcF17586D08A5740B7D91735fcCE3dfe3eeD"
-    }
+    },
+    "10":{
+      "MailBox":"0xd4C1905BB1D26BC93DAC913e13CaCC278CdCC80D"
+    },
+    "10":{
+      "MailBox":"0xd4C1905BB1D26BC93DAC913e13CaCC278CdCC80D"
+    },
+    "1301":{
+      "MailBox":"0xDDcFEcF17586D08A5740B7D91735fcCE3dfe3eeD"
+    },
+    "130":{
+      "MailBox":"0x3a464f746D23Ab22155710f44dB16dcA53e0775E"
+    },
+    "42161":{
+      "MailBox":"0x979Ca5202784112f4738403dBec5D0F3B9daabB9"
+    },
   }
 
   console.log("mailbox-----",allMailbox[chainId+""].MailBox)
