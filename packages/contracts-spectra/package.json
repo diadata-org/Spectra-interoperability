@@ -2,7 +2,7 @@
     "name": "@dia-data/contracts-spectra",
     "description": "Spectra Cross-chain Protocol",
     "author": "DIA Data",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "repository": {
         "type": "git",
         "url": "git+https://github.com/diadata-org/Spectra-interoperability.git"
@@ -10,7 +10,7 @@
       "bugs": {
         "url": "https://github.com/diadata-org/Spectra-interoperability/issues"
       },
-      "homepage": "https://github.com/diadata-org/Spectra-interoperability#readme",
+      "homepage": "https://www.diadata.org/",
     "scripts": {
       "compile": "npx hardhat compile",
       "test": "forge test --contracts 'contracts/**/*.sol'",
