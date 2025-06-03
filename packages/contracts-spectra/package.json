@@ -1,0 +1,55 @@
+{
+    "name": "@dia-data/contracts-spectra",
+    "description": "Spectra Cross-chain Protocol",
+    "author": "DIA Data",
+    "version": "1.1.0",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/diadata-org/Spectra-interoperability.git"
+      },
+      "bugs": {
+        "url": "https://github.com/diadata-org/Spectra-interoperability/issues"
+      },
+      "homepage": "https://github.com/diadata-org/Spectra-interoperability#readme",
+    "scripts": {
+      "compile": "npx hardhat compile",
+      "test": "forge test --contracts 'contracts/**/*.sol'",
+      "test:coverage": "forge coverage --contracts 'contracts/**/*.sol'",
+      "prettier": "npx prettier --write --plugin=prettier-plugin-solidity 'contracts/**/*.sol'",
+      "lint": "npx solhint 'contracts/**/*.sol'"
+    },
+    "engines": {
+        "node": ">=18",
+        "pnpm": ">=10"
+    },
+    "devDependencies": {
+      "@nomicfoundation/hardhat-ethers": "^3.0.8",
+      "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+      "@nomicfoundation/hardhat-verify": "^2.0.10",
+      "hardhat": "^2.22.6",
+      "prettier": "^3.5.3",
+      "prettier-plugin-solidity": "^1.4.2",
+      "solhint": "^5.0.5",
+      "ts-node": "^10.9.2",
+      "typescript": "^5.6.2",
+      "@typechain/ethers-v6": "^0.5.0",
+      "@typechain/hardhat": "^9.0.0",
+      "@types/chai": "^4.2.0",
+      "@types/mocha": ">=9.1.0",
+      "chai": "^4.2.0",
+      "dotenv": "^16.4.7",
+      "hardhat-gas-reporter": "^1.0.8",
+      "solidity-coverage": "^0.8.1",
+      "typechain": "^8.3.0",
+      "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
+      "@nomicfoundation/hardhat-ignition": "^0.15.10",
+      "@nomicfoundation/hardhat-ignition-ethers": "^0.15.0",
+      "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
+      "@nomicfoundation/ignition-core": "^0.15.10"
+    },
+    "dependencies": {
+      "@hyperlane-xyz/utils": "^5.2.1",
+      "@openzeppelin/contracts": "^4.4.0"
+    }
+  }
+  
