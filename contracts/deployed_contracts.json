@@ -19,6 +19,16 @@
       "ProtocolFeeHook": "0x048050547eb6e68cB37Fb21EEafEad40CF2CbdbB"
     }
   },
+  "146": {
+    "ChainId": "146",
+    "Type": "destination",
+    "Contracts": {
+      "Ism": "0xE74B7D236A97eED9026926073cBb436638266888",
+      "RequestOracle": "0xA42217338614B7e67D022C52D1CD38e02D619bb0",
+      "PushOracleReceiver": "0x048050547eb6e68cB37Fb21EEafEad40CF2CbdbB",
+      "ProtocolFeeHook": "0x0ec9C62333E29243B04C934bC924c169c1255027"
+    }
+  },
   "1050": {
     "ChainId": "1050",
     "Type": "source",
@@ -76,6 +86,16 @@
       "RequestOracle": "0x61D217a26D0Bff1D2b4c6f5880e621071326aadC",
       "PushOracleReceiver": "0x9bb71344Ed950F9cFD85EE1C7258553B01d95FA0",
       "ProtocolFeeHook": "0x611C8b288c642336136a436d7125AC49FA71468B"
+    }
+  },
+  "98866": {
+    "ChainId": "98866",
+    "Type": "destination",
+    "Contracts": {
+      "Ism": "0x92F0f4C9F769ed83609CD2ccD1ACcE224bBC8cBF",
+      "RequestOracle": "0xE74B7D236A97eED9026926073cBb436638266888",
+      "PushOracleReceiver": "0xA42217338614B7e67D022C52D1CD38e02D619bb0",
+      "ProtocolFeeHook": "0x048050547eb6e68cB37Fb21EEafEad40CF2CbdbB"
     }
   },
   "100640": {
