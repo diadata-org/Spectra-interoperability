@@ -1,0 +1,46 @@
+{
+  "2": {
+    "network": "Chain 2",
+    "validators": [
+      {
+        "name": "Hyperlane Validator 1",
+        "address": "0xDBc7cC0E73C5ea9Fd39fe777dB54f1c0ca564C1e"
+      }
+    ]
+  },
+  "3": {
+    "network": "Chain 3",
+    "validators": [
+      {
+        "name": "Hyperlane Validator 1",
+        "address": "0xD77b516730A836Fc41934e7D5864e72c165b934e"
+      }
+    ]
+  },
+  "7": {
+    "network": "Chain 7",
+    "validators": [
+      {
+        "name": "Hyperlane Validator 1",
+        "address": "0x691dc4e763514df883155DF0952f847b539454c0"
+      }
+    ]
+  },
+  "8": {
+    "network": "Chain 8",
+    "validators": [
+      {
+        "name": "Hyperlane Validator 1",
+        "address": "0xBB5842aE0e05215b53Df4787A29144EfB7e67551"
+      },
+      {
+        "name": "Hyperlane Validator 2",
+        "address": "0xa5a56e97fB46f0AC3A3D261E404ACB998d9a6969"
+      },
+      {
+        "name": "Hyperlane Validator 3",
+        "address": "0x95C7bF235837cb5A609fe6c95870410B9f68bCFF"
+      }
+    ]
+  }
+}
