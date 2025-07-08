@@ -11,8 +11,8 @@ contract OracleIntentRegistry {
         // Metadata
         string intentType;
         string version;
-        uint64 chainId;
-        uint64 nonce;
+        uint256 chainId;
+        uint256 nonce;
         uint256 expiry;
         
         // Oracle data
@@ -35,6 +35,17 @@ contract OracleIntentRegistry {
     // Mapping of authorized signers
     mapping(address => bool) public authorizedSigners;
     
+    // Mapping to track processed intents
+    mapping(bytes32 => bool) public processedIntents;
+    
+    // EIP-712 domain separator
+    bytes32 private immutable DOMAIN_SEPARATOR;
+    
+    // EIP-712 type hash
+    bytes32 private constant ORACLE_INTENT_TYPEHASH = keccak256(
+        "OracleIntent(string intentType,string version,uint256 chainId,uint256 nonce,uint256 expiry,string symbol,uint256 price,uint256 timestamp,string source)"
+    );
+    
     // Events
     event IntentRegistered(bytes32 indexed intentHash, string indexed symbol, uint256 price, uint256 timestamp, address signer);
     event SignerAuthorized(address indexed signer, bool status);
@@ -56,10 +67,22 @@ contract OracleIntentRegistry {
     constructor() {
         owner = msg.sender;
         authorizedSigners[msg.sender] = true;
+        
+        // Create the EIP-712 domain separator
+        DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)"),
+                keccak256("DIA Oracle Intent"),
+                keccak256("1"),
+                block.chainid,
+                address(this),
+                bytes32(0)
+            )
+        );
     }
     
     /**
-     * @dev Registers a new oracle intent
+     * @dev Registers a new oracle intent with EIP-712 signature
      * @param intentType The type of intent (e.g., "OracleUpdate")
      * @param version The version of the intent format
      * @param chainId The chain ID where the intent originates
@@ -69,14 +92,14 @@ contract OracleIntentRegistry {
      * @param price The price value
      * @param timestamp The timestamp of the oracle data
      * @param source The source of the oracle data
-     * @param signature The signature of the intent
+     * @param signature The EIP-712 signature
      * @param signer The address of the signer
      */
     function registerIntent(
         string memory intentType,
         string memory version,
-        uint64 chainId,
-        uint64 nonce,
+        uint256 chainId,
+        uint256 nonce,
         uint256 expiry,
         string memory symbol,
         uint256 price,
@@ -84,32 +107,46 @@ contract OracleIntentRegistry {
         string memory source,
         bytes memory signature,
         address signer
-    ) external onlyAuthorized {
+    ) external {
         // Check if the intent has expired
         require(block.timestamp <= expiry, "OracleIntentRegistry: intent has expired");
         
         // Verify the signer is authorized
         require(authorizedSigners[signer], "OracleIntentRegistry: signer is not authorized");
         
-        // Create the intent hash
-        bytes32 intentHash = keccak256(abi.encode(
-            intentType,
-            version,
-            chainId,
-            nonce,
-            expiry,
-            symbol,
-            price,
-            timestamp,
-            source
-        ));
+        // Create the intent hash for EIP-712
+        bytes32 structHash = keccak256(
+            abi.encode(
+                ORACLE_INTENT_TYPEHASH,
+                keccak256(bytes(intentType)),
+                keccak256(bytes(version)),
+                chainId,
+                nonce,
+                expiry,
+                keccak256(bytes(symbol)),
+                price,
+                timestamp,
+                keccak256(bytes(source))
+            )
+        );
         
-        // Verify the signature using personal_sign format
-        // Hash the message directly with Ethereum signed message prefix
-        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", intentHash));
+        // Create the EIP-712 hash
+        bytes32 hash = keccak256(
+            abi.encodePacked(
+                "\x19\x01",
+                DOMAIN_SEPARATOR,
+                structHash
+            )
+        );
+        
+        // Check if this intent has already been processed
+        require(!processedIntents[hash], "OracleIntentRegistry: intent already processed");
         
         // Verify the signature
-        require(recoverSigner(ethSignedMessageHash, signature) == signer, "OracleIntentRegistry: invalid signature");
+        require(recoverSigner(hash, signature) == signer, "OracleIntentRegistry: invalid signature");
+        
+        // Mark the intent as processed
+        processedIntents[hash] = true;
         
         // Store the intent
         OracleIntent memory intent = OracleIntent({
@@ -126,6 +163,8 @@ contract OracleIntentRegistry {
             signer: signer
         });
         
+        // Use the EIP-712 hash as the intent hash
+        bytes32 intentHash = hash;
         intents[intentHash] = intent;
         
         // Update latest intent for symbol if this timestamp is newer
@@ -136,17 +175,6 @@ contract OracleIntentRegistry {
         
         // Emit event
         emit IntentRegistered(intentHash, symbol, price, timestamp, signer);
-    }
-    
-    /**
-     * @dev Registers a new oracle intent from a JSON string
-     * This function is provided for convenience when integrating with external systems
-     * Implementation is not provided in this version
-     */
-    function registerIntentFromJSON() external view onlyAuthorized {
-        // In a real implementation, you would parse the JSON and call registerIntent
-        // This is a placeholder for demonstration purposes
-        revert("OracleIntentRegistry: JSON parsing not implemented");
     }
     
     /**
@@ -222,48 +250,9 @@ contract OracleIntentRegistry {
     }
     
     /**
-     * @dev Converts a bytes32 to a hex string
-     * @param data The bytes32 to convert
-     * @return The hex string
+     * @dev Returns the domain separator for EIP-712 signatures
      */
-    function toHexString(bytes32 data) internal pure returns (string memory) {
-        bytes memory hexChars = "0123456789abcdef";
-        bytes memory result = new bytes(64); // 32 bytes * 2 hex chars
-        
-        for (uint i = 0; i < 32; i++) {
-            result[i*2] = hexChars[uint8(data[i] >> 4)];
-            result[i*2+1] = hexChars[uint8(data[i] & 0x0f)];
-        }
-        
-        return string(abi.encodePacked("0x", result));
+    function getDomainSeparator() external view returns (bytes32) {
+        return DOMAIN_SEPARATOR;
     }
-    
-    /**
-     * @dev Converts a uint to a string
-     * @param value The uint to convert
-     * @return The string representation
-     */
-    function uintToString(uint256 value) internal pure returns (string memory) {
-        if (value == 0) {
-            return "0";
-        }
-        
-        uint256 temp = value;
-        uint256 digits;
-        
-        while (temp != 0) {
-            digits++;
-            temp /= 10;
-        }
-        
-        bytes memory buffer = new bytes(digits);
-        
-        while (value != 0) {
-            digits -= 1;
-            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
-            value /= 10;
-        }
-        
-        return string(buffer);
-    }
-}
+} 

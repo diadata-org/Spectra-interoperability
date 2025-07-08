@@ -41,6 +41,17 @@ func main() {
 	pollingTimeStr := utils.GetEnv("POLLING_TIME", fmt.Sprintf("%d", defaultPollingTime))
 	consumerAddr := utils.GetEnv("CONSUMER_ADDRESS", defaultConsumerAddr)
 
+	// Always use EIP-712 signatures
+	log.Println("Using EIP-712 signatures for intents")
+
+	// Check if the EIP-712 contract address is set
+	eip712Contract := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+	if eip712Contract == "" {
+		log.Printf("Warning: L2_INTENT_REGISTRY_EIP712 environment variable not set, signature verification may fail")
+	} else {
+		log.Printf("Using EIP-712 contract: %s", eip712Contract)
+	}
+
 	// Set debug mode
 	debugModeStr := utils.GetEnv("DEBUG", fmt.Sprintf("%t", defaultDebug))
 	utils.DebugMode, _ = strconv.ParseBool(debugModeStr)
@@ -86,7 +97,7 @@ func main() {
 		log.Printf("Polling interval: %s", pollingTime)
 
 		// Start consumer service
-		go consumer.StartConsumerService(ctx, oracleClient, consumerAddr, symbol, pollingTime)
+		go consumer.StartConsumerService(ctx, oracleClient, consumerAddr, symbol, pollingTime, consumer.ModeEIP712)
 	} else {
 		// Start attestation loop
 		log.Printf("Starting attestation service for symbol %s", symbol)
@@ -150,7 +161,7 @@ func processAttestation(ctx context.Context, oracleClient *client.OracleClient, 
 	}
 
 	// Publish the intent to the L2 chain
-	txHash, err := intent.PublishIntent(ctx, oracleClient.GetPrivateKey(), signedIntentJSON)
+	txHash, err := intent.PublishIntent(ctx, oracleClient.GetPrivateKey(), signedIntentJSON, intent.ModeEIP712)
 	if err != nil {
 		log.Printf("Failed to publish intent: %v", err)
 		return
