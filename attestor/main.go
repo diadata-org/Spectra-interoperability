@@ -22,7 +22,7 @@ const (
 	defaultRPCURL       = "https://testnet-rpc.diadata.org"
 	defaultOracleAddr   = "0x0087342f5f4c7AB23a37c045c3EF710749527c88"
 	defaultSymbol       = "BTC/USD"
-	defaultPollingTime  = 60 // seconds
+	defaultPollingTime  = 0.3 // seconds (300ms)
 	defaultDebug        = false
 	defaultConsumerAddr = "" // Default OracleIntentConsumer address
 )
@@ -38,7 +38,7 @@ func main() {
 	signedAddr := utils.GetEnv("SIGNED_ORACLE_ADDRESS", "")
 	privateKey := utils.GetEnv("PRIVATE_KEY", "")
 	symbol := utils.GetEnv("SYMBOL", defaultSymbol)
-	pollingTimeStr := utils.GetEnv("POLLING_TIME", fmt.Sprintf("%d", defaultPollingTime))
+	pollingTimeStr := utils.GetEnv("POLLING_TIME", fmt.Sprintf("%g", defaultPollingTime))
 	consumerAddr := utils.GetEnv("CONSUMER_ADDRESS", defaultConsumerAddr)
 
 	// Always use EIP-712 signatures
@@ -68,10 +68,11 @@ func main() {
 	}
 
 	// Parse polling time
-	pollingTime, err := time.ParseDuration(pollingTimeStr + "s")
+	pollingTimeFloat, err := strconv.ParseFloat(pollingTimeStr, 64)
 	if err != nil {
 		log.Fatalf("Invalid polling time: %v", err)
 	}
+	pollingTime := time.Duration(pollingTimeFloat * float64(time.Second))
 
 	// Create oracle client
 	oracleClient, err := client.NewOracleClient(rpcURL, oracleAddr, signedAddr, privateKey)
@@ -94,7 +95,11 @@ func main() {
 		}
 		log.Printf("Starting OracleIntentConsumer service for symbol %s", symbol)
 		log.Printf("Consumer address: %s", consumerAddr)
-		log.Printf("Polling interval: %s", pollingTime)
+		if pollingTime < time.Second {
+			log.Printf("Polling interval: %dms", pollingTime.Milliseconds())
+		} else {
+			log.Printf("Polling interval: %s", pollingTime)
+		}
 
 		// Start consumer service
 		go consumer.StartConsumerService(ctx, oracleClient, consumerAddr, symbol, pollingTime, consumer.ModeEIP712)
@@ -103,7 +108,11 @@ func main() {
 		log.Printf("Starting attestation service for symbol %s", symbol)
 		log.Printf("Oracle address: %s", oracleAddr)
 		log.Printf("Signed oracle address: %s", signedAddr)
-		log.Printf("Polling interval: %s", pollingTime)
+		if pollingTime < time.Second {
+			log.Printf("Polling interval: %dms", pollingTime.Milliseconds())
+		} else {
+			log.Printf("Polling interval: %s", pollingTime)
+		}
 
 		// Process once immediately
 		processAttestation(ctx, oracleClient, symbol)
@@ -159,6 +168,7 @@ func processAttestation(ctx context.Context, oracleClient *client.OracleClient, 
 		log.Printf("Failed to create intent: %v", err)
 		return
 	}
+	log.Printf("Signing intent process completed in %s", time.Since(startTime))
 
 	// Publish the intent to the L2 chain
 	txHash, err := intent.PublishIntent(ctx, oracleClient.GetPrivateKey(), signedIntentJSON, intent.ModeEIP712)
