@@ -33,8 +33,8 @@ type OracleIntent struct {
 	// Metadata
 	IntentType string   `json:"intentType"` // "OracleUpdate"
 	Version    string   `json:"version"`    // "1.0"
-	ChainId    int64    `json:"chainId"`    // Chain ID where the intent originates
-	Nonce      uint64   `json:"nonce"`      // Unique identifier for this intent
+	ChainId    *big.Int `json:"chainId"`    // Chain ID where the intent originates
+	Nonce      *big.Int `json:"nonce"`      // Unique identifier for this intent
 	Expiry     *big.Int `json:"expiry"`     // When this intent expires (unix timestamp)
 
 	// Oracle data

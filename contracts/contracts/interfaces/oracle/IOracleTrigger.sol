@@ -55,24 +55,28 @@ interface IOracleTrigger {
     /// @notice Emitted when the metadata contract address is updated
     /// @param newMetadata The new metadata contract address
     event MetadataContractUpdated(address indexed newMetadata);
+    
+    // /// @notice Emitted when the intent registry contract address is updated
+    // /// @param newRegistry The new intent registry contract address
+    // event IntentRegistryContractUpdated(address indexed newRegistry);
 
     /// @notice Emitted when tokens are recovered
     /// @param receiver The address of the receiver
     /// @param amount The amount of tokens recovered
     event TokensRecovered(address receiver, uint256 amount);
 
-    /// @notice Dispatches a message to a destination chain
+    /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
     /// @param _destinationDomain The destination chain ID
-    /// @param key The key used to fetch the oracle value
+    /// @param key The symbol to fetch the latest intent for
     function dispatchToChain(
         uint32 _destinationDomain,
         string memory key
     ) external payable;
 
-    /// @notice Dispatches a message to a destination chain
+    /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
     /// @param _destinationDomain The destination chain ID
     /// @param _recipientAddress The address of the recipient contract on the destination chain
-    /// @param _key The key used to fetch the oracle value
+    /// @param _key The symbol to fetch the latest intent for
     function dispatch(
         uint32 _destinationDomain,
         address _recipientAddress,
@@ -82,4 +86,6 @@ interface IOracleTrigger {
     /// @notice Retrieves the mailbox contract address
     /// @return The address of the mailbox contract
     function getMailBox() external view returns (address);
+    
+ 
 }

@@ -13,6 +13,32 @@ interface IDIAOracleV2 {
     ) external view returns (uint128, uint128);
 }
 
+// Interface for OracleIntentRegistry
+interface IOracleIntentRegistry {
+    struct OracleIntent {
+        // Metadata
+        string intentType;
+        string version;
+        uint256 chainId;
+        uint256 nonce;
+        uint256 expiry;
+        
+        // Oracle data
+        string symbol;
+        uint256 price;
+        uint256 timestamp;
+        string source;
+        
+        // Signature data
+        bytes signature;
+        address signer;
+    }
+    
+    function getLatestPrice(string memory symbol) external view returns (uint256 price, uint256 timestamp, string memory source);
+    function getIntent(bytes32 intentHash) external view returns (OracleIntent memory);
+    function latestIntentBySymbol(string memory) external view returns (bytes32);
+}
+
 /// @title OracleTrigger
 /// @notice Reads the latest oracle value from metadata and dispatches it to the desired chain.
 /// @dev Provides access control for managing chains and secure dispatching mechanisms.
@@ -37,6 +63,9 @@ contract OracleTrigger is
 
     /// @notice Address of the DIA oracle metadata contract.
     address public metadataContract;
+    
+    /// @notice Address of the OracleIntentRegistry contract.
+    address public intentRegistryContract;
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -113,9 +142,19 @@ contract OracleTrigger is
         metadataContract = newMetadata;
         emit MetadataContractUpdated(newMetadata);
     }
+    
+    /// @notice Updates the intent registry contract address
+    /// @param newRegistry The new intent registry contract address
+    function updateIntentRegistryContract(
+        address newRegistry
+    ) external onlyRole(OWNER_ROLE) validateAddress(newRegistry) {
+        intentRegistryContract = newRegistry;
+        emit IntentRegistryContractUpdated(newRegistry);
+    }
 
     /**
      * @dev See {IOracleTrigger-dispatchToChain}.
+     * @notice Now gets the latest intent from the registry and sends it as the message
      */
     function dispatchToChain(
         uint32 _destinationDomain,
@@ -128,9 +167,30 @@ contract OracleTrigger is
         validateAddress(mailBox)
         nonReentrant
     {
-        (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
-
-        bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
+        // Get the latest intent from the registry
+        if (intentRegistryContract == address(0)) revert InvalidAddress();
+        
+        // Get the latest intent hash for the symbol
+        bytes32 intentHash = IOracleIntentRegistry(intentRegistryContract).latestIntentBySymbol(key);
+        if (intentHash == bytes32(0)) revert OracleError(key);
+        
+        // Get the intent details
+        IOracleIntentRegistry.OracleIntent memory intent = IOracleIntentRegistry(intentRegistryContract).getIntent(intentHash);
+        
+        // Encode the intent as the message body
+        bytes memory messageBody = abi.encode(
+            intent.intentType,
+            intent.version,
+            intent.chainId,
+            intent.nonce,
+            intent.expiry,
+            intent.symbol,
+            intent.price,
+            intent.timestamp,
+            intent.source,
+            intent.signature,
+            intent.signer
+        );
 
         address recipient = chains[_destinationDomain];
 
@@ -145,6 +205,7 @@ contract OracleTrigger is
 
     /**
      * @dev See {IOracleTrigger-dispatch}.
+     * @notice Now gets the latest intent from the registry and sends it as the message
      */
     function dispatch(
         uint32 _destinationDomain,
@@ -158,9 +219,30 @@ contract OracleTrigger is
         validateAddress(mailBox)
         validateAddress(recipientAddress)
     {
-        (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
-
-        bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
+        // Get the latest intent from the registry
+        if (intentRegistryContract == address(0)) revert InvalidAddress();
+        
+        // Get the latest intent hash for the symbol
+        bytes32 intentHash = IOracleIntentRegistry(intentRegistryContract).latestIntentBySymbol(key);
+        if (intentHash == bytes32(0)) revert OracleError(key);
+        
+        // Get the intent details
+        IOracleIntentRegistry.OracleIntent memory intent = IOracleIntentRegistry(intentRegistryContract).getIntent(intentHash);
+        
+        // Encode the intent as the message body
+        bytes memory messageBody = abi.encode(
+            intent.intentType,
+            intent.version,
+            intent.chainId,
+            intent.nonce,
+            intent.expiry,
+            intent.symbol,
+            intent.price,
+            intent.timestamp,
+            intent.source,
+            intent.signature,
+            intent.signer
+        );
 
         bytes32 messageId = IMailbox(mailBox).dispatch{ value: msg.value }(
             _destinationDomain,
@@ -200,6 +282,13 @@ contract OracleTrigger is
     function getMailBox() external view returns (address) {
         return mailBox;
     }
+    
+    /**
+     * @notice Returns the address of the intent registry contract.
+     */
+    function getIntentRegistry() external view returns (address) {
+        return intentRegistryContract;
+    }
 
     /**
      * @notice Fetches value from the oracle.
@@ -219,4 +308,7 @@ contract OracleTrigger is
             revert OracleError(key);
         }
     }
+    
+    // Event for intent registry updates
+    event IntentRegistryContractUpdated(address indexed newRegistry);
 }

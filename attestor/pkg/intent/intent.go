@@ -262,6 +262,412 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	return string(signedIntentJSON), nil
 }
 
+// SymbolData represents price data for a single symbol
+type SymbolData struct {
+	Symbol string
+	Price  *big.Int
+	Volume *big.Int
+}
+
+// AttestMultipleValues creates signed intents for multiple symbols in a single transaction
+func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress string, symbolsData []SymbolData) (string, error) {
+	if privateKey == "" {
+		return "", fmt.Errorf("private key not provided")
+	}
+
+	if len(symbolsData) == 0 {
+		return "", fmt.Errorf("no symbols provided")
+	}
+
+	// Get the current timestamp
+	now := time.Now().Unix()
+	nowBig := big.NewInt(now)
+
+	symbols := make([]string, len(symbolsData))
+	for i, data := range symbolsData {
+		symbols[i] = data.Symbol
+	}
+
+	utils.DebugLog("Creating batch intent for symbols: %s", strings.Join(symbols, ", "))
+
+	// Generate a unique nonce (using nanoseconds)
+	nonceVal := time.Now().UnixNano()
+	nonce := big.NewInt(nonceVal)
+
+	// Set expiry to 1 hour from now
+	expiry := big.NewInt(now + 3600)
+
+	// Get the chain ID from the environment or use default
+	rpcURL := utils.GetEnv("RPC_URL", "https://testnet-rpc.diadata.org")
+	ethClient, err := ethclient.Dial(rpcURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to RPC: %v", err)
+	}
+
+	// Get chain ID from the connected network
+	chainID, err := ethClient.ChainID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get chain ID: %v", err)
+	}
+
+	// Use the chain ID from the network
+	rpcChainId := chainID.Uint64()
+
+	// Get contract address for EIP-712 domain
+	contractAddr := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+	if contractAddr == "" {
+		utils.DebugLog("Warning: No contract address found, using zero address")
+		contractAddr = "0x0000000000000000000000000000000000000000"
+	}
+
+	// Parse private key
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse private key: %v", err)
+	}
+
+	// Get the signer address from the private key
+	publicKey := privKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return "", fmt.Errorf("failed to cast public key to ECDSA")
+	}
+	signerAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	// Store all signed intents
+	signedIntents := make([]types.SignedIntent, len(symbolsData))
+
+	// Process each symbol
+	for i, data := range symbolsData {
+		// Create the intent
+		intent := types.OracleIntent{
+			IntentType: "OracleUpdate",
+			Version:    "1.0",
+			ChainId:    chainID,
+			Nonce:      nonce,
+			Expiry:     expiry,
+			Symbol:     data.Symbol,
+			Price:      data.Price,
+			Timestamp:  nowBig,
+			Source:     "DIA Oracle",
+		}
+
+		// Convert intent to JSON
+		intentJSON, err := json.Marshal(intent)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal intent: %v", err)
+		}
+
+		utils.DebugLog("Intent data for %s: %s", data.Symbol, string(intentJSON))
+
+		// Create EIP-712 typed data for signing
+		// Define the domain separator and type data
+		domain := apitypes.TypedDataDomain{
+			Name:              "DIA Oracle Intent",
+			Version:           "1",
+			ChainId:           gethmath.NewHexOrDecimal256(int64(rpcChainId)),
+			VerifyingContract: contractAddr,
+			Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
+		}
+
+		utils.DebugLog("EIP-712 Domain for %s: Name=%s, Version=%s, ChainId=%d, Contract=%s",
+			data.Symbol, domain.Name, domain.Version, rpcChainId, contractAddr)
+
+		// Create the typed data for EIP-712 signing
+		typedData := apitypes.TypedData{
+			Types: apitypes.Types{
+				"EIP712Domain": []apitypes.Type{
+					{Name: "name", Type: "string"},
+					{Name: "version", Type: "string"},
+					{Name: "chainId", Type: "uint256"},
+					{Name: "verifyingContract", Type: "address"},
+					{Name: "salt", Type: "bytes32"},
+				},
+				"OracleIntent": []apitypes.Type{
+					{Name: "intentType", Type: "string"},
+					{Name: "version", Type: "string"},
+					{Name: "chainId", Type: "uint256"},
+					{Name: "nonce", Type: "uint256"},
+					{Name: "expiry", Type: "uint256"},
+					{Name: "symbol", Type: "string"},
+					{Name: "price", Type: "uint256"},
+					{Name: "timestamp", Type: "uint256"},
+					{Name: "source", Type: "string"},
+				},
+			},
+			PrimaryType: "OracleIntent",
+			Domain:      domain,
+			Message: map[string]interface{}{
+				"intentType": intent.IntentType,
+				"version":    intent.Version,
+				"chainId":    intent.ChainId,
+				"nonce":      intent.Nonce,
+				"expiry":     intent.Expiry,
+				"symbol":     intent.Symbol,
+				"price":      intent.Price,
+				"timestamp":  intent.Timestamp,
+				"source":     intent.Source,
+			},
+		}
+
+		// Hash the typed data
+		domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
+		if err != nil {
+			return "", fmt.Errorf("failed to hash domain separator: %v", err)
+		}
+
+		typedDataHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
+		if err != nil {
+			return "", fmt.Errorf("failed to hash typed data: %v", err)
+		}
+
+		// Create the final hash to sign
+		dataToSign := append([]byte{0x19, 0x01}, domainSeparator[:]...)
+		dataToSign = append(dataToSign, typedDataHash[:]...)
+		hash := crypto.Keccak256Hash(dataToSign)
+
+		utils.DebugLog("Domain separator for %s: 0x%x", data.Symbol, domainSeparator)
+		utils.DebugLog("Message hash for %s: 0x%x", data.Symbol, typedDataHash)
+		utils.DebugLog("EIP-712 hash for verification for %s: %s", data.Symbol, hash.Hex())
+
+		// Sign the hash
+		signature, err := crypto.Sign(hash.Bytes(), privKey)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign message: %v", err)
+		}
+
+		// Adjust the V value (recovery ID) for Ethereum compatibility
+		// Ethereum expects V to be 27 or 28, but the signature algorithm gives values 0 or 1
+		if signature[64] == 0 || signature[64] == 1 {
+			signature[64] += 27
+		}
+
+		// Extract R, S, V values for debugging
+		r := signature[:32]
+		s := signature[32:64]
+		v := signature[64]
+
+		utils.DebugLog("Signature components for %s - R: 0x%x, S: 0x%x, V: %d", data.Symbol, r, s, v)
+
+		// Convert signature to hex
+		signatureHex := "0x" + hex.EncodeToString(signature)
+		utils.DebugLog("Signature for %s: %s", data.Symbol, signatureHex)
+
+		// Create the signed intent
+		signedIntent := types.SignedIntent{}
+		signedIntent.Intent.IntentType = intent.IntentType
+		signedIntent.Intent.Version = intent.Version
+		signedIntent.Intent.ChainId = intent.ChainId
+		signedIntent.Intent.Nonce = intent.Nonce
+		signedIntent.Intent.Expiry = intent.Expiry
+		signedIntent.Intent.Symbol = intent.Symbol
+		signedIntent.Intent.Price = intent.Price
+		signedIntent.Intent.Timestamp = intent.Timestamp
+		signedIntent.Intent.Source = intent.Source
+		signedIntent.Signature = signatureHex
+		signedIntent.Signer = signerAddress.Hex()
+
+		// Add to our batch
+		signedIntents[i] = signedIntent
+
+		// Log the intent details
+		log.Printf("Created EIP-712 signed intent for %s", data.Symbol)
+		log.Printf("Price: %s", data.Price.String())
+	}
+
+	// Create batch intent structure
+	type BatchSignedIntent struct {
+		Intents []types.SignedIntent `json:"intents"`
+	}
+
+	batchIntent := BatchSignedIntent{
+		Intents: signedIntents,
+	}
+
+	// Convert the batch intent to JSON
+	batchIntentJSON, err := json.Marshal(batchIntent)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal batch intent: %v", err)
+	}
+
+	// Return the batch intent JSON
+	return string(batchIntentJSON), nil
+}
+
+// PublishMultipleIntents publishes multiple signed intents in a single transaction
+func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJSON string) (string, error) {
+	startTime := time.Now()
+
+	// Get L2 RPC URL and contract address from environment variables
+	l2RpcURL := utils.GetEnv("L2_RPC_URL", "https://testnet-rpc.diadata.org")
+	l2IntentContract := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+
+	if l2IntentContract == "" {
+		return "", fmt.Errorf("L2_INTENT_REGISTRY_EIP712 environment variable not set")
+	}
+
+	utils.DebugLog("Publishing multiple intents to %s using EIP-712", l2IntentContract)
+
+	// For debugging purposes
+	utils.DebugLog("Batch Intent JSON: %s", batchIntentJSON)
+
+	// Parse the batch intent
+	var batchIntent struct {
+		Intents []types.SignedIntent `json:"intents"`
+	}
+
+	err := json.Unmarshal([]byte(batchIntentJSON), &batchIntent)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse batch intent: %v", err)
+	}
+
+	intentCount := len(batchIntent.Intents)
+	if intentCount == 0 {
+		return "", fmt.Errorf("no intents found in batch")
+	}
+
+	log.Printf("Processing %d intents in batch transaction", intentCount)
+
+	// Connect to the L2 chain
+	ethClient, err := ethclient.Dial(l2RpcURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
+	}
+
+	// Parse private key
+	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse private key: %v", err)
+	}
+
+	// Get the chain ID
+	chainID, err := ethClient.ChainID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get chain ID: %v", err)
+	}
+
+	// Get the sender's nonce
+	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
+	nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
+	if err != nil {
+		return "", fmt.Errorf("failed to get nonce: %v", err)
+	}
+
+	// Get gas price
+	gasPrice, err := ethClient.SuggestGasPrice(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get gas price: %v", err)
+	}
+
+	// Define the ABI for the batch register function
+	const batchRegistryABI = `[{"inputs":[{"components":[{"internalType":"string","name":"intentType","type":"string"},{"internalType":"string","name":"version","type":"string"},{"internalType":"uint256","name":"chainId","type":"uint256"},{"internalType":"uint256","name":"nonce","type":"uint256"},{"internalType":"uint256","name":"expiry","type":"uint256"},{"internalType":"string","name":"symbol","type":"string"},{"internalType":"uint256","name":"price","type":"uint256"},{"internalType":"uint256","name":"timestamp","type":"uint256"},{"internalType":"string","name":"source","type":"string"},{"internalType":"bytes","name":"signature","type":"bytes"},{"internalType":"address","name":"signer","type":"address"}],"internalType":"struct OracleIntentRegistryEIP712.IntentData[]","name":"intents","type":"tuple[]"}],"name":"registerMultipleIntents","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+
+	// Parse the ABI
+	parsedABI, err := abi.JSON(strings.NewReader(batchRegistryABI))
+	if err != nil {
+		return "", fmt.Errorf("failed to parse ABI: %v", err)
+	}
+
+	// Prepare the intents for the batch transaction
+	intentData := make([]struct {
+		IntentType string
+		Version    string
+		ChainId    *big.Int
+		Nonce      *big.Int
+		Expiry     *big.Int
+		Symbol     string
+		Price      *big.Int
+		Timestamp  *big.Int
+		Source     string
+		Signature  []byte
+		Signer     common.Address
+	}, len(batchIntent.Intents))
+
+	log.Printf("Preparing %d intents for batch registration", len(batchIntent.Intents))
+
+	for i, intent := range batchIntent.Intents {
+		// Convert signature from hex to bytes
+		signatureStr := intent.Signature
+		if strings.HasPrefix(signatureStr, "0x") {
+			signatureStr = signatureStr[2:]
+		}
+		signatureBytes, err := hex.DecodeString(signatureStr)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode signature for %s: %v", intent.Intent.Symbol, err)
+		}
+
+		intentData[i] = struct {
+			IntentType string
+			Version    string
+			ChainId    *big.Int
+			Nonce      *big.Int
+			Expiry     *big.Int
+			Symbol     string
+			Price      *big.Int
+			Timestamp  *big.Int
+			Source     string
+			Signature  []byte
+			Signer     common.Address
+		}{
+			IntentType: intent.Intent.IntentType,
+			Version:    intent.Intent.Version,
+			ChainId:    intent.Intent.ChainId,
+			Nonce:      intent.Intent.Nonce,
+			Expiry:     intent.Intent.Expiry,
+			Symbol:     intent.Intent.Symbol,
+			Price:      intent.Intent.Price,
+			Timestamp:  intent.Intent.Timestamp,
+			Source:     intent.Intent.Source,
+			Signature:  signatureBytes,
+			Signer:     common.HexToAddress(intent.Signer),
+		}
+	}
+
+	log.Printf("Packing input data for transaction")
+
+	// Pack the input data for the registerMultipleIntents function
+	data, err := parsedABI.Pack("registerMultipleIntents", intentData)
+	if err != nil {
+		return "", fmt.Errorf("failed to pack input data: %v", err)
+	}
+
+	// Calculate gas limit based on the number of intents
+	// Base gas limit of 3,000,000 plus 200,000 per intent
+	gasLimit := uint64(3000000 + (intentCount * 200000))
+
+	log.Printf("Creating transaction with gas limit: %d", gasLimit)
+
+	// Create transaction
+	tx := ethTypes.NewTransaction(
+		nonce,
+		common.HexToAddress(l2IntentContract),
+		big.NewInt(0),
+		gasLimit,
+		gasPrice,
+		data,
+	)
+
+	// Sign the transaction
+	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign transaction: %v", err)
+	}
+
+	log.Printf("Sending batch transaction to blockchain")
+
+	// Send the transaction
+	err = ethClient.SendTransaction(ctx, signedTx)
+	if err != nil {
+		return "", fmt.Errorf("failed to send transaction: %v", err)
+	}
+
+	elapsedTime := time.Since(startTime)
+	log.Printf("Batch transaction completed in %s", elapsedTime)
+
+	// Return the transaction hash
+	return signedTx.Hash().Hex(), nil
+}
+
 // RegistryMode represents the type of registry contract to interact with
 // Now only EIP-712 is supported
 type RegistryMode string

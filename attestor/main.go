@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,15 +22,18 @@ import (
 const (
 	defaultRPCURL       = "https://testnet-rpc.diadata.org"
 	defaultOracleAddr   = "0x0087342f5f4c7AB23a37c045c3EF710749527c88"
-	defaultSymbol       = "BTC/USD"
 	defaultPollingTime  = 0.3 // seconds (300ms)
 	defaultDebug        = false
 	defaultConsumerAddr = "" // Default OracleIntentConsumer address
 )
 
+// Default symbols as a comma-separated string
+const defaultSymbols = "BTC/USD,ETH/USD"
+
 func main() {
 	// Define command line flags
 	startConsumer := flag.Bool("consumer", false, "Start the OracleIntentConsumer service")
+	useBatchMode := flag.Bool("batch", true, "Use batch mode to process all symbols in one transaction")
 	flag.Parse()
 
 	// Get configuration from environment variables or use defaults
@@ -37,9 +41,15 @@ func main() {
 	oracleAddr := utils.GetEnv("ORACLE_ADDRESS", defaultOracleAddr)
 	signedAddr := utils.GetEnv("SIGNED_ORACLE_ADDRESS", "")
 	privateKey := utils.GetEnv("PRIVATE_KEY", "")
-	symbol := utils.GetEnv("SYMBOL", defaultSymbol)
+	symbolsStr := utils.GetEnv("SYMBOLS", defaultSymbols)
 	pollingTimeStr := utils.GetEnv("POLLING_TIME", fmt.Sprintf("%g", defaultPollingTime))
 	consumerAddr := utils.GetEnv("CONSUMER_ADDRESS", defaultConsumerAddr)
+
+	// Parse symbols into a slice
+	symbols := strings.Split(symbolsStr, ",")
+	for i, s := range symbols {
+		symbols[i] = strings.TrimSpace(s)
+	}
 
 	// Always use EIP-712 signatures
 	log.Println("Using EIP-712 signatures for intents")
@@ -93,7 +103,7 @@ func main() {
 		if consumerAddr == "" {
 			log.Fatal("CONSUMER_ADDRESS environment variable is required for consumer service")
 		}
-		log.Printf("Starting OracleIntentConsumer service for symbol %s", symbol)
+		log.Printf("Starting OracleIntentConsumer service for symbols: %s", strings.Join(symbols, ", "))
 		log.Printf("Consumer address: %s", consumerAddr)
 		if pollingTime < time.Second {
 			log.Printf("Polling interval: %dms", pollingTime.Milliseconds())
@@ -101,11 +111,13 @@ func main() {
 			log.Printf("Polling interval: %s", pollingTime)
 		}
 
-		// Start consumer service
-		go consumer.StartConsumerService(ctx, oracleClient, consumerAddr, symbol, pollingTime, consumer.ModeEIP712)
+		// Start consumer service for each symbol
+		for _, symbol := range symbols {
+			go consumer.StartConsumerService(ctx, oracleClient, consumerAddr, symbol, pollingTime, consumer.ModeEIP712)
+		}
 	} else {
 		// Start attestation loop
-		log.Printf("Starting attestation service for symbol %s", symbol)
+		log.Printf("Starting attestation service for symbols: %s", strings.Join(symbols, ", "))
 		log.Printf("Oracle address: %s", oracleAddr)
 		log.Printf("Signed oracle address: %s", signedAddr)
 		if pollingTime < time.Second {
@@ -114,8 +126,21 @@ func main() {
 			log.Printf("Polling interval: %s", pollingTime)
 		}
 
+		// Log batch mode setting
+		if *useBatchMode {
+			log.Printf("Using batch mode: All symbols will be processed in a single transaction")
+		} else {
+			log.Printf("Using individual mode: Each symbol will be processed separately")
+		}
+
 		// Process once immediately
-		processAttestation(ctx, oracleClient, symbol)
+		if *useBatchMode {
+			processMultipleAttestations(ctx, oracleClient, symbols)
+		} else {
+			for _, symbol := range symbols {
+				processAttestation(ctx, oracleClient, symbol)
+			}
+		}
 	}
 
 	// Create .env.example file
@@ -134,7 +159,14 @@ func main() {
 			if *startConsumer {
 				// Consumer service is handled in its own goroutine
 			} else {
-				processAttestation(ctx, oracleClient, symbol)
+				// Process symbols based on batch mode setting
+				if *useBatchMode {
+					processMultipleAttestations(ctx, oracleClient, symbols)
+				} else {
+					for _, symbol := range symbols {
+						processAttestation(ctx, oracleClient, symbol)
+					}
+				}
 			}
 		case <-sigCh:
 			log.Println("Received shutdown signal, exiting...")
@@ -143,7 +175,7 @@ func main() {
 	}
 }
 
-// processAttestation handles the attestation process
+// processAttestation handles the attestation process for a single symbol
 func processAttestation(ctx context.Context, oracleClient *client.OracleClient, symbol string) {
 	// Get the current time
 	startTime := time.Now()
@@ -180,4 +212,65 @@ func processAttestation(ctx context.Context, oracleClient *client.OracleClient, 
 	// Log success
 	log.Printf("Successfully published intent for %s, transaction hash: %s", symbol, txHash)
 	log.Printf("Attestation process completed in %s", time.Since(startTime))
+}
+
+// processMultipleAttestations handles attestation for multiple symbols in one transaction
+func processMultipleAttestations(ctx context.Context, oracleClient *client.OracleClient, symbols []string) {
+	// Get the current time
+	startTime := time.Now()
+	log.Printf("Processing batch attestation for symbols: %s at %s",
+		strings.Join(symbols, ", "), startTime.Format(time.RFC3339))
+
+	// Create symbol data array
+	symbolsData := make([]intent.SymbolData, 0, len(symbols))
+
+	// Collect data for each symbol
+	for _, symbol := range symbols {
+		// Get oracle value
+		price, timestamp, err := oracleClient.GetOracleValue(ctx, symbol)
+		if err != nil {
+			log.Printf("Failed to get oracle value for %s: %v", symbol, err)
+			continue
+		}
+
+		// Use a default volume of 1 for simplicity
+		volume := big.NewInt(1)
+
+		// Log the retrieved values
+		log.Printf("Retrieved price for %s: %s, timestamp: %s",
+			symbol, price.String(), timestamp.String())
+
+		// Add to the symbols data array
+		symbolsData = append(symbolsData, intent.SymbolData{
+			Symbol: symbol,
+			Price:  price,
+			Volume: volume,
+		})
+	}
+
+	if len(symbolsData) == 0 {
+		log.Printf("No valid symbol data found, skipping batch attestation")
+		return
+	}
+
+	// Create batch intent
+	batchIntentJSON, err := intent.AttestMultipleValues(ctx, oracleClient.GetPrivateKey(),
+		oracleClient.GetFromAddress(), symbolsData)
+	if err != nil {
+		log.Printf("Failed to create batch intent: %v", err)
+		return
+	}
+	log.Printf("Signing batch intent process completed in %s", time.Since(startTime))
+
+	// Publish the batch intent to the L2 chain
+	txHash, err := intent.PublishMultipleIntents(ctx, oracleClient.GetPrivateKey(), batchIntentJSON)
+	if err != nil {
+		log.Printf("Failed to publish batch intent: %v", err)
+		return
+	}
+
+	// Log success
+	log.Printf("Successfully published batch intent for %d symbols, transaction hash: %s",
+		len(symbolsData), txHash)
+	log.Printf("Batch attestation process completed in %s", time.Since(startTime))
 }

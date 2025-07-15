@@ -30,16 +30,19 @@ RPC_URL=https://testnet-rpc.diadata.org
 ORACLE_ADDRESS=0x0087342f5f4c7AB23a37c045c3EF710749527c88
 SIGNED_ORACLE_ADDRESS=
 PRIVATE_KEY=
-SYMBOL=BTC/USD
+SYMBOLS=BTC/USD,ETH/USD
 POLLING_TIME=60
 DEBUG=false
 
 # L2 Chain Configuration for Cross-Chain Intent System
 L2_RPC_URL=https://testnet-rpc.diadata.org
-L2_INTENT_CONTRACT=0x30c0A25a54e156487f8FF2F5836c5150A2828632
+L2_INTENT_REGISTRY_EIP712=0x0000000000000000000000000000000000000000
 
 # OracleIntentConsumer Configuration
 CONSUMER_ADDRESS=
+
+# PushOracleReceiver Configuration (Direct Intent Updates)
+RECEIVER_ADDRESS=
 `
 	return os.WriteFile(".env.example", []byte(envContent), 0644)
 }

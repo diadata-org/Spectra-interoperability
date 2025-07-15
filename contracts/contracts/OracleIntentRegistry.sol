@@ -26,6 +26,21 @@ contract OracleIntentRegistry {
         address signer;
     }
     
+    // Intent data structure for batch processing
+    struct IntentData {
+        string intentType;
+        string version;
+        uint256 chainId;
+        uint256 nonce;
+        uint256 expiry;
+        string symbol;
+        uint256 price;
+        uint256 timestamp;
+        string source;
+        bytes signature;
+        address signer;
+    }
+    
     // Mapping from intent hash to intent
     mapping(bytes32 => OracleIntent) public intents;
     
@@ -49,6 +64,7 @@ contract OracleIntentRegistry {
     // Events
     event IntentRegistered(bytes32 indexed intentHash, string indexed symbol, uint256 price, uint256 timestamp, address signer);
     event SignerAuthorized(address indexed signer, bool status);
+    event BatchIntentsRegistered(uint256 count);
     
     // Owner of the contract
     address public owner;
@@ -175,6 +191,102 @@ contract OracleIntentRegistry {
         
         // Emit event
         emit IntentRegistered(intentHash, symbol, price, timestamp, signer);
+    }
+
+    /**
+     * @dev Registers multiple oracle intents with EIP-712 signatures in a single transaction
+     * @param intentsData Array of intent data to register
+     */
+    function registerMultipleIntents(IntentData[] memory intentsData) external {
+        require(intentsData.length > 0, "OracleIntentRegistry: no intents provided");
+        
+        uint256 successCount = 0;
+        
+        for (uint256 i = 0; i < intentsData.length; i++) {
+            IntentData memory data = intentsData[i];
+            
+            // Skip expired intents
+            if (block.timestamp > data.expiry) {
+                continue;
+            }
+            
+            // Skip intents from unauthorized signers
+            if (!authorizedSigners[data.signer]) {
+                continue;
+            }
+            
+            // Create the intent hash for EIP-712
+            bytes32 structHash = keccak256(
+                abi.encode(
+                    ORACLE_INTENT_TYPEHASH,
+                    keccak256(bytes(data.intentType)),
+                    keccak256(bytes(data.version)),
+                    data.chainId,
+                    data.nonce,
+                    data.expiry,
+                    keccak256(bytes(data.symbol)),
+                    data.price,
+                    data.timestamp,
+                    keccak256(bytes(data.source))
+                )
+            );
+            
+            // Create the EIP-712 hash
+            bytes32 hash = keccak256(
+                abi.encodePacked(
+                    "\x19\x01",
+                    DOMAIN_SEPARATOR,
+                    structHash
+                )
+            );
+            
+            // Skip already processed intents
+            if (processedIntents[hash]) {
+                continue;
+            }
+            
+            // Verify the signature
+            if (recoverSigner(hash, data.signature) != data.signer) {
+                continue;
+            }
+            
+            // Mark the intent as processed
+            processedIntents[hash] = true;
+            
+            // Store the intent
+            OracleIntent memory intent = OracleIntent({
+                intentType: data.intentType,
+                version: data.version,
+                chainId: data.chainId,
+                nonce: data.nonce,
+                expiry: data.expiry,
+                symbol: data.symbol,
+                price: data.price,
+                timestamp: data.timestamp,
+                source: data.source,
+                signature: data.signature,
+                signer: data.signer
+            });
+            
+            // Use the EIP-712 hash as the intent hash
+            bytes32 intentHash = hash;
+            intents[intentHash] = intent;
+            
+            // Update latest intent for symbol if this timestamp is newer
+            bytes32 currentLatestIntentHash = latestIntentBySymbol[data.symbol];
+            if (currentLatestIntentHash == bytes32(0) || intents[currentLatestIntentHash].timestamp < data.timestamp) {
+                latestIntentBySymbol[data.symbol] = intentHash;
+            }
+            
+            // Emit event for each successfully registered intent
+            emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
+            
+            // Increment success count
+            successCount++;
+        }
+        
+        // Emit batch event
+        emit BatchIntentsRegistered(successCount);
     }
     
     /**
