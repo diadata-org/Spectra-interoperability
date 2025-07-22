@@ -1,0 +1,244 @@
+{
+  "title": "Oracle Bridge Latency Dashboard",
+    "uid": "oracle-latency",
+    "tags": ["oracle", "bridge", "latency", "performance"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "panels": [
+      {
+        "title": "End-to-End Oracle Latency",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 0, "w": 24, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(bridge_end_to_end_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "p99 {{symbol}}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_end_to_end_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "p95 {{symbol}}"
+          },
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(bridge_end_to_end_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "p50 {{symbol}}"
+          }
+        ],
+        "yaxes": [{"format": "s", "label": "Latency"}]
+      },
+      {
+        "title": "Latency Breakdown by Stage",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_intent_to_registration_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "Intent→Registration {{symbol}}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_registration_to_scan_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "Registration→Scan {{symbol}}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_scan_to_processing_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "Scan→Processing {{symbol}}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_processing_to_submission_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "Processing→Submission {{symbol}}"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_submission_to_confirmation_latency_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "Submission→Confirmation {{symbol}}"
+          }
+        ],
+        "yaxes": [{"format": "s", "label": "Stage Latency"}]
+      },
+      {
+        "title": "Scanner Performance",
+        "type": "graph",
+        "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_registration_to_scan_latency_seconds_bucket[5m])) by (scanner_type, le))",
+            "legendFormat": "{{scanner_type}} scanner"
+          }
+        ],
+        "yaxes": [{"format": "s", "label": "Scan Latency"}]
+      },
+      {
+        "title": "Intent Processing Rate",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 16, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(bridge_intents_created_total[5m])) by (symbol)",
+            "legendFormat": "Created {{symbol}}"
+          },
+          {
+            "expr": "sum(rate(bridge_intents_confirmed_total[5m])) by (symbol)",
+            "legendFormat": "Confirmed {{symbol}}"
+          },
+          {
+            "expr": "sum(rate(bridge_intents_failed_total[5m])) by (symbol)",
+            "legendFormat": "Failed {{symbol}}"
+          }
+        ],
+        "yaxes": [{"format": "ops", "label": "Rate"}]
+      },
+      {
+        "title": "Router Decision Time",
+        "type": "graph",
+        "gridPos": {"x": 8, "y": 16, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_router_decision_latency_seconds_bucket[5m])) by (router_id, le))",
+            "legendFormat": "{{router_id}}"
+          }
+        ],
+        "yaxes": [{"format": "ms", "label": "Decision Time"}]
+      },
+      {
+        "title": "Gas Metrics",
+        "type": "graph",
+        "gridPos": {"x": 16, "y": 16, "w": 8, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_gas_price_gwei_bucket[5m])) by (symbol, destination_chain, le))",
+            "legendFormat": "Gas Price {{symbol}} chain:{{destination_chain}}"
+          }
+        ],
+        "yaxes": [{"format": "short", "label": "Gas Price (gwei)"}]
+      },
+      {
+        "title": "Price Age at Submission",
+        "type": "graph",
+        "gridPos": {"x": 0, "y": 22, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bridge_price_age_seconds_bucket[5m])) by (symbol, le))",
+            "legendFormat": "{{symbol}}"
+          }
+        ],
+        "yaxes": [{"format": "s", "label": "Price Age"}]
+      },
+      {
+        "title": "Stage Success Rate",
+        "type": "stat",
+        "gridPos": {"x": 12, "y": 22, "w": 12, "h": 6},
+        "targets": [
+          {
+            "expr": "sum(rate(bridge_intents_confirmed_total[5m])) / sum(rate(bridge_intents_created_total[5m])) * 100",
+            "legendFormat": "Overall Success Rate"
+          }
+        ],
+        "format": "percent",
+        "thresholds": {
+          "mode": "absolute",
+          "steps": [
+            {"color": "red", "value": 0},
+            {"color": "yellow", "value": 90},
+            {"color": "green", "value": 95}
+          ]
+        }
+      },
+      {
+        "title": "Intent Lifecycle Waterfall",
+        "type": "table",
+        "gridPos": {"x": 0, "y": 28, "w": 24, "h": 8},
+        "targets": [
+          {
+            "expr": "topk(10, bridge_intent_timestamp) by (intent_hash, symbol)",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "topk(10, bridge_registration_timestamp) by (intent_hash, symbol)",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "topk(10, bridge_scan_timestamp) by (intent_hash, symbol)",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "topk(10, bridge_processing_timestamp) by (intent_hash, symbol)",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "topk(10, bridge_submission_timestamp) by (intent_hash, symbol)",
+            "format": "table",
+            "instant": true
+          },
+          {
+            "expr": "topk(10, bridge_confirmation_timestamp) by (intent_hash, symbol)",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "columns": [
+          {"text": "Intent Hash", "value": "intent_hash"},
+          {"text": "Symbol", "value": "symbol"},
+          {"text": "Intent Time", "value": "Value #A", "type": "time"},
+          {"text": "Registration", "value": "Value #B", "type": "time"},
+          {"text": "Scan", "value": "Value #C", "type": "time"},
+          {"text": "Processing", "value": "Value #D", "type": "time"},
+          {"text": "Submission", "value": "Value #E", "type": "time"},
+          {"text": "Confirmation", "value": "Value #F", "type": "time"}
+        ]
+      },
+      {
+        "title": "Current Latency Heatmap",
+        "type": "heatmap",
+        "gridPos": {"x": 0, "y": 36, "w": 24, "h": 8},
+        "targets": [
+          {
+            "expr": "sum(increase(bridge_end_to_end_latency_seconds_bucket[1m])) by (le)",
+            "format": "heatmap"
+          }
+        ],
+        "dataFormat": "timeseries",
+        "yAxis": {"format": "s"},
+        "color": {
+          "mode": "spectrum",
+          "scheme": "interpolateRdYlGn",
+          "reverse": true
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "symbol",
+          "type": "query",
+          "query": "label_values(bridge_intents_created_total, symbol)",
+          "multi": true,
+          "includeAll": true,
+          "current": {"text": "All", "value": "$__all"}
+        },
+        {
+          "name": "destination_chain",
+          "type": "query",
+          "query": "label_values(bridge_intents_submitted_total, destination_chain)",
+          "multi": true,
+          "includeAll": true,
+          "current": {"text": "All", "value": "$__all"}
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Failed Intents",
+          "datasource": "Prometheus",
+          "expr": "increase(bridge_intents_failed_total[1m]) > 0",
+          "tagKeys": "symbol,stage,error_type"
+        }
+      ]
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+}

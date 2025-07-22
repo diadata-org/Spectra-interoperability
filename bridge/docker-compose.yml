@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: bridge_postgres
+    environment:
+      POSTGRES_USER: bridge
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: oracle_bridge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bridge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oracle_bridge
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - CONFIG_PATH=/root/config.json
+    ports:
+      - "8090:8080"
+    volumes:
+      - ./config.json:/root/config.json:ro
+    restart: unless-stopped
+    command: ["./bridge", "-config", "/root/config.json"]
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: bridge_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: bridge_grafana
+    ports:
+      - "3334:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
