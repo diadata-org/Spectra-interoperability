@@ -430,15 +430,27 @@ func (bs *EnhancedBlockScanner) logProgress() {
 		return
 	}
 
-	gap := bs.backwardBlock - bs.forwardBlock
+	var gap uint64
+	if bs.backwardBlock > bs.forwardBlock {
+		gap = bs.backwardBlock - bs.forwardBlock
+	} else {
+		// Already converged or invalid state
+		gap = 0
+	}
+	
 	if gap > 0 {
 		blocksPerSec := float64(bs.totalBlocksScanned) / time.Since(time.Now().Add(-30 * time.Second)).Seconds()
-		eta := time.Duration(float64(gap) / blocksPerSec * float64(time.Second))
-		
-		logger.Infof("Scan progress: Forward at block %d, Backward at block %d, Gap: %d blocks, ETA: %s",
-			bs.forwardBlock, bs.backwardBlock, gap, eta)
-		logger.Infof("Events found: %d (forward), %d (backward), Total blocks scanned: %d",
-			bs.forwardEventsFound, bs.backwardEventsFound, bs.totalBlocksScanned)
+		if blocksPerSec > 0 {
+			eta := time.Duration(float64(gap) / blocksPerSec * float64(time.Second))
+			
+			logger.Infof("Enhanced Block Scanner Progress:")
+			logger.Infof("  - Forward Scanner: Block %d (found %d events)", bs.forwardBlock, bs.forwardEventsFound)
+			logger.Infof("  - Backward Scanner: Block %d (found %d events)", bs.backwardBlock, bs.backwardEventsFound)
+			logger.Infof("  - Gap: %d blocks, ETA: %s", gap, eta)
+			logger.Infof("  - Total blocks scanned: %d", bs.totalBlocksScanned)
+		}
+	} else if bs.converged {
+		logger.Info("Scanners have converged - no gap remaining")
 	}
 }
 
@@ -572,9 +584,8 @@ func (bs *EnhancedBlockScanner) Stop() error {
 
 // parseLog converts a raw log to EventData
 func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData, error) {
-	// This is a simplified version - in production, use the same parsing logic as EventMonitor
 	event := &bridgeTypes.EventData{
-		EventName:       "IntentRegistered", // Determine from log.Topics[0]
+		EventName:       "IntentRegistered",
 		ContractAddress: log.Address,
 		BlockNumber:     log.BlockNumber,
 		TxHash:          log.TxHash,
@@ -582,13 +593,21 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 		Raw:             log,
 	}
 
-	// Extract data based on event type
+	// Extract indexed data
 	if len(log.Topics) > 1 {
 		event.IntentHash = [32]byte(log.Topics[1])
 	}
 
-	// Parse additional fields from log.Data
-	// This would use ABI decoding in production
+	// Parse non-indexed data from log.Data
+	// The data contains: price (uint256), timestamp (uint256), signer (address)
+	if len(log.Data) >= 96 { // 32 bytes each for price, timestamp, and 20 bytes for address (padded to 32)
+		event.Price = new(big.Int).SetBytes(log.Data[0:32])
+		event.Timestamp = new(big.Int).SetBytes(log.Data[32:64])
+		event.Signer = common.BytesToAddress(log.Data[64:96])
+	}
+
+	// Symbol is indexed but as a string hash, we'll need to get it from the contract or leave empty
+	// For now, leave it empty and let the bridge fetch full event details if needed
 
 	return event, nil
 }

@@ -355,10 +355,10 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
         for (uint256 i = 0; i < intents.length; i++) {
             OracleIntent calldata intent = intents[i];
             
-            // Skip expired intents
-            if (block.timestamp > intent.expiry) {
-                continue;
-            }
+            // // Skip expired intents
+            // if (block.timestamp > intent.expiry) {
+            //     continue;
+            // }
             
             // Skip intents from unauthorized signers
             if (!authorizedSigners[intent.signer]) {

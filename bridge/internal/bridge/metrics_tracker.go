@@ -67,7 +67,14 @@ func (mt *MetricsTracker) RecordIntentRegistered(event *bridgetypes.IntentRegist
 	}
 	
 	intentHash := event.IntentHash.Hex()
-	registrationTime := time.Unix(event.Timestamp.Int64(), 0)
+	
+	// Handle nil timestamp
+	var registrationTime time.Time
+	if event.Timestamp != nil {
+		registrationTime = time.Unix(event.Timestamp.Int64(), 0)
+	} else {
+		registrationTime = time.Now()
+	}
 	
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]

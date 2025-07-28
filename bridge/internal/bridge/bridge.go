@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,35 +24,35 @@ import (
 
 // Bridge represents the main bridge service
 type Bridge struct {
-	config            *config.Config
-	db                *database.DB
-	sourceClient      *ethclient.Client
-	registryClient    *contracts.RegistryClient
+	config             *config.Config
+	db                 *database.DB
+	sourceClient       *ethclient.Client
+	registryClient     *contracts.RegistryClient
 	destinationClients map[int64]*DestinationClient
-	
+
 	// Channels for communication
-	updateChan        chan *bridgetypes.UpdateRequest
-	eventChan         chan *bridgetypes.EventData
-	errorChan         chan error
-	shutdownChan      chan struct{}
-	
+	updateChan   chan *bridgetypes.UpdateRequest
+	eventChan    chan *bridgetypes.EventData
+	errorChan    chan error
+	shutdownChan chan struct{}
+
 	// State management
-	mu                sync.RWMutex
-	running           bool
-	stats             *bridgetypes.BridgeStats
+	mu                 sync.RWMutex
+	running            bool
+	stats              *bridgetypes.BridgeStats
 	lastProcessedBlock uint64
-	
+
 	// Worker management
-	workerPool        *WorkerPool
-	
+	workerPool *WorkerPool
+
 	// Router system
-	routerRegistry    *router.Registry
-	
+	routerRegistry *router.Registry
+
 	// Block scanner
-	blockScanner      BlockScanner
-	
+	blockScanner BlockScanner
+
 	// Metrics tracking
-	metricsTracker    *MetricsTracker
+	metricsTracker *MetricsTracker
 }
 
 // DestinationClient represents a client for a destination chain
@@ -118,7 +119,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	// Create channels
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
-	
+
 	// Create metrics tracker
 	var metricsTracker *MetricsTracker
 	if metricsCollector != nil {
@@ -224,14 +225,14 @@ func (b *Bridge) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to start block scanner: %w", err)
 		}
 		logger.Info("Block scanner started")
-		
+
 		// Start scanner event processor
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			b.processScannerEvents(ctx)
 		}()
-		
+
 		// Start error handler
 		wg.Add(1)
 		go func() {
@@ -375,11 +376,27 @@ func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.Inte
 		return
 	}
 
+	// Check if intent has expired before routing
+	// currentTime := time.Now().Unix()
+	// if intent.Expiry.Int64() < currentTime {
+	// 	expiryTime := time.Unix(intent.Expiry.Int64(), 0)
+	// 	logger.Warnf("Skipping expired intent %s for %s: expired at %s (current: %s)",
+	// 		event.IntentHash.Hex(),
+	// 		intent.Symbol,
+	// 		expiryTime.Format(time.RFC3339),
+	// 		time.Unix(currentTime, 0).Format(time.RFC3339))
+
+	// 	if b.metricsTracker != nil {
+	// 		b.metricsTracker.RecordIntentFailed(intent, "routing", "intent_expired")
+	// 	}
+	// 	return // Skip expired intent
+	// }
+
 	// Track intent lifecycle start
 	if b.metricsTracker != nil {
 		b.metricsTracker.StartIntentLifecycle(intent, fmt.Sprintf("%d", b.config.Source.ChainID))
 	}
-	
+
 	// Use routers to determine routing
 	routers := b.routerRegistry.GetActiveRouters()
 	if len(routers) == 0 {
@@ -391,19 +408,19 @@ func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.Inte
 	for _, r := range routers {
 		routerStart := time.Now()
 		shouldRoute, reason := r.ShouldRoute(intent)
-		
+
 		// Track router decision
 		if b.metricsTracker != nil {
 			b.metricsTracker.RecordRouterDecision(r.ID(), intent, shouldRoute, reason, routerStart)
 		}
-		
+
 		if !shouldRoute {
 			logger.Debugf("Router %s skipped: %s", r.ID(), reason)
 			continue
 		}
 
 		logger.Infof("Router %s approved for %s: %s", r.ID(), intent.Symbol, reason)
-		
+
 		// Track processing start
 		if b.metricsTracker != nil {
 			b.metricsTracker.RecordIntentProcessing(intent, r.ID())
@@ -427,12 +444,12 @@ func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.Inte
 						break
 					}
 				}
-				
+
 				if contractConfig == nil {
 					logger.Warnf("Contract config not found for %s", contractAddr)
 					continue
 				}
-				
+
 				updateReq := &bridgetypes.UpdateRequest{
 					Intent:           intent,
 					DestinationChain: destClient.config,
@@ -445,7 +462,7 @@ func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.Inte
 				select {
 				case b.updateChan <- updateReq:
 					routedCount++
-					logger.Debugf("Router %s: Queued update for %s on chain %d contract %s", 
+					logger.Debugf("Router %s: Queued update for %s on chain %d contract %s",
 						r.ID(), intent.Symbol, dest.ChainID, contractAddr)
 				default:
 					logger.Warnf("Update channel full, dropping request")
@@ -492,14 +509,36 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 
 	logger.Infof("Processing update for %s on chain %d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
 
+	// Check if intent has expired before processing
+	currentTime := time.Now().Unix()
+	if updateReq.Intent.Expiry.Int64() < currentTime {
+		expiryTime := time.Unix(updateReq.Intent.Expiry.Int64(), 0)
+		logger.Warnf("Skipping expired intent for %s: expired at %s (current: %s)",
+			updateReq.Intent.Symbol,
+			expiryTime.Format(time.RFC3339),
+			time.Unix(currentTime, 0).Format(time.RFC3339))
+
+		if b.metricsTracker != nil {
+			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "validation", "intent_expired")
+		}
+		return nil // Skip expired intent
+	}
+
 	// Check if signer is authorized
+	logger.Infof("Checking signer authorization for %s on chain %d, contract %s",
+		updateReq.Intent.Signer.Hex(), updateReq.DestinationChain.ChainID,
+		destClient.receiverClient.GetAddress().Hex())
 	isAuthorized, err := destClient.receiverClient.IsAuthorizedSigner(ctx, updateReq.Intent.Signer)
 	if err != nil {
+		logger.Errorf("Failed to check signer authorization: %v", err)
 		return fmt.Errorf("failed to check signer authorization: %w", err)
 	}
 	if !isAuthorized {
+		logger.Errorf("Signer %s is not authorized on contract %s",
+			updateReq.Intent.Signer.Hex(), destClient.receiverClient.GetAddress().Hex())
 		return fmt.Errorf("signer %s is not authorized", updateReq.Intent.Signer.Hex())
 	}
+	logger.Infof("Signer %s is authorized", updateReq.Intent.Signer.Hex())
 
 	// Get gas price
 	gasPrice, err := b.getGasPrice(ctx, destClient)
@@ -508,11 +547,14 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	}
 
 	// Update auth
+	logger.Infof("Updating auth for symbol %s on chain %d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
 	if err := destClient.receiverClient.UpdateAuth(ctx, gasPrice); err != nil {
 		return fmt.Errorf("failed to update auth: %w", err)
 	}
 
 	// Send transaction
+	logger.Infof("Sending transaction for symbol %s on chain %d with gas limit 300000",
+		updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
 	tx, err := destClient.receiverClient.HandleIntentUpdate(
 		ctx,
 		updateReq.Intent,
@@ -520,6 +562,16 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		gasPrice,
 	)
 	if err != nil {
+		// Log intent details for debugging
+		if strings.Contains(err.Error(), "simulation failed") {
+			logger.Errorf("Intent details that failed simulation: symbol=%s, price=%s, timestamp=%s, nonce=%s, expiry=%s, signer=%s",
+				updateReq.Intent.Symbol,
+				updateReq.Intent.Price.String(),
+				updateReq.Intent.Timestamp.String(),
+				updateReq.Intent.Nonce.String(),
+				updateReq.Intent.Expiry.String(),
+				updateReq.Intent.Signer.Hex())
+		}
 		if b.metricsTracker != nil {
 			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "submission", "transaction_failed")
 		}
@@ -527,17 +579,28 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	}
 
 	logger.Infof("Transaction sent: %s for %s on chain %d", tx.Hash().Hex(), updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
-	
+
+	// Add a defer to catch any panics
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("PANIC in handleUpdateRequest after sending tx %s: %v", tx.Hash().Hex(), r)
+		}
+	}()
+
 	// Track submission
 	if b.metricsTracker != nil {
+		logger.Debugf("Recording intent submission for tx %s", tx.Hash().Hex())
 		b.metricsTracker.RecordIntentSubmitted(
 			updateReq.Intent,
 			fmt.Sprintf("%d", updateReq.DestinationChain.ChainID),
 			tx.Hash().Hex(),
 			gasPrice,
 		)
+		logger.Debugf("Intent submission recorded for tx %s", tx.Hash().Hex())
 	}
 
+	logger.Infof("About to wait for receipt for tx %s", tx.Hash().Hex())
+	
 	// Wait for transaction receipt
 	receipt, err := b.waitForReceipt(ctx, destClient.client, tx.Hash())
 	if err != nil {
@@ -553,7 +616,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		}
 		return fmt.Errorf("transaction failed: %s", tx.Hash().Hex())
 	}
-	
+
 	// Track confirmation
 	if b.metricsTracker != nil {
 		b.metricsTracker.RecordIntentConfirmed(updateReq.Intent, tx.Hash().Hex(), receipt.GasUsed)
@@ -562,12 +625,11 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	// Update last update time
 	destClient.updateLastUpdate(updateReq.Intent.Symbol)
 
-	logger.Infof("Successfully updated %s on chain %d, gas used: %d", 
+	logger.Infof("Successfully updated %s on chain %d, gas used: %d",
 		updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID, receipt.GasUsed)
 
 	return nil
 }
-
 
 // updateLastUpdate updates the last update time for a symbol
 func (dc *DestinationClient) updateLastUpdate(symbol string) {
@@ -583,6 +645,11 @@ func (b *Bridge) getGasPrice(ctx context.Context, destClient *DestinationClient)
 		return nil, err
 	}
 
+	// Increase suggested gas price by 20% to ensure timely inclusion
+	// This helps avoid stuck transactions
+	gasPrice.Mul(gasPrice, big.NewInt(120))
+	gasPrice.Div(gasPrice, big.NewInt(100))
+
 	// Apply gas price cap from contract config if available
 	// Note: This would need to be per-contract in production
 	for _, contract := range destClient.config.Contracts {
@@ -590,26 +657,46 @@ func (b *Bridge) getGasPrice(ctx context.Context, destClient *DestinationClient)
 			maxGasPrice := new(big.Int)
 			maxGasPrice, ok := maxGasPrice.SetString(contract.MaxGasPrice, 10)
 			if ok && gasPrice.Cmp(maxGasPrice) > 0 {
+				logger.Warnf("Gas price %s exceeds max %s, using max", gasPrice.String(), maxGasPrice.String())
 				gasPrice = maxGasPrice
 			}
 			break
 		}
 	}
 
+	logger.Infof("Using gas price: %s wei (%s gwei)", gasPrice.String(), 
+		new(big.Int).Div(gasPrice, big.NewInt(1e9)).String())
+
 	return gasPrice, nil
 }
 
 // waitForReceipt waits for a transaction receipt
 func (b *Bridge) waitForReceipt(ctx context.Context, client *ethclient.Client, txHash common.Hash) (*types.Receipt, error) {
+	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
+	
+	// Maximum wait time: 5 minutes
+	timeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	
+	attempts := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-timeout:
+			return nil, fmt.Errorf("timeout waiting for transaction receipt after 5 minutes")
+		case <-ticker.C:
+			attempts++
 			receipt, err := client.TransactionReceipt(ctx, txHash)
 			if err != nil {
+				if attempts%12 == 0 { // Log every minute
+					logger.Debugf("Still waiting for receipt %s (attempt %d): %v", txHash.Hex(), attempts, err)
+				}
 				continue
 			}
+			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d", 
+				txHash.Hex(), receipt.Status, receipt.GasUsed)
 			return receipt, nil
 		}
 	}
@@ -711,7 +798,7 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 	if b.config.Metrics.Enabled {
 		logger.Info("Metrics collection is enabled")
 	}
-	
+
 	// TODO: Implement HTTP server with health, stats, and metrics endpoints
 	// Example implementation:
 	// apiServer := api.NewAPIServer(b, b.config.Bridge.MetricsPort)
@@ -721,7 +808,7 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 // processScannerEvents processes events from the block scanner
 func (b *Bridge) processScannerEvents(ctx context.Context) {
 	logger.Info("Starting scanner event processor")
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -737,7 +824,7 @@ func (b *Bridge) processScannerEvents(ctx context.Context) {
 			if b.metricsTracker != nil {
 				b.metricsTracker.RecordIntentScanned(event, scannerType)
 			}
-			
+
 			// Convert scanner event to intent event
 			intentEvent := &bridgetypes.IntentRegisteredEvent{
 				IntentHash:  common.BytesToHash(event.IntentHash[:]),
@@ -748,15 +835,15 @@ func (b *Bridge) processScannerEvents(ctx context.Context) {
 				BlockNumber: event.BlockNumber,
 				TxHash:      event.TxHash,
 			}
-			
+
 			// Track registration
 			if b.metricsTracker != nil {
 				b.metricsTracker.RecordIntentRegistered(intentEvent, fmt.Sprintf("%d", b.config.Source.ChainID))
 			}
-			
+
 			// Process the event
 			b.processIntentEvent(ctx, intentEvent)
-			
+
 			// Mark event as processed in database
 			processedEvent := &database.ProcessedEvent{
 				IntentHash:      intentEvent.IntentHash.Hex(),
@@ -779,7 +866,7 @@ func (b *Bridge) processScannerEvents(ctx context.Context) {
 // handleErrors handles errors from various components
 func (b *Bridge) handleErrors(ctx context.Context) {
 	logger.Info("Starting error handler")
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -802,11 +889,11 @@ func (b *Bridge) GetStats() *bridgetypes.BridgeStats {
 	stats := *b.stats
 	stats.Uptime = time.Since(b.stats.StartTime)
 	stats.UptimeFormatted = utils.FormatDuration(stats.Uptime)
-	
+
 	// Add scanner stats if available
 	if b.blockScanner != nil {
 		stats.ScannerStats = b.blockScanner.GetStats()
 	}
-	
+
 	return &stats
 }
