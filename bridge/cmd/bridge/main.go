@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/bridge"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
@@ -72,15 +72,15 @@ func main() {
 	defer cancel()
 
 	// Create Ethereum clients for health monitoring
-	sourceClient, err := ethclient.Dial(cfg.Source.RPCURL)
+	sourceClient, err := rpc.NewMultiClient(cfg.Source.RPCURLs)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to connect to source chain")
 	}
 	defer sourceClient.Close()
 
-	destClients := make(map[int64]*ethclient.Client)
+	destClients := make(map[int64]rpc.EthClient)
 	for _, destConfig := range cfg.GetEnabledDestinations() {
-		client, err := ethclient.Dial(destConfig.RPCURL)
+		client, err := rpc.NewMultiClient(destConfig.RPCURLs)
 		if err != nil {
 			logger.WithError(err).Errorf("Failed to connect to destination chain %d", destConfig.ChainID)
 			continue

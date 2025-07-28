@@ -6,19 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
-
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
 )
 
 // HealthMonitor monitors the health of bridge components
 type HealthMonitor struct {
 	config         *config.HealthCheckConfig
 	db             *database.DB
-	sourceClient   *ethclient.Client
-	destClients    map[int64]*ethclient.Client
+	sourceClient   rpc.EthClient
+	destClients    map[int64]rpc.EthClient
 	
 	mu             sync.RWMutex
 	componentStatus map[string]*ComponentStatus
@@ -53,8 +52,8 @@ type Alert struct {
 func NewHealthMonitor(
 	cfg *config.HealthCheckConfig,
 	db *database.DB,
-	sourceClient *ethclient.Client,
-	destClients map[int64]*ethclient.Client,
+	sourceClient rpc.EthClient,
+	destClients map[int64]rpc.EthClient,
 ) *HealthMonitor {
 	return &HealthMonitor{
 		config:          cfg,

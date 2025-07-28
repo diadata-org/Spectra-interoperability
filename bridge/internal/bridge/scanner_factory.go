@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/scanner"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
@@ -15,7 +15,7 @@ import (
 // CreateBlockScanner creates the appropriate block scanner based on configuration
 func CreateBlockScanner(
 	cfg *config.Config,
-	client *ethclient.Client,
+	client rpc.EthClient,
 	db *database.DB,
 	eventChan chan<- *bridgeTypes.EventData,
 	errorChan chan<- error,
@@ -24,11 +24,17 @@ func CreateBlockScanner(
 	useEnhancedScanner := cfg.BlockScanner.Enabled && cfg.BlockScanner.BackwardSync
 	
 	if useEnhancedScanner {
+		// Get the underlying ethclient for scanner
+		ethClient, err := client.GetClient()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get eth client: %w", err)
+		}
+		
 		// Create enhanced scanner with backward sync
 		enhancedScanner, err := scanner.NewEnhancedBlockScanner(
 			&cfg.BlockScanner,
 			&cfg.Source,
-			client,
+			ethClient,
 			db,
 			eventChan,
 			errorChan,
@@ -39,11 +45,17 @@ func CreateBlockScanner(
 		return &enhancedScannerAdapter{enhancedScanner}, nil
 	}
 	
+	// Get the underlying ethclient for scanner
+	ethClient, err := client.GetClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get eth client: %w", err)
+	}
+	
 	// Create standard scanner
 	standardScanner, err := scanner.NewBlockScanner(
 		&cfg.BlockScanner,
 		&cfg.Source,
-		client,
+		ethClient,
 		db,
 		eventChan,
 		errorChan,

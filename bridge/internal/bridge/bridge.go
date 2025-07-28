@@ -10,9 +10,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/contracts"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
@@ -26,7 +26,7 @@ import (
 type Bridge struct {
 	config             *config.Config
 	db                 *database.DB
-	sourceClient       *ethclient.Client
+	sourceClient       rpc.EthClient
 	registryClient     *contracts.RegistryClient
 	destinationClients map[int64]*DestinationClient
 
@@ -58,7 +58,7 @@ type Bridge struct {
 // DestinationClient represents a client for a destination chain
 type DestinationClient struct {
 	config         *config.DestinationConfig
-	client         *ethclient.Client
+	client         rpc.EthClient
 	receiverClient *contracts.ReceiverClient
 	lastUpdate     map[string]time.Time // symbol -> last update time
 	mu             sync.RWMutex
@@ -66,11 +66,12 @@ type DestinationClient struct {
 
 // NewBridge creates a new bridge instance
 func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Collector) (*Bridge, error) {
-	// Connect to source chain
-	sourceClient, err := ethclient.Dial(cfg.Source.RPCURL)
+	// Connect to source chain with multiple RPC support
+	sourceClient, err := rpc.NewMultiClient(cfg.Source.RPCURLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to source chain: %w", err)
 	}
+	logger.Infof("Connected to source chain %s via %s", cfg.Source.Name, sourceClient.GetCurrentRPCURL())
 
 	// Create registry client
 	// Note: RegistryAddress should be extracted from Source.Contracts if needed
@@ -84,8 +85,14 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		return nil, fmt.Errorf("registry address not found in source contracts")
 	}
 
+	// Get the underlying ethclient for contracts
+	ethClient, err := sourceClient.GetClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get eth client: %w", err)
+	}
+
 	registryClient, err := contracts.NewRegistryClient(
-		sourceClient,
+		ethClient,
 		common.HexToAddress(registryAddress),
 	)
 	if err != nil {
@@ -165,11 +172,12 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 
 // NewDestinationClient creates a new destination client
 func NewDestinationClient(cfg *config.DestinationConfig, privateKey string) (*DestinationClient, error) {
-	// Connect to destination chain
-	client, err := ethclient.Dial(cfg.RPCURL)
+	// Connect to destination chain with multiple RPC support
+	client, err := rpc.NewMultiClient(cfg.RPCURLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to destination chain: %w", err)
 	}
+	logger.Infof("Connected to destination chain %s via %s", cfg.Name, client.GetCurrentRPCURL())
 
 	// Create receiver client
 	// Note: ReceiverAddress should be extracted from destination contracts
@@ -184,8 +192,14 @@ func NewDestinationClient(cfg *config.DestinationConfig, privateKey string) (*De
 		return nil, fmt.Errorf("no enabled receiver contract found")
 	}
 
+	// Get the underlying ethclient for contracts
+	ethClient, err := client.GetClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get eth client: %w", err)
+	}
+
 	receiverClient, err := contracts.NewReceiverClient(
-		client,
+		ethClient,
 		common.HexToAddress(receiverAddress),
 		privateKey,
 	)
@@ -671,7 +685,7 @@ func (b *Bridge) getGasPrice(ctx context.Context, destClient *DestinationClient)
 }
 
 // waitForReceipt waits for a transaction receipt
-func (b *Bridge) waitForReceipt(ctx context.Context, client *ethclient.Client, txHash common.Hash) (*types.Receipt, error) {
+func (b *Bridge) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash) (*types.Receipt, error) {
 	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
 	
 	// Maximum wait time: 5 minutes
@@ -765,7 +779,7 @@ func (b *Bridge) performHealthCheck(ctx context.Context) {
 }
 
 // checkChainHealth checks the health of a single chain
-func (b *Bridge) checkChainHealth(ctx context.Context, client *ethclient.Client, chainID int64) error {
+func (b *Bridge) checkChainHealth(ctx context.Context, client rpc.EthClient, chainID int64) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 

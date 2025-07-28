@@ -33,8 +33,8 @@ func (c *Config) Validate() error {
 	if c.Source.ChainID == 0 {
 		return fmt.Errorf("source chain_id is required")
 	}
-	if c.Source.RPCURL == "" {
-		return fmt.Errorf("source rpc_url is required")
+	if len(c.Source.RPCURLs) == 0 {
+		return fmt.Errorf("source rpc_urls is required")
 	}
 
 	// Validate destination configurations
@@ -46,8 +46,8 @@ func (c *Config) Validate() error {
 		if dest.ChainID == 0 {
 			return fmt.Errorf("destination[%d] chain_id is required", i)
 		}
-		if dest.RPCURL == "" {
-			return fmt.Errorf("destination[%d] rpc_url is required", i)
+		if len(dest.RPCURLs) == 0 {
+			return fmt.Errorf("destination[%d] rpc_urls is required", i)
 		}
 		if c.PrivateKey == "" {
 			return fmt.Errorf("private_key is required")

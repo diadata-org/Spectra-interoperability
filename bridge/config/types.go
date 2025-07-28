@@ -34,7 +34,7 @@ type DatabaseConfig struct {
 type SourceConfig struct {
 	ChainID      int64                          `json:"chain_id"`
 	Name         string                         `json:"name"`
-	RPCURL       string                         `json:"rpc_url"`
+	RPCURLs      []string                       `json:"rpc_urls"`      // Multiple RPC URLs for failover
 	WsURL        string                         `json:"ws_url"`
 	StartBlock   uint64                         `json:"start_block"`
 	Contracts    map[string]map[string]interface{} `json:"contracts"`
@@ -54,7 +54,7 @@ type EventFilters struct {
 type DestinationConfig struct {
 	ChainID   int64             `json:"chain_id"`
 	Name      string            `json:"name"`
-	RPCURL    string            `json:"rpc_url"`
+	RPCURLs   []string          `json:"rpc_urls"`   // Multiple RPC URLs for failover
 	Enabled   bool              `json:"enabled"`
 	Contracts []ContractConfig  `json:"contracts"`
 }
