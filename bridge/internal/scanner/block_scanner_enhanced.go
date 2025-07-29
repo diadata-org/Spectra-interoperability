@@ -139,6 +139,9 @@ func (bs *EnhancedBlockScanner) Start(ctx context.Context) error {
 	// Start gap detection
 	go bs.gapDetectionLoop(ctx)
 
+	// Try to start WebSocket subscription for real-time events
+	go bs.startWebSocketSubscription(ctx)
+
 	return nil
 }
 
@@ -364,11 +367,25 @@ func (bs *EnhancedBlockScanner) scanBlockRange(ctx context.Context, startBlock, 
 		// Apply filters
 		if bs.shouldProcessEvent(event) {
 			events = append(events, event)
+			
+			// Log individual event discovery with method
+			scanMethod := "FORWARD"
+			if isBackward {
+				scanMethod = "BACKFILL"
+			}
+			logger.Infof("[%s] Discovered %s event at block %d, tx %s, symbol: %s", 
+				scanMethod, event.EventName, log.BlockNumber, log.TxHash.Hex(), event.Symbol)
 		}
 	}
 
-	logger.Debugf("Found %d events in blocks %d-%d (backward=%v)", 
-		len(events), startBlock, endBlock, isBackward)
+	if len(events) > 0 {
+		scanType := "forward scan"
+		if isBackward {
+			scanType = "backfill"
+		}
+		logger.Infof("Found %d events via %s in blocks %d-%d", 
+			len(events), scanType, startBlock, endBlock)
+	}
 
 	return events, nil
 }
@@ -389,12 +406,12 @@ func (bs *EnhancedBlockScanner) processEvent(ctx context.Context, event *bridgeT
 	// Send to event channel
 	select {
 	case bs.eventChan <- event:
-		direction := "forward"
+		scanMethod := "FORWARD"
 		if event.IsBackwardScan {
-			direction = "backward"
+			scanMethod = "BACKFILL"
 		}
-		logger.Infof("Block scanner (%s) found event: %s at block %d", 
-			direction, event.EventName, event.BlockNumber)
+		logger.Infof("[%s] Processing event: %s at block %d (intent: %s)", 
+			scanMethod, event.EventName, event.BlockNumber, intentHashHex)
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-time.After(5 * time.Second):
@@ -687,5 +704,70 @@ func (bs *EnhancedBlockScanner) GetStats() *bridgeTypes.ScannerStats {
 		ForwardEventsFound:  bs.forwardEventsFound,
 		BackwardEventsFound: bs.backwardEventsFound,
 		TotalBlocksScanned:  bs.totalBlocksScanned,
+	}
+}
+
+// startWebSocketSubscription attempts to subscribe to real-time events via WebSocket
+func (bs *EnhancedBlockScanner) startWebSocketSubscription(ctx context.Context) {
+	logger.Info("Attempting to start WebSocket subscription for real-time events")
+	
+	// Build filter query
+	query := ethereum.FilterQuery{
+		Addresses: bs.contractAddresses,
+		Topics:    [][]common.Hash{bs.eventSignatures},
+	}
+	
+	// Create log channel
+	logs := make(chan types.Log, 100)
+	
+	// Subscribe to logs
+	sub, err := bs.client.SubscribeFilterLogs(ctx, query, logs)
+	if err != nil {
+		logger.Warnf("WebSocket subscription not available, falling back to polling: %v", err)
+		return
+	}
+	
+	logger.Info("[WEBSOCKET] Real-time event subscription active")
+	
+	// Process incoming logs
+	for {
+		select {
+		case <-ctx.Done():
+			sub.Unsubscribe()
+			return
+			
+		case <-bs.stopChan:
+			sub.Unsubscribe()
+			return
+			
+		case err := <-sub.Err():
+			logger.Errorf("[WEBSOCKET] Subscription error: %v", err)
+			// Try to reconnect after a delay
+			time.Sleep(10 * time.Second)
+			go bs.startWebSocketSubscription(ctx)
+			return
+			
+		case log := <-logs:
+			// Process the log
+			event, err := bs.parseLog(log)
+			if err != nil {
+				logger.Errorf("[WEBSOCKET] Failed to parse log: %v", err)
+				continue
+			}
+			
+			// Mark as real-time event
+			event.Priority = 3 // Highest priority for real-time events
+			
+			// Apply filters
+			if bs.shouldProcessEvent(event) {
+				logger.Infof("[WEBSOCKET] Real-time event detected: %s at block %d, tx %s, symbol: %s", 
+					event.EventName, log.BlockNumber, log.TxHash.Hex(), event.Symbol)
+				
+				// Send to processing
+				if err := bs.processEvent(ctx, event); err != nil {
+					logger.Errorf("[WEBSOCKET] Failed to process event: %v", err)
+				}
+			}
+		}
 	}
 }

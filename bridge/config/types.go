@@ -35,7 +35,6 @@ type SourceConfig struct {
 	ChainID      int64                          `json:"chain_id"`
 	Name         string                         `json:"name"`
 	RPCURLs      []string                       `json:"rpc_urls"`      // Multiple RPC URLs for failover
-	WsURL        string                         `json:"ws_url"`
 	StartBlock   uint64                         `json:"start_block"`
 	Contracts    map[string]map[string]interface{} `json:"contracts"`
 	EventFilters EventFilters                   `json:"event_filters"`
@@ -45,8 +44,6 @@ type SourceConfig struct {
 type EventFilters struct {
 	Symbols   []string `json:"symbols"`
 	Signers   []string `json:"signers"`
-	MinPrice  string   `json:"min_price"`
-	MaxPrice  string   `json:"max_price"`
 	MaxAge    int      `json:"max_age"`
 }
 
@@ -65,10 +62,6 @@ type ContractConfig struct {
 	Address            string                       `json:"address"`
 	Type               string                       `json:"type"`
 	Enabled            bool                         `json:"enabled"`
-	SupportedSymbols   []string                     `json:"supported_symbols"`
-	Priority           int                          `json:"priority"`
-	MinUpdateInterval  Duration                     `json:"min_update_interval"`
-	MaxPriceDeviation  float64                      `json:"max_price_deviation"`
 	GasLimit           uint64                       `json:"gas_limit"`
 	GasMultiplier      float64                      `json:"gas_multiplier"`
 	MaxGasPrice        string                       `json:"max_gas_price"`
@@ -161,7 +154,6 @@ type RouterConfig struct {
 // RouterFilter represents router filtering options
 type RouterFilter struct {
 	Symbols []string `json:"symbols"`
-	Signers []string `json:"signers"`
 }
 
 // RouterDestination represents a router destination

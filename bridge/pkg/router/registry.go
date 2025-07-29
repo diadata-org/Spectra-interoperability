@@ -128,8 +128,8 @@ func (r *Registry) GetStats() []RouterStats {
 }
 
 // LoadFromConfig loads routers from configuration
-func (r *Registry) LoadFromConfig(routerConfigs []config.RouterConfig, destinations []*config.DestinationConfig) error {
-	// Load explicit routers from config
+func (r *Registry) LoadFromConfig(routerConfigs []config.RouterConfig) error {
+	// Load routers from config
 	for _, cfg := range routerConfigs {
 		router, err := CreateRouterFromConfig(cfg)
 		if err != nil {
@@ -148,17 +148,7 @@ func (r *Registry) LoadFromConfig(routerConfigs []config.RouterConfig, destinati
 		}
 	}
 
-	// Create legacy routers from destination configurations
-	legacyRouters := CreateLegacyRoutersFromConfig(destinations)
-	for _, router := range legacyRouters {
-		if err := r.Register(router); err != nil {
-			logger.Errorf("Failed to register legacy router %s: %v", router.ID(), err)
-			continue
-		}
-	}
-
-	logger.Infof("Loaded %d routers from configuration (%d explicit, %d legacy)", 
-		len(r.routers), len(routerConfigs), len(legacyRouters))
+	logger.Infof("Loaded %d routers from configuration", len(r.routers))
 	return nil
 }
 

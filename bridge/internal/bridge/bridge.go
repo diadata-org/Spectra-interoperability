@@ -119,7 +119,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 
 	// Create router registry and load routers
 	routerRegistry := router.NewRegistry()
-	if err := routerRegistry.LoadFromConfig(cfg.Routers, cfg.Destinations); err != nil {
+	if err := routerRegistry.LoadFromConfig(cfg.Routers); err != nil {
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
@@ -830,6 +830,18 @@ func (b *Bridge) processScannerEvents(ctx context.Context) {
 		case <-b.shutdownChan:
 			return
 		case event := <-b.eventChan:
+			// Determine discovery method based on priority and flags
+			discoveryMethod := "FORWARD"
+			if event.Priority == 3 {
+				discoveryMethod = "WEBSOCKET"
+			} else if event.IsBackwardScan {
+				discoveryMethod = "BACKFILL"
+			}
+			
+			logger.Infof("[%s] Received event: %s at block %d, intent: %s", 
+				discoveryMethod, event.EventName, event.BlockNumber, 
+				common.BytesToHash(event.IntentHash[:]).Hex())
+			
 			// Track scanner detection
 			scannerType := "forward"
 			if event.IsBackwardScan {
@@ -855,10 +867,23 @@ func (b *Bridge) processScannerEvents(ctx context.Context) {
 				b.metricsTracker.RecordIntentRegistered(intentEvent, fmt.Sprintf("%d", b.config.Source.ChainID))
 			}
 
-			// Process the event
+			// Get the full intent data to enrich the event
+			intent, err := b.registryClient.GetIntent(ctx, intentEvent.IntentHash)
+			if err != nil {
+				logger.Errorf("Failed to get intent %s: %v", intentEvent.IntentHash.Hex(), err)
+				// Still save the event with empty symbol to avoid reprocessing
+			} else {
+				// Use enriched data from intent
+				intentEvent.Symbol = intent.Symbol
+				intentEvent.Price = intent.Price
+				intentEvent.Timestamp = intent.Timestamp
+				intentEvent.Signer = intent.Signer
+			}
+
+			// Process the event (this will fetch intent again, but it's ok for now)
 			b.processIntentEvent(ctx, intentEvent)
 
-			// Mark event as processed in database
+			// Mark event as processed in database with enriched data
 			processedEvent := &database.ProcessedEvent{
 				IntentHash:      intentEvent.IntentHash.Hex(),
 				BlockNumber:     intentEvent.BlockNumber,

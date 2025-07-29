@@ -365,22 +365,6 @@ func (em *EventMonitor) shouldProcessEvent(event *bridgeTypes.EventData) bool {
 		}
 	}
 
-	// Check price range
-	if event.Price != nil {
-		if filters.MinPrice != "" {
-			minPrice, ok := new(big.Int).SetString(filters.MinPrice, 10)
-			if ok && event.Price.Cmp(minPrice) < 0 {
-				return false
-			}
-		}
-		
-		if filters.MaxPrice != "" {
-			maxPrice, ok := new(big.Int).SetString(filters.MaxPrice, 10)
-			if ok && event.Price.Cmp(maxPrice) > 0 {
-				return false
-			}
-		}
-	}
 
 	// Age check removed - bridge processes all intents regardless of age
 
