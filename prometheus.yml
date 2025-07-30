@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'dia-oracle-system'
+
+scrape_configs:
+  # Bridge service metrics
+  - job_name: 'bridge'
+    static_configs:
+      - targets: ['bridge:8080']
+        labels:
+          service: 'bridge'
+          component: 'oracle-bridge'
+
+  # Attestor service metrics (when implemented)
+  - job_name: 'attestor'
+    static_configs:
+      - targets: ['attestor:8080']
+        labels:
+          service: 'attestor'
+          component: 'oracle-attestor'
+
+  # PostgreSQL exporter (if added)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgres'
+          component: 'database'
+
+  # Node exporter for system metrics (if added)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          service: 'node'
+          component: 'system'

@@ -1,18 +1,143 @@
 version: '3.8'
 
 services:
+  # PostgreSQL database for bridge service
+  postgres:
+    image: postgres:15-alpine
+    container_name: dia_postgres
+    environment:
+      POSTGRES_USER: bridge
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: oracle_bridge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bridge"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dia-network
+
+  # Attestor service - creates and publishes oracle intents
+  attestor:
+    build:
+      context: ./attestor
+      dockerfile: Dockerfile
+    container_name: dia_attestor
+    environment:
+      # Core configuration
+      - RPC_URL=${ATTESTOR_RPC_URL:-https://testnet-rpc.diadata.org}
+      - ORACLE_ADDRESS=${ORACLE_ADDRESS:-0x0087342f5f4c7AB23a37c045c3EF710749527c88}
+      - PRIVATE_KEY=${ATTESTOR_PRIVATE_KEY}
+      - SYMBOLS=${SYMBOLS:-BTC/USD,ETH/USD}
+      - POLLING_TIME=${POLLING_TIME:-0.3}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      # L2 Registry configuration
+      - L2_RPC_URL=${L2_RPC_URL:-https://testnet-rpc.diadata.org}
+      - L2_INTENT_REGISTRY_EIP712=${L2_INTENT_REGISTRY_EIP712:-0xd2313dcabB0E9447d800546b953E05dD47EB2eB9}
+      # Metrics configuration
+      - METRICS_PORT=8080
+    ports:
+      - "8089:8080"  # Metrics port for attestor
+    restart: unless-stopped
+    networks:
+      - dia-network
+    depends_on:
+      - postgres
+
+  # Bridge service - monitors and propagates oracle updates
+  bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    container_name: dia_bridge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      attestor:
+        condition: service_started
+    environment:
+      - CONFIG_PATH=/root/config.json
+      - DATABASE_URL=postgres://bridge:${DB_PASSWORD:-password}@postgres:5432/oracle_bridge
+      # Private keys for destination chains
+      - OP_SEPOLIA_PRIVATE_KEY=${OP_SEPOLIA_PRIVATE_KEY}
+      - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY}
+      - BASE_PRIVATE_KEY=${BASE_PRIVATE_KEY}
+    ports:
+      - "8090:8080"  # Metrics port
+      - "8091:8081"  # API port
+    volumes:
+      - ./bridge/config.json:/root/config.json:ro
+    restart: unless-stopped
+    command: ["./bridge", "-config", "/root/config.json"]
+    networks:
+      - dia-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dia_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - dia-network
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: dia_grafana
+    ports:
+      - "3334:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    depends_on:
+      - prometheus
+    networks:
+      - dia-network
+
+  # MinIO for object storage (if needed)
   minio:
     image: minio/minio:latest
-    container_name: minio
+    container_name: dia_minio
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER:  
-      MINIO_ROOT_PASSWORD:  
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:
-      - minio-data:/data
+      - minio_data:/data
     command: server /data --console-address ":9001"
+    networks:
+      - dia-network
 
 volumes:
-  minio-data:
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  dia-network:
+    driver: bridge

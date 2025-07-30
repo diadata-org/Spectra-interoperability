@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log"
 	"math/big"
 	"os"
 	"os/signal"
@@ -15,7 +14,10 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/client"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/intent"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/metrics"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/utils"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -35,54 +37,62 @@ func main() {
 	symbolsStr := utils.GetEnv("SYMBOLS", defaultSymbols)
 	pollingTimeStr := utils.GetEnv("POLLING_TIME", fmt.Sprintf("%g", defaultPollingTime))
 
+	// Initialize logger
+	logLevel := utils.GetEnv("LOG_LEVEL", "info")
+	if err := logger.Init(logLevel); err != nil {
+		logger.Warnf("Invalid log level %s, using default: %v", logLevel, err)
+	}
+
 	symbols := strings.Split(symbolsStr, ",")
 	for i, s := range symbols {
 		symbols[i] = strings.TrimSpace(s)
 	}
 
-	log.Println("Using EIP-712 signatures for intents")
+	logger.Info("Using EIP-712 signatures for intents")
 
 	eip712Contract := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
 	if eip712Contract == "" {
-		log.Printf("Warning: L2_INTENT_REGISTRY_EIP712 environment variable not set")
+		logger.Warn("L2_INTENT_REGISTRY_EIP712 environment variable not set")
 	} else {
-		log.Printf("Using EIP-712 contract: %s", eip712Contract)
+		logger.WithField("contract", eip712Contract).Info("Using EIP-712 contract")
 	}
 
 
 	if privateKey == "" {
-		log.Fatal("PRIVATE_KEY environment variable is required")
+		logger.Fatal("PRIVATE_KEY environment variable is required")
 	}
 
 	pollingTimeFloat, err := strconv.ParseFloat(pollingTimeStr, 64)
 	if err != nil {
-		log.Fatalf("Invalid polling time: %v", err)
+		logger.Fatalf("Invalid polling time: %v", err)
 	}
 	pollingTime := time.Duration(pollingTimeFloat * float64(time.Second))
 
 	oracleClient, err := client.NewOracleClient(rpcURL, oracleAddr, "", privateKey)
 	if err != nil {
-		log.Fatalf("Failed to create oracle client: %v", err)
+		logger.Fatalf("Failed to create oracle client: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Start metrics server in background
+	metricsPort := utils.GetEnv("METRICS_PORT", "8080")
+	go metrics.StartMetricsServer(metricsPort)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Printf("Starting attestation service for symbols: %s", strings.Join(symbols, ", "))
-	log.Printf("Oracle address: %s", oracleAddr)
-	if pollingTime < time.Second {
-		log.Printf("Polling interval: %dms", pollingTime.Milliseconds())
-	} else {
-		log.Printf("Polling interval: %s", pollingTime)
-	}
+	logger.WithFields(map[string]interface{}{
+		"symbols":      strings.Join(symbols, ", "),
+		"oracle":       oracleAddr,
+		"polling_time": pollingTime.String(),
+	}).Info("Starting attestation service")
 
 	if *useBatchMode {
-		log.Printf("Using batch mode: All symbols will be processed in a single transaction")
+		logger.Info("Using batch mode: All symbols will be processed in a single transaction")
 	} else {
-		log.Printf("Using individual mode: Each symbol will be processed separately")
+		logger.Info("Using individual mode: Each symbol will be processed separately")
 	}
 
 	if *useBatchMode {
@@ -94,7 +104,7 @@ func main() {
 	}
 
 	if err := utils.CreateEnvTemplate(); err != nil {
-		log.Printf("Warning: Failed to create .env.example file: %v", err)
+		logger.Warnf("Failed to create .env.example file: %v", err)
 	}
 
 	ticker := time.NewTicker(pollingTime)
@@ -110,8 +120,8 @@ func main() {
 					processAttestation(ctx, oracleClient, symbol)
 				}
 			}
-		case <-sigCh:
-			log.Println("Received shutdown signal, exiting...")
+		case sig := <-sigCh:
+			logger.WithField("signal", sig).Info("Received shutdown signal, exiting gracefully...")
 			return
 		}
 	}
@@ -119,76 +129,128 @@ func main() {
 
 func processAttestation(ctx context.Context, oracleClient *client.OracleClient, symbol string) {
 	startTime := time.Now()
-	log.Printf("Processing attestation for %s", symbol)
+	timer := prometheus.NewTimer(metrics.ProcessingDuration.WithLabelValues(symbol, "single"))
+	defer timer.ObserveDuration()
 
+	logger.WithField("symbol", symbol).Info("Processing attestation")
+
+	// Time oracle fetch
+	fetchTimer := prometheus.NewTimer(metrics.OracleValueFetchDuration.WithLabelValues(symbol))
 	price, timestamp, err := oracleClient.GetOracleValue(ctx, symbol)
+	fetchTimer.ObserveDuration()
+
 	if err != nil {
-		log.Printf("Failed to get oracle value: %v", err)
+		logger.WithFields(map[string]interface{}{
+			"symbol": symbol,
+			"error":  err,
+		}).Error("Failed to get oracle value")
+		metrics.IntentsCreated.WithLabelValues(symbol, "error").Inc()
 		return
 	}
 
 	volume := big.NewInt(1)
 
-	log.Printf("Retrieved price: %s, timestamp: %s", price.String(), timestamp.String())
+	logger.WithFields(map[string]interface{}{
+		"symbol":    symbol,
+		"price":     price.String(),
+		"timestamp": timestamp.String(),
+	}).Debug("Retrieved oracle value")
 
 	signedIntentJSON, err := intent.AttestValue(ctx, oracleClient.GetPrivateKey(), oracleClient.GetFromAddress(), price, volume, symbol)
 	if err != nil {
-		log.Printf("Failed to create intent: %v", err)
+		logger.WithFields(map[string]interface{}{
+			"symbol": symbol,
+			"error":  err,
+		}).Error("Failed to create intent")
+		metrics.IntentsCreated.WithLabelValues(symbol, "error").Inc()
 		return
 	}
+	metrics.IntentsCreated.WithLabelValues(symbol, "success").Inc()
 
 	txHash, err := intent.PublishIntent(ctx, oracleClient.GetPrivateKey(), signedIntentJSON)
 	if err != nil {
-		log.Printf("Failed to publish intent: %v", err)
+		logger.WithFields(map[string]interface{}{
+			"symbol": symbol,
+			"error":  err,
+		}).Error("Failed to publish intent")
+		metrics.IntentsPublished.WithLabelValues(symbol, "error").Inc()
 		return
 	}
+	metrics.IntentsPublished.WithLabelValues(symbol, "success").Inc()
 
-	log.Printf("Successfully published intent for %s, transaction hash: %s", symbol, txHash)
-	log.Printf("Completed in %s", time.Since(startTime))
+	logger.WithFields(map[string]interface{}{
+		"symbol":   symbol,
+		"tx_hash":  txHash,
+		"duration": time.Since(startTime).String(),
+	}).Info("Successfully published intent")
 }
 
 func processMultipleAttestations(ctx context.Context, oracleClient *client.OracleClient, symbols []string) {
 	startTime := time.Now()
-	log.Printf("Processing batch attestation for %d symbols", len(symbols))
+	timer := prometheus.NewTimer(metrics.ProcessingDuration.WithLabelValues("batch", "batch"))
+	defer timer.ObserveDuration()
+
+	logger.WithField("symbol_count", len(symbols)).Info("Processing batch attestation")
 
 	symbolsData := make([]intent.SymbolData, 0, len(symbols))
 
 	for _, symbol := range symbols {
+		fetchTimer := prometheus.NewTimer(metrics.OracleValueFetchDuration.WithLabelValues(symbol))
 		price, timestamp, err := oracleClient.GetOracleValue(ctx, symbol)
+		fetchTimer.ObserveDuration()
+
 		if err != nil {
-			log.Printf("Failed to get oracle value for %s: %v", symbol, err)
+			logger.WithFields(map[string]interface{}{
+				"symbol": symbol,
+				"error":  err,
+			}).Error("Failed to get oracle value")
+			metrics.IntentsCreated.WithLabelValues(symbol, "error").Inc()
 			continue
 		}
 
 		volume := big.NewInt(1)
 
-		log.Printf("Retrieved price for %s: %s, timestamp: %s", symbol, price.String(), timestamp.String())
+		logger.WithFields(map[string]interface{}{
+			"symbol":    symbol,
+			"price":     price.String(),
+			"timestamp": timestamp.String(),
+		}).Debug("Retrieved oracle value")
 
 		symbolsData = append(symbolsData, intent.SymbolData{
 			Symbol: symbol,
 			Price:  price,
 			Volume: volume,
 		})
+		metrics.IntentsCreated.WithLabelValues(symbol, "success").Inc()
 	}
 
 	if len(symbolsData) == 0 {
-		log.Printf("No valid symbol data found")
+		logger.Warn("No valid symbol data found")
 		return
 	}
 
 	batchIntentJSON, err := intent.AttestMultipleValues(ctx, oracleClient.GetPrivateKey(),
 		oracleClient.GetFromAddress(), symbolsData)
 	if err != nil {
-		log.Printf("Failed to create batch intent: %v", err)
+		logger.WithField("error", err).Error("Failed to create batch intent")
 		return
 	}
 
 	txHash, err := intent.PublishMultipleIntents(ctx, oracleClient.GetPrivateKey(), batchIntentJSON)
 	if err != nil {
-		log.Printf("Failed to publish batch intent: %v", err)
+		logger.WithField("error", err).Error("Failed to publish batch intent")
+		for _, data := range symbolsData {
+			metrics.IntentsPublished.WithLabelValues(data.Symbol, "error").Inc()
+		}
 		return
 	}
+	for _, data := range symbolsData {
+		metrics.IntentsPublished.WithLabelValues(data.Symbol, "success").Inc()
+	}
 
-	log.Printf("Successfully published batch intent for %d symbols, transaction hash: %s", len(symbolsData), txHash)
-	log.Printf("Completed in %s", time.Since(startTime))
+	logger.WithFields(map[string]interface{}{
+		"symbol_count": len(symbolsData),
+		"tx_hash":      txHash,
+		"duration":     time.Since(startTime).String(),
+	}).Info("Successfully published batch intent")
 }

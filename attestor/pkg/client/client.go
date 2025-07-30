@@ -4,10 +4,10 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -70,7 +70,7 @@ func NewOracleClient(rpcURL, oracleAddrStr, signedAddrStr, privateKeyStr string)
 		address := crypto.PubkeyToAddress(*publicKeyECDSA)
 		fromAddress = address.Hex()
 
-		log.Printf("Derived address from private key: %s", fromAddress)
+		logger.WithField("address", fromAddress).Debug("Derived address from private key")
 	} else {
 		// Fallback to a placeholder if no private key provided
 		fromAddress = "0x0000000000000000000000000000000000000000"

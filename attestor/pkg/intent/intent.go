@@ -6,11 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"math/big"
 	"strings"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/types"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/utils"
 
@@ -183,7 +183,10 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 		return "", fmt.Errorf("failed to marshal signed intent: %v", err)
 	}
 
-	log.Printf("Created intent for %s, price: %s", symbol, price.String())
+	logger.WithFields(map[string]interface{}{
+		"symbol": symbol,
+		"price":  price.String(),
+	}).Debug("Created intent")
 
 	return string(signedIntentJSON), nil
 }
@@ -347,7 +350,10 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 
 		signedIntents[i] = signedIntent
 
-		log.Printf("Created intent for %s, price: %s", data.Symbol, data.Price.String())
+		logger.WithFields(map[string]interface{}{
+			"symbol": data.Symbol,
+			"price":  data.Price.String(),
+		}).Debug("Created intent")
 	}
 
 	type BatchSignedIntent struct {
@@ -392,7 +398,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 		return "", fmt.Errorf("no intents found in batch")
 	}
 
-	log.Printf("Processing %d intents in batch transaction", intentCount)
+	logger.WithField("intent_count", intentCount).Info("Processing batch transaction")
 
 	// Connect to the L2 chain
 	ethClient, err := ethclient.Dial(l2RpcURL)
@@ -510,7 +516,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 		return "", fmt.Errorf("failed to send transaction: %v", err)
 	}
 
-	log.Printf("Batch transaction completed in %s", time.Since(startTime))
+	logger.WithField("duration", time.Since(startTime).String()).Info("Batch transaction completed")
 
 	return signedTx.Hash().Hex(), nil
 }
