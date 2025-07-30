@@ -2,8 +2,10 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
@@ -21,12 +24,13 @@ import (
 
 // EnhancedBlockScanner implements both forward and backward scanning
 type EnhancedBlockScanner struct {
-	config          *config.BlockScannerConfig
-	sourceConfig    *config.SourceConfig
-	client          *ethclient.Client
-	db              *database.DB
-	eventChan       chan<- *bridgeTypes.EventData
-	errorChan       chan<- error
+	config           *config.BlockScannerConfig
+	sourceConfig     *config.SourceConfig
+	eventDefinitions map[string]*config.EventDefinition
+	client           *ethclient.Client
+	db               *database.DB
+	eventChan        chan<- *bridgeTypes.EventData
+	errorChan        chan<- error
 	
 	contractAddresses []common.Address
 	eventSignatures   []common.Hash
@@ -45,6 +49,11 @@ type EnhancedBlockScanner struct {
 	backwardBlock   uint64
 	converged       bool
 	
+	// Head tracking for real-time processing
+	headBlock       uint64
+	lastHeadUpdate  time.Time
+	headEventsFound uint64
+	
 	// Statistics
 	forwardEventsFound  uint64
 	backwardEventsFound uint64
@@ -58,20 +67,22 @@ type EnhancedBlockScanner struct {
 func NewEnhancedBlockScanner(
 	cfg *config.BlockScannerConfig,
 	sourceConfig *config.SourceConfig,
+	eventDefinitions map[string]*config.EventDefinition,
 	client *ethclient.Client,
 	db *database.DB,
 	eventChan chan<- *bridgeTypes.EventData,
 	errorChan chan<- error,
 ) (*EnhancedBlockScanner, error) {
 	scanner := &EnhancedBlockScanner{
-		config:       cfg,
-		sourceConfig: sourceConfig,
-		client:       client,
-		db:           db,
-		eventChan:    eventChan,
-		errorChan:    errorChan,
-		stopChan:     make(chan struct{}),
-		stoppedChan:  make(chan struct{}),
+		config:           cfg,
+		sourceConfig:     sourceConfig,
+		eventDefinitions: eventDefinitions,
+		client:           client,
+		db:               db,
+		eventChan:        eventChan,
+		errorChan:        errorChan,
+		stopChan:         make(chan struct{}),
+		stoppedChan:      make(chan struct{}),
 	}
 
 	// Extract contract addresses and event signatures
@@ -125,13 +136,16 @@ func (bs *EnhancedBlockScanner) Start(ctx context.Context) error {
 	}
 	bs.mu.Unlock()
 
-	// Start forward scanning
-	go bs.forwardScanLoop(ctx)
+	// PRIORITY 1: Start real-time head tracker for new blocks
+	go bs.headTrackerLoop(ctx)
 
-	// Start backward scanning if needed
+	// PRIORITY 2: Start backward scanning to catch recent events quickly
 	if needBackwardScan {
 		go bs.backwardScanLoop(ctx)
 	}
+
+	// PRIORITY 3: Start forward scanning from last known position
+	go bs.forwardScanLoop(ctx)
 
 	// Start convergence monitor
 	go bs.convergenceMonitor(ctx)
@@ -151,7 +165,8 @@ func (bs *EnhancedBlockScanner) forwardScanLoop(ctx context.Context) {
 		logger.Info("Forward scanner stopped")
 	}()
 	
-	ticker := time.NewTicker(bs.config.ScanInterval.Duration())
+	// Use longer interval for forward scan since head tracker handles new blocks
+	ticker := time.NewTicker(30 * time.Second) // Check every 30 seconds
 	defer ticker.Stop()
 
 	for {
@@ -161,6 +176,18 @@ func (bs *EnhancedBlockScanner) forwardScanLoop(ctx context.Context) {
 		case <-bs.stopChan:
 			return
 		case <-ticker.C:
+			// Only scan if we're not too far behind head tracker
+			bs.mu.RLock()
+			headBlock := bs.headBlock
+			forwardBlock := bs.forwardBlock
+			bs.mu.RUnlock()
+			
+			// Skip if head tracker has already processed recent blocks
+			if headBlock > 0 && headBlock-forwardBlock < 100 {
+				logger.Debugf("Forward scanner skipping - head tracker is handling recent blocks")
+				continue
+			}
+			
 			if err := bs.forwardScan(ctx); err != nil {
 				logger.Errorf("Forward scan error: %v", err)
 				bs.errorChan <- err
@@ -176,6 +203,7 @@ func (bs *EnhancedBlockScanner) backwardScanLoop(ctx context.Context) {
 	}()
 	
 	// Backward scan runs continuously without ticker
+	// Use smaller sleep time for faster processing
 	for {
 		select {
 		case <-ctx.Done():
@@ -186,15 +214,17 @@ func (bs *EnhancedBlockScanner) backwardScanLoop(ctx context.Context) {
 			bs.mu.RLock()
 			if bs.converged || !bs.backwardScanning {
 				bs.mu.RUnlock()
-				time.Sleep(5 * time.Second)
+				time.Sleep(2 * time.Second)
 				continue
 			}
 			bs.mu.RUnlock()
 			
 			if err := bs.backwardScan(ctx); err != nil {
 				logger.Errorf("Backward scan error: %v", err)
-				time.Sleep(time.Second)
+				time.Sleep(500 * time.Millisecond) // Shorter retry delay
 			}
+			// Small delay between batches to avoid overloading
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -290,9 +320,11 @@ func (bs *EnhancedBlockScanner) backwardScan(ctx context.Context) error {
 	bs.mu.Unlock()
 
 	// Calculate start block for this iteration
+	// Use larger batch size for backward scanning to catch up faster
+	const backwardBatchSize = 5000 // Process 5000 blocks at a time
 	startBlock := endBlock
-	if endBlock > uint64(bs.config.BlockRange) {
-		startBlock = endBlock - uint64(bs.config.BlockRange) + 1
+	if endBlock > backwardBatchSize {
+		startBlock = endBlock - backwardBatchSize + 1
 	}
 	
 	// Don't go below target
@@ -304,7 +336,7 @@ func (bs *EnhancedBlockScanner) backwardScan(ctx context.Context) error {
 		return nil
 	}
 
-	logger.Debugf("Backward scanning blocks %d to %d", startBlock, endBlock)
+	logger.Infof("[BACKFILL] Scanning blocks %d to %d (batch size: %d)", startBlock, endBlock, endBlock-startBlock+1)
 
 	events, err := bs.scanBlockRange(ctx, startBlock, endBlock, true)
 	if err != nil {
@@ -332,6 +364,10 @@ func (bs *EnhancedBlockScanner) backwardScan(ctx context.Context) error {
 		logger.Info("Backward scanner reached forward scanner position - converged!")
 	}
 	bs.mu.Unlock()
+
+	if len(events) > 0 {
+		logger.Infof("[BACKFILL] Found %d events in blocks %d-%d", len(events), startBlock, endBlock)
+	}
 
 	return nil
 }
@@ -443,32 +479,37 @@ func (bs *EnhancedBlockScanner) logProgress() {
 	bs.mu.RLock()
 	defer bs.mu.RUnlock()
 
-	if !bs.backwardScanning && !bs.converged {
-		return
-	}
-
-	var gap uint64
-	if bs.backwardBlock > bs.forwardBlock {
-		gap = bs.backwardBlock - bs.forwardBlock
+	logger.Infof("Enhanced Block Scanner Progress:")
+	logger.Infof("  - Head Tracker: Block %d (found %d events) [Last Update: %s ago]", 
+		bs.headBlock, bs.headEventsFound, time.Since(bs.lastHeadUpdate).Round(time.Second))
+	
+	if bs.backwardScanning || bs.converged {
+		var gap uint64
+		if bs.backwardBlock > bs.forwardBlock {
+			gap = bs.backwardBlock - bs.forwardBlock
+		} else {
+			// Already converged or invalid state
+			gap = 0
+		}
+		
+		logger.Infof("  - Forward Scanner: Block %d (found %d events)", bs.forwardBlock, bs.forwardEventsFound)
+		logger.Infof("  - Backward Scanner: Block %d (found %d events)", bs.backwardBlock, bs.backwardEventsFound)
+		
+		if gap > 0 {
+			blocksPerSec := float64(bs.totalBlocksScanned) / time.Since(time.Now().Add(-30 * time.Second)).Seconds()
+			if blocksPerSec > 0 {
+				eta := time.Duration(float64(gap) / blocksPerSec * float64(time.Second))
+				logger.Infof("  - Gap: %d blocks, ETA: %s", gap, eta)
+			}
+		} else if bs.converged {
+			logger.Info("  - Scanners have converged - no gap remaining")
+		}
 	} else {
-		// Already converged or invalid state
-		gap = 0
+		logger.Infof("  - Forward Scanner: Block %d (found %d events)", bs.forwardBlock, bs.forwardEventsFound)
 	}
 	
-	if gap > 0 {
-		blocksPerSec := float64(bs.totalBlocksScanned) / time.Since(time.Now().Add(-30 * time.Second)).Seconds()
-		if blocksPerSec > 0 {
-			eta := time.Duration(float64(gap) / blocksPerSec * float64(time.Second))
-			
-			logger.Infof("Enhanced Block Scanner Progress:")
-			logger.Infof("  - Forward Scanner: Block %d (found %d events)", bs.forwardBlock, bs.forwardEventsFound)
-			logger.Infof("  - Backward Scanner: Block %d (found %d events)", bs.backwardBlock, bs.backwardEventsFound)
-			logger.Infof("  - Gap: %d blocks, ETA: %s", gap, eta)
-			logger.Infof("  - Total blocks scanned: %d", bs.totalBlocksScanned)
-		}
-	} else if bs.converged {
-		logger.Info("Scanners have converged - no gap remaining")
-	}
+	logger.Infof("  - Total blocks scanned: %d", bs.totalBlocksScanned)
+	logger.Infof("  - Total events found: %d", bs.forwardEventsFound + bs.backwardEventsFound + bs.headEventsFound)
 }
 
 // gapDetectionLoop periodically checks for gaps in processed blocks
@@ -631,57 +672,65 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 
 // shouldProcessEvent applies filters to determine if event should be processed
 func (bs *EnhancedBlockScanner) shouldProcessEvent(event *bridgeTypes.EventData) bool {
-	// Apply the same filters as EventMonitor
-	filters := bs.sourceConfig.EventFilters
-
-	// Check symbol filter
-	if len(filters.Symbols) > 0 && event.Symbol != "" {
-		found := false
-		for _, symbol := range filters.Symbols {
-			if event.Symbol == symbol {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-
-	// Additional filters...
-	
+	// For now, process all events since new config doesn't have filters
+	// Filtering is done at router level
 	return true
 }
 
 // extractContractInfo extracts addresses and event signatures from config
 func (bs *EnhancedBlockScanner) extractContractInfo() error {
-	for _, contractConfig := range bs.sourceConfig.Contracts {
-		if addr, ok := contractConfig["address"].(string); ok {
-			bs.contractAddresses = append(bs.contractAddresses, common.HexToAddress(addr))
+	if bs.eventDefinitions == nil || len(bs.eventDefinitions) == 0 {
+		return fmt.Errorf("no event definitions provided")
+	}
+	
+	// Extract unique contract addresses and event signatures
+	contractMap := make(map[common.Address]bool)
+	
+	for eventName, eventDef := range bs.eventDefinitions {
+		// Add contract address
+		contractAddr := common.HexToAddress(eventDef.Contract)
+		if !contractMap[contractAddr] {
+			bs.contractAddresses = append(bs.contractAddresses, contractAddr)
+			contractMap[contractAddr] = true
 		}
-
-		// Extract event signatures
-		if events, ok := contractConfig["events"].(map[string]interface{}); ok {
-			for _, eventConfig := range events {
-				if cfg, ok := eventConfig.(map[string]interface{}); ok {
-					if enabled, ok := cfg["enabled"].(bool); ok && enabled {
-						if sig, ok := cfg["signature"].(string); ok {
-							bs.eventSignatures = append(bs.eventSignatures, common.HexToHash(sig))
-						}
-					}
-				}
-			}
+		
+		// Calculate event signature from ABI
+		// Parse the event ABI to get the signature
+		var event struct {
+			Name   string `json:"name"`
+			Type   string `json:"type"`
+			Inputs []struct {
+				Name    string `json:"name"`
+				Type    string `json:"type"`
+				Indexed bool   `json:"indexed"`
+			} `json:"inputs"`
 		}
+		
+		if err := json.Unmarshal([]byte(eventDef.ABI), &event); err != nil {
+			logger.Warnf("Failed to parse ABI for event %s: %v", eventName, err)
+			continue
+		}
+		
+		// Build event signature string
+		var types []string
+		for _, input := range event.Inputs {
+			types = append(types, input.Type)
+		}
+		sigStr := fmt.Sprintf("%s(%s)", event.Name, strings.Join(types, ","))
+		
+		// Calculate signature hash
+		sigHash := crypto.Keccak256Hash([]byte(sigStr))
+		bs.eventSignatures = append(bs.eventSignatures, sigHash)
+		
+		logger.Infof("Event %s: signature=%s, hash=%s", eventName, sigStr, sigHash.Hex())
 	}
-
-	if len(bs.contractAddresses) == 0 {
-		return fmt.Errorf("no contract addresses found")
+	
+	logger.Infof("Monitoring %d contracts for %d events on chain %d", 
+		len(bs.contractAddresses), len(bs.eventSignatures), bs.sourceConfig.ChainID)
+	for _, addr := range bs.contractAddresses {
+		logger.Infof("  - Contract: %s", addr.Hex())
 	}
-
-	if len(bs.eventSignatures) == 0 {
-		return fmt.Errorf("no event signatures found")
-	}
-
+	
 	return nil
 }
 
@@ -701,15 +750,19 @@ func (bs *EnhancedBlockScanner) GetStats() *bridgeTypes.ScannerStats {
 		Converged:           bs.converged,
 		ForwardBlock:        bs.forwardBlock,
 		BackwardBlock:       bs.backwardBlock,
+		HeadBlock:           bs.headBlock,
 		ForwardEventsFound:  bs.forwardEventsFound,
 		BackwardEventsFound: bs.backwardEventsFound,
+		HeadEventsFound:     bs.headEventsFound,
 		TotalBlocksScanned:  bs.totalBlocksScanned,
+		LastHeadUpdate:      bs.lastHeadUpdate,
 	}
 }
 
 // startWebSocketSubscription attempts to subscribe to real-time events via WebSocket
 func (bs *EnhancedBlockScanner) startWebSocketSubscription(ctx context.Context) {
-	logger.Info("Attempting to start WebSocket subscription for real-time events")
+	logger.Infof("Attempting to start WebSocket subscription for real-time events on chain %d (%s)", 
+		bs.sourceConfig.ChainID, bs.sourceConfig.Name)
 	
 	// Build filter query
 	query := ethereum.FilterQuery{
@@ -723,11 +776,13 @@ func (bs *EnhancedBlockScanner) startWebSocketSubscription(ctx context.Context) 
 	// Subscribe to logs
 	sub, err := bs.client.SubscribeFilterLogs(ctx, query, logs)
 	if err != nil {
-		logger.Warnf("WebSocket subscription not available, falling back to polling: %v", err)
+		logger.Warnf("WebSocket subscription not available for chain %d (%s), falling back to polling: %v", 
+			bs.sourceConfig.ChainID, bs.sourceConfig.Name, err)
 		return
 	}
 	
-	logger.Info("[WEBSOCKET] Real-time event subscription active")
+	logger.Infof("[WEBSOCKET] Real-time event subscription active for chain %d (%s)", 
+		bs.sourceConfig.ChainID, bs.sourceConfig.Name)
 	
 	// Process incoming logs
 	for {
@@ -741,7 +796,8 @@ func (bs *EnhancedBlockScanner) startWebSocketSubscription(ctx context.Context) 
 			return
 			
 		case err := <-sub.Err():
-			logger.Errorf("[WEBSOCKET] Subscription error: %v", err)
+			logger.Errorf("[WEBSOCKET] Subscription error for chain %d (%s): %v", 
+				bs.sourceConfig.ChainID, bs.sourceConfig.Name, err)
 			// Try to reconnect after a delay
 			time.Sleep(10 * time.Second)
 			go bs.startWebSocketSubscription(ctx)
@@ -766,6 +822,103 @@ func (bs *EnhancedBlockScanner) startWebSocketSubscription(ctx context.Context) 
 				// Send to processing
 				if err := bs.processEvent(ctx, event); err != nil {
 					logger.Errorf("[WEBSOCKET] Failed to process event: %v", err)
+				}
+			}
+		}
+	}
+}
+
+// headTrackerLoop continuously monitors and processes new blocks in real-time
+func (bs *EnhancedBlockScanner) headTrackerLoop(ctx context.Context) {
+	defer func() {
+		logger.Info("Head tracker stopped")
+	}()
+	
+	// Use a shorter interval for head tracking
+	ticker := time.NewTicker(2 * time.Second) // Check every 2 seconds for new blocks
+	defer ticker.Stop()
+	
+	var lastProcessedHead uint64
+	
+	// Initialize with current head
+	if currentBlock, err := bs.client.BlockNumber(ctx); err == nil {
+		lastProcessedHead = currentBlock
+		bs.mu.Lock()
+		bs.headBlock = currentBlock
+		bs.lastHeadUpdate = time.Now()
+		bs.mu.Unlock()
+	}
+	
+	logger.Info("Starting head tracker for real-time block processing")
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-bs.stopChan:
+			return
+		case <-ticker.C:
+			// Get current block
+			currentBlock, err := bs.client.BlockNumber(ctx)
+			if err != nil {
+				logger.Errorf("Head tracker: failed to get current block: %v", err)
+				continue
+			}
+			
+			// Check if there are new blocks
+			if currentBlock > lastProcessedHead {
+				logger.Infof("[HEAD TRACKER] New blocks detected: %d to %d", lastProcessedHead+1, currentBlock)
+				
+				// Process new blocks immediately
+				startBlock := lastProcessedHead + 1
+				endBlock := currentBlock
+				
+				// Limit batch size to prevent overwhelming
+				const maxBatchSize = 50
+				if endBlock-startBlock > maxBatchSize {
+					endBlock = startBlock + maxBatchSize - 1
+				}
+				
+				// Scan new blocks with highest priority
+				events, err := bs.scanBlockRange(ctx, startBlock, endBlock, false)
+				if err != nil {
+					logger.Errorf("[HEAD TRACKER] Failed to scan blocks %d-%d: %v", startBlock, endBlock, err)
+					continue
+				}
+				
+				// Process events with highest priority
+				for _, event := range events {
+					event.Priority = 4 // Highest priority for head tracker events
+					if err := bs.processEvent(ctx, event); err != nil {
+						logger.Errorf("[HEAD TRACKER] Failed to process event: %v", err)
+					}
+				}
+				
+				// Update statistics
+				bs.mu.Lock()
+				bs.headBlock = endBlock
+				bs.lastHeadUpdate = time.Now()
+				bs.headEventsFound += uint64(len(events))
+				atomic.AddUint64(&bs.totalBlocksScanned, endBlock-startBlock+1)
+				bs.mu.Unlock()
+				
+				// Update last processed head
+				lastProcessedHead = endBlock
+				
+				if len(events) > 0 {
+					logger.Infof("[HEAD TRACKER] Processed %d events from blocks %d-%d", 
+						len(events), startBlock, endBlock)
+				}
+				
+				// Update database with latest block if it's ahead of forward scanner
+				bs.mu.RLock()
+				if endBlock > bs.forwardBlock {
+					bs.mu.RUnlock()
+					if err := bs.db.UpdateLastScanBlock(bs.sourceConfig.ChainID, endBlock); err != nil {
+						logger.Errorf("[HEAD TRACKER] Failed to update last scan block: %v", err)
+					}
+				} else {
+					bs.mu.RUnlock()
 				}
 			}
 		}

@@ -59,7 +59,7 @@ func NewEventProcessor(
 	errorChan chan<- error,
 	routerRegistry *router.Registry,
 ) (*EventProcessor, error) {
-	dedupCache := NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL)
+	dedupCache := NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration())
 
 	return &EventProcessor{
 		config:         cfg,
@@ -81,13 +81,10 @@ func NewEventProcessor(
 func (ep *EventProcessor) Start(ctx context.Context) error {
 	logger.Info("Starting event processor")
 
-	// Start processing loop
 	go ep.processLoop(ctx)
 
-	// Start stats reporter
 	go ep.statsReporter(ctx)
 
-	// Start cache cleaner
 	go ep.dedupCache.StartCleaner(ctx)
 
 	return nil
@@ -99,7 +96,6 @@ func (ep *EventProcessor) Stop() error {
 	
 	close(ep.stopChan)
 	
-	// Wait for processor to stop with timeout
 	select {
 	case <-ep.stoppedChan:
 		logger.Info("Event processor stopped")
@@ -114,7 +110,6 @@ func (ep *EventProcessor) Stop() error {
 func (ep *EventProcessor) processLoop(ctx context.Context) {
 	defer close(ep.stoppedChan)
 
-	// Process events with configurable batch size
 	batch := make([]*types.EventData, 0, ep.config.BatchSize)
 	batchTimer := time.NewTimer(time.Second)
 	batchTimer.Stop()
@@ -173,14 +168,12 @@ func (ep *EventProcessor) processBatch(ctx context.Context, events []*types.Even
 func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventData) error {
 	intentHashHex := hex.EncodeToString(event.IntentHash[:])
 	
-	// Check deduplication cache
 	if ep.dedupCache.Has(intentHashHex) {
 		atomic.AddUint64(&ep.stats.EventsDuplicate, 1)
 		logger.Debugf("Event already in cache: %s", intentHashHex)
 		return nil
 	}
 
-	// Check database for processed events
 	processed, err := ep.db.IsEventProcessed(intentHashHex)
 	if err != nil {
 		return fmt.Errorf("failed to check event status: %w", err)
@@ -192,20 +185,17 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 		return nil
 	}
 
-	// Fetch full intent data from registry
 	intent, err := ep.registryClient.GetIntent(ctx, event.IntentHash)
 	if err != nil {
 		return fmt.Errorf("failed to get intent: %w", err)
 	}
 
-	// Validate intent
 	if err := ep.validateIntent(intent); err != nil {
 		atomic.AddUint64(&ep.stats.EventsInvalid, 1)
 		logger.Warnf("Invalid intent %s: %v", intentHashHex, err)
-		return nil // Don't retry invalid intents
+		return nil
 	}
 
-	// Save to database
 	processedEvent := &database.ProcessedEvent{
 		IntentHash:      intentHashHex,
 		BlockNumber:     event.BlockNumber,
@@ -222,10 +212,8 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 		return fmt.Errorf("failed to save processed event: %w", err)
 	}
 
-	// Add to dedup cache
 	ep.dedupCache.Add(intentHashHex)
 
-	// Route using routers
 	updatesCreated := 0
 	
 	if ep.routerRegistry == nil {
@@ -233,7 +221,6 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 		return fmt.Errorf("router registry not initialized")
 	}
 
-	// Get all active routers
 	routers := ep.routerRegistry.GetActiveRouters()
 	
 	if len(routers) == 0 {
@@ -241,7 +228,6 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 		return nil
 	}
 
-	// Check each router
 	for _, r := range routers {
 		shouldRoute, reason := r.ShouldRoute(intent)
 		if !shouldRoute {
@@ -251,18 +237,14 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 		
 		logger.Infof("Router %s approved: %s", r.ID(), reason)
 		
-		// Create update requests for router's destinations
 		for _, dest := range r.GetDestinations() {
-			// Find destination config
 			destConfig := ep.getDestinationConfig(dest.ChainID)
 			if destConfig == nil {
 				logger.Warnf("Destination chain %d not found for router %s", dest.ChainID, r.ID())
 				continue
 			}
 			
-			// Create update for each contract
 			for _, contractAddr := range dest.Contracts {
-				// Find contract config
 				contractConfig := ep.findContractConfig(destConfig, contractAddr)
 				if contractConfig == nil {
 					logger.Warnf("Contract %s not found on chain %d", contractAddr, dest.ChainID)
@@ -284,7 +266,6 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 			}
 		}
 		
-		// Notify router that intent was processed
 		r.OnRouted(intent)
 	}
 
@@ -314,16 +295,13 @@ func (ep *EventProcessor) createUpdateRequest(
 		Event:            event,
 		DestinationChain: destination,
 		Contract:         contract,
-		Priority:         contract.Priority,
+		Priority:         1,
 		CreatedAt:        time.Now(),
 	}
 }
 
 // validateIntent validates an oracle intent
 func (ep *EventProcessor) validateIntent(intent *types.OracleIntent) error {
-	// Expiry check removed - bridge processes all intents regardless of expiry
-
-	// Check required fields
 	if intent.Symbol == "" {
 		return fmt.Errorf("missing symbol")
 	}
@@ -337,12 +315,10 @@ func (ep *EventProcessor) validateIntent(intent *types.OracleIntent) error {
 		return fmt.Errorf("missing signer")
 	}
 
-	// Verify signature if configured
 	if ep.config.ValidationTimeout > 0 {
-		ctx, cancel := context.WithTimeout(context.Background(), ep.config.ValidationTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), ep.config.ValidationTimeout.Duration())
 		defer cancel()
 		
-		// In production, implement proper EIP-712 signature verification
 		_ = ctx
 	}
 

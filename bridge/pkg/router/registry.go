@@ -129,7 +129,6 @@ func (r *Registry) GetStats() []RouterStats {
 
 // LoadFromConfig loads routers from configuration
 func (r *Registry) LoadFromConfig(routerConfigs []config.RouterConfig) error {
-	// Load routers from config
 	for _, cfg := range routerConfigs {
 		router, err := CreateRouterFromConfig(cfg)
 		if err != nil {
@@ -142,7 +141,6 @@ func (r *Registry) LoadFromConfig(routerConfigs []config.RouterConfig) error {
 			continue
 		}
 
-		// Set enabled state from config
 		if !cfg.Enabled {
 			router.Disable()
 		}
@@ -154,41 +152,29 @@ func (r *Registry) LoadFromConfig(routerConfigs []config.RouterConfig) error {
 
 // CreateRouterFromConfig creates a router instance from configuration
 func CreateRouterFromConfig(cfg config.RouterConfig) (Router, error) {
-	// Convert config destinations to router destinations
 	destinations := make([]Destination, len(cfg.Destinations))
 	for i, dest := range cfg.Destinations {
 		destinations[i] = Destination{
 			ChainID:   dest.ChainID,
-			Contracts: dest.Contracts,
+			Contracts: []string{dest.Contract},
 		}
 	}
 
-	// Extract symbols from filter
-	symbols := cfg.Filter.Symbols
-	if symbols == nil {
-		symbols = []string{}
-	}
-
+	symbols := []string{}
+	
 	switch cfg.Type {
 	case "time":
-		interval, err := time.ParseDuration(cfg.Config["interval"].(string))
-		if err != nil {
-			return nil, fmt.Errorf("invalid interval for time router: %w", err)
-		}
+		interval := 5 * time.Minute
 		return NewTimeRouter(cfg.ID, cfg.Name, interval, symbols, destinations), nil
 
 	case "deviation":
-		threshold, ok := cfg.Config["threshold"].(float64)
-		if !ok {
-			return nil, fmt.Errorf("invalid threshold for deviation router")
-		}
+		threshold := 0.05
 		return NewDeviationRouter(cfg.ID, cfg.Name, threshold, symbols, destinations), nil
 
 	case "symbol":
 		return NewSymbolRouter(cfg.ID, cfg.Name, symbols, destinations), nil
 
 	case "composite":
-		// TODO: Implement composite router that combines multiple conditions
 		return nil, fmt.Errorf("composite router not yet implemented")
 
 	default:

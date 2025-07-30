@@ -8,20 +8,21 @@ import (
 
 // Config represents the complete bridge configuration
 type Config struct {
-	Database        DatabaseConfig       `json:"database"`
-	Source          SourceConfig         `json:"source"`
-	Destinations    []*DestinationConfig `json:"destinations"`
-	Routers         []RouterConfig       `json:"routers"`
-	PrivateKey      string              `json:"private_key"`
-	EventMonitor    EventMonitorConfig   `json:"event_monitor"`
-	BlockScanner    BlockScannerConfig   `json:"block_scanner"`
-	EventProcessor  EventProcessorConfig `json:"event_processor"`
-	WorkerPool      WorkerPoolConfig     `json:"worker_pool"`
-	HealthCheck     HealthCheckConfig    `json:"health_check"`
-	Recovery        RecoveryConfig       `json:"recovery"`
-	API             APIConfig            `json:"api"`
-	Metrics         MetricsConfig        `json:"metrics"`
-	DryRun          bool                `json:"dry_run"`
+	Database        DatabaseConfig                `json:"database"`
+	Source          SourceConfig                  `json:"source"`
+	EventDefinitions map[string]*EventDefinition  `json:"event_definitions"`
+	Destinations    map[int64]*DestinationConfig  `json:"destinations"`
+	Routers         []RouterConfig                `json:"routers"`
+	PrivateKey      string                        `json:"private_key"` // Default private key (deprecated - use per-router keys)
+	EventMonitor    EventMonitorConfig            `json:"event_monitor"`
+	BlockScanner    BlockScannerConfig            `json:"block_scanner"`
+	EventProcessor  EventProcessorConfig          `json:"event_processor"`
+	WorkerPool      WorkerPoolConfig              `json:"worker_pool"`
+	HealthCheck     HealthCheckConfig             `json:"health_check"`
+	Recovery        RecoveryConfig                `json:"recovery"`
+	API             APIConfig                     `json:"api"`
+	Metrics         MetricsConfig                 `json:"metrics"`
+	DryRun          bool                          `json:"dry_run"`
 }
 
 // DatabaseConfig represents database configuration
@@ -35,17 +36,10 @@ type SourceConfig struct {
 	ChainID      int64                          `json:"chain_id"`
 	Name         string                         `json:"name"`
 	RPCURLs      []string                       `json:"rpc_urls"`      // Multiple RPC URLs for failover
+	WsURL        string                         `json:"ws_url"`        // WebSocket URL for event monitoring
 	StartBlock   uint64                         `json:"start_block"`
-	Contracts    map[string]map[string]interface{} `json:"contracts"`
-	EventFilters EventFilters                   `json:"event_filters"`
 }
 
-// EventFilters represents event filtering configuration
-type EventFilters struct {
-	Symbols   []string `json:"symbols"`
-	Signers   []string `json:"signers"`
-	MaxAge    int      `json:"max_age"`
-}
 
 // DestinationConfig represents destination chain configuration
 type DestinationConfig struct {
@@ -140,27 +134,8 @@ type MetricsConfig struct {
 	Namespace string `json:"namespace"`
 }
 
-// RouterConfig represents router configuration
-type RouterConfig struct {
-	ID           string                 `json:"id"`
-	Name         string                 `json:"name"`
-	Type         string                 `json:"type"`
-	Enabled      bool                   `json:"enabled"`
-	Filter       RouterFilter           `json:"filter"`
-	Config       map[string]interface{} `json:"config"`
-	Destinations []RouterDestination    `json:"destinations"`
-}
-
-// RouterFilter represents router filtering options
-type RouterFilter struct {
-	Symbols []string `json:"symbols"`
-}
-
-// RouterDestination represents a router destination
-type RouterDestination struct {
-	ChainID   int64    `json:"chain_id"`
-	Contracts []string `json:"contracts"`
-}
+// NOTE: RouterConfig, RouterFilter, and RouterDestination are now defined in event_definitions.go
+// as part of the generic event handling system
 
 // Duration wrapper for JSON marshaling
 type Duration time.Duration

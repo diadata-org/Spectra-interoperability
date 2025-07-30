@@ -19,6 +19,8 @@ type DB struct {
 // ProcessedEvent represents a processed oracle intent event
 type ProcessedEvent struct {
 	ID              int64
+	EventID         string          // Unique identifier (tx_hash-block-logindex)
+	EventName       string          // Event name (e.g., IntentRegistered)
 	IntentHash      string
 	BlockNumber     uint64
 	TransactionHash string
@@ -128,6 +130,11 @@ func (db *DB) Migrate() error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 	}
+	
+	// Run generic events migration
+	if err := db.MigrateForGenericEvents(); err != nil {
+		return fmt.Errorf("generic events migration failed: %w", err)
+	}
 
 	return nil
 }
@@ -144,6 +151,37 @@ func (db *DB) IsEventProcessed(intentHash string) (bool, error) {
 
 // SaveProcessedEvent saves a processed event to the database
 func (db *DB) SaveProcessedEvent(event *ProcessedEvent) error {
+	// For generic events, we use EventID as the unique key
+	if event.EventID != "" {
+		query := `
+			INSERT INTO processed_events (
+				event_id, event_name, intent_hash, block_number, transaction_hash, log_index,
+				symbol, price, timestamp, signer, processed_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			ON CONFLICT (transaction_hash, log_index) DO NOTHING`
+		
+		var signerStr string
+		if event.Signer != (common.Address{}) {
+			signerStr = event.Signer.Hex()
+		}
+		
+		_, err := db.Exec(query,
+			event.EventID,
+			event.EventName,
+			event.IntentHash,
+			event.BlockNumber,
+			event.TransactionHash,
+			event.LogIndex,
+			event.Symbol,
+			event.Price,
+			event.Timestamp,
+			signerStr,
+			event.ProcessedAt,
+		)
+		return err
+	}
+	
+	// Legacy code path for compatibility
 	query := `
 		INSERT INTO processed_events (
 			intent_hash, block_number, transaction_hash, log_index,

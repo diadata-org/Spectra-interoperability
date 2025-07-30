@@ -213,15 +213,18 @@ type ProcessorStats struct {
 
 // ScannerStats represents block scanner statistics
 type ScannerStats struct {
-	LastScanBlock       uint64 `json:"last_scan_block"`
-	CurrentBlock        uint64 `json:"current_block"`
-	BlocksBehind        uint64 `json:"blocks_behind"`
-	IsScanning          bool   `json:"is_scanning"`
-	BackwardScanning    bool   `json:"backward_scanning"`
-	Converged           bool   `json:"converged"`
-	ForwardBlock        uint64 `json:"forward_block"`
-	BackwardBlock       uint64 `json:"backward_block"`
-	ForwardEventsFound  uint64 `json:"forward_events_found"`
-	BackwardEventsFound uint64 `json:"backward_events_found"`
-	TotalBlocksScanned  uint64 `json:"total_blocks_scanned"`
+	LastScanBlock       uint64    `json:"last_scan_block"`
+	CurrentBlock        uint64    `json:"current_block"`
+	BlocksBehind        uint64    `json:"blocks_behind"`
+	IsScanning          bool      `json:"is_scanning"`
+	BackwardScanning    bool      `json:"backward_scanning"`
+	Converged           bool      `json:"converged"`
+	ForwardBlock        uint64    `json:"forward_block"`
+	BackwardBlock       uint64    `json:"backward_block"`
+	HeadBlock           uint64    `json:"head_block"`
+	ForwardEventsFound  uint64    `json:"forward_events_found"`
+	BackwardEventsFound uint64    `json:"backward_events_found"`
+	HeadEventsFound     uint64    `json:"head_events_found"`
+	TotalBlocksScanned  uint64    `json:"total_blocks_scanned"`
+	LastHeadUpdate      time.Time `json:"last_head_update"`
 }

@@ -34,6 +34,7 @@ func CreateBlockScanner(
 		enhancedScanner, err := scanner.NewEnhancedBlockScanner(
 			&cfg.BlockScanner,
 			&cfg.Source,
+			cfg.EventDefinitions,
 			ethClient,
 			db,
 			eventChan,
@@ -55,6 +56,7 @@ func CreateBlockScanner(
 	standardScanner, err := scanner.NewBlockScanner(
 		&cfg.BlockScanner,
 		&cfg.Source,
+		cfg.EventDefinitions,
 		ethClient,
 		db,
 		eventChan,

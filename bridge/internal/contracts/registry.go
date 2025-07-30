@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"strings"
 
@@ -380,6 +381,11 @@ func (bc *BoundContract) Call(ctx context.Context, method string, params ...inte
 	result, err := bc.client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return nil, err
+	}
+
+	// Check if result is empty
+	if len(result) == 0 {
+		return nil, fmt.Errorf("empty result from contract call to %s", method)
 	}
 
 	return bc.abi.Unpack(method, result)

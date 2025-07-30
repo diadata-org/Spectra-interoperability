@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
@@ -17,6 +18,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/processor"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/utils"
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/router"
@@ -50,6 +52,9 @@ type Bridge struct {
 
 	// Block scanner
 	blockScanner BlockScanner
+	
+	// Event processor
+	eventProcessor *processor.GenericEventProcessor
 
 	// Metrics tracking
 	metricsTracker *MetricsTracker
@@ -74,15 +79,19 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	logger.Infof("Connected to source chain %s via %s", cfg.Source.Name, sourceClient.GetCurrentRPCURL())
 
 	// Create registry client
-	// Note: RegistryAddress should be extracted from Source.Contracts if needed
-	var registryAddress string
-	if registryContract, ok := cfg.Source.Contracts["registry"]; ok {
-		if addr, ok := registryContract["address"].(string); ok {
-			registryAddress = addr
+	// For new config, registry address would come from event definitions
+	// Extract registry address from event definitions
+	registryAddress := ""
+	for _, eventDef := range cfg.EventDefinitions {
+		if eventDef.Contract != "" {
+			// Use the contract address from the IntentRegistered event
+			registryAddress = eventDef.Contract
+			break
 		}
 	}
+	
 	if registryAddress == "" {
-		return nil, fmt.Errorf("registry address not found in source contracts")
+		return nil, fmt.Errorf("no registry contract address found in event definitions")
 	}
 
 	// Get the underlying ethclient for contracts
@@ -161,6 +170,34 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		}
 		bridge.blockScanner = scanner
 	}
+	
+	// Get destination eth clients for event processor
+	destEthClients := make(map[int64]*ethclient.Client)
+	for chainID, destClient := range destClients {
+		ethClient, err := destClient.client.GetClient()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get eth client for chain %d: %w", chainID, err)
+		}
+		destEthClients[chainID] = ethClient
+	}
+	
+	// Create generic event processor
+	eventProcessor, err := processor.NewGenericEventProcessor(
+		&cfg.EventProcessor,
+		cfg.EventDefinitions,
+		cfg.Destinations,
+		db,
+		routerRegistry,
+		ethClient,
+		destEthClients,
+		eventChan,
+		errorChan,
+		bridge.updateChan,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create event processor: %w", err)
+	}
+	bridge.eventProcessor = eventProcessor
 
 	// Initialize chain stats
 	bridge.initializeChainStats()
@@ -240,12 +277,13 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}
 		logger.Info("Block scanner started")
 
-		// Start scanner event processor
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			b.processScannerEvents(ctx)
-		}()
+		// Start generic event processor
+		if b.eventProcessor != nil {
+			if err := b.eventProcessor.Start(ctx); err != nil {
+				return fmt.Errorf("failed to start event processor: %w", err)
+			}
+			logger.Info("Generic event processor started")
+		}
 
 		// Start error handler
 		wg.Add(1)
@@ -255,12 +293,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}()
 	}
 
-	// Start event monitoring
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		b.monitorEvents(ctx)
-	}()
 
 	// Start update processor
 	wg.Add(1)
@@ -323,61 +355,7 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	return nil
 }
 
-// monitorEvents monitors for new IntentRegistered events
-func (b *Bridge) monitorEvents(ctx context.Context) {
-	logger.Info("Starting event monitoring")
 
-	// Use BlockScanner scan interval for polling
-	ticker := time.NewTicker(b.config.BlockScanner.ScanInterval.Duration())
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-b.shutdownChan:
-			return
-		case <-ticker.C:
-			b.processNewEvents(ctx)
-		}
-	}
-}
-
-// processNewEvents processes new IntentRegistered events
-func (b *Bridge) processNewEvents(ctx context.Context) {
-	// Get current block
-	currentBlock, err := b.sourceClient.BlockNumber(ctx)
-	if err != nil {
-		logger.Errorf("Failed to get current block: %v", err)
-		return
-	}
-
-	// Process events from last processed block to current block
-	if currentBlock > b.lastProcessedBlock {
-		fromBlock := b.lastProcessedBlock + 1
-		toBlock := currentBlock
-
-		// Limit batch size using EventProcessor batch size
-		if toBlock-fromBlock > uint64(b.config.EventProcessor.BatchSize) {
-			toBlock = fromBlock + uint64(b.config.EventProcessor.BatchSize)
-		}
-
-		logger.Debugf("Processing events from block %d to %d", fromBlock, toBlock)
-
-		events, err := b.registryClient.GetIntentRegisteredEvents(ctx, fromBlock, toBlock)
-		if err != nil {
-			logger.Errorf("Failed to get intent registered events: %v", err)
-			return
-		}
-
-		for _, event := range events {
-			b.processIntentEvent(ctx, event)
-		}
-
-		b.lastProcessedBlock = toBlock
-		b.updateStats()
-	}
-}
 
 // processIntentEvent processes a single IntentRegistered event
 func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.IntentRegisteredEvent) {
@@ -820,6 +798,8 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 }
 
 // processScannerEvents processes events from the block scanner
+// DEPRECATED: This is replaced by GenericEventProcessor
+/*
 func (b *Bridge) processScannerEvents(ctx context.Context) {
 	logger.Info("Starting scanner event processor")
 
@@ -901,6 +881,7 @@ func (b *Bridge) processScannerEvents(ctx context.Context) {
 		}
 	}
 }
+*/
 
 // handleErrors handles errors from various components
 func (b *Bridge) handleErrors(ctx context.Context) {

@@ -1,0 +1,524 @@
+package processor
+
+import (
+	"context"
+	"fmt"
+	"math/big"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/diadata.org/Spectra-interoperability/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/pipeline"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
+	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/router"
+)
+
+// GenericEventProcessor processes events using the generic pipeline
+type GenericEventProcessor struct {
+	config          *config.EventProcessorConfig
+	eventDefs       map[string]*config.EventDefinition
+	destinations    map[int64]*config.DestinationConfig
+	db              *database.DB
+	routerRegistry  *router.Registry
+	sourceClient    *ethclient.Client
+	destClients     map[int64]*ethclient.Client
+	
+	extractor       *pipeline.DataExtractor
+	enricher        *pipeline.DataEnricher
+	transformer     *pipeline.DataTransformer
+	txBuilder       *pipeline.TransactionBuilder
+	
+	eventChan       <-chan *types.EventData
+	errorChan       chan<- error
+	updateChan      chan<- *types.UpdateRequest
+	
+	dedupCache      *DedupCache
+	
+	stats           types.ProcessorStats
+	
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
+}
+
+// NewGenericEventProcessor creates a new generic event processor
+func NewGenericEventProcessor(
+	cfg *config.EventProcessorConfig,
+	eventDefs map[string]*config.EventDefinition,
+	destinations map[int64]*config.DestinationConfig,
+	db *database.DB,
+	routerRegistry *router.Registry,
+	sourceClient *ethclient.Client,
+	destClients map[int64]*ethclient.Client,
+	eventChan <-chan *types.EventData,
+	errorChan chan<- error,
+	updateChan chan<- *types.UpdateRequest,
+) (*GenericEventProcessor, error) {
+	extractor, err := pipeline.NewDataExtractor(eventDefs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create data extractor: %w", err)
+	}
+	
+	enricher, err := pipeline.NewDataEnricher(sourceClient, eventDefs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create data enricher: %w", err)
+	}
+	
+	transformer := pipeline.NewDataTransformer()
+	
+	txBuilder, err := pipeline.NewTransactionBuilder(destClients)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create transaction builder: %w", err)
+	}
+	
+	return &GenericEventProcessor{
+		config:         cfg,
+		eventDefs:      eventDefs,
+		destinations:   destinations,
+		db:             db,
+		routerRegistry: routerRegistry,
+		sourceClient:   sourceClient,
+		destClients:    destClients,
+		extractor:      extractor,
+		enricher:       enricher,
+		transformer:    transformer,
+		txBuilder:      txBuilder,
+		eventChan:      eventChan,
+		errorChan:      errorChan,
+		updateChan:     updateChan,
+		dedupCache:     NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration()),
+		stopChan:       make(chan struct{}),
+	}, nil
+}
+
+// Start begins processing events
+func (gep *GenericEventProcessor) Start(ctx context.Context) error {
+	logger.Info("Starting generic event processor")
+	
+	gep.wg.Add(1)
+	go gep.processLoop(ctx)
+	
+	gep.wg.Add(1)
+	go gep.statsReporter(ctx)
+	
+	return nil
+}
+
+// Stop gracefully stops the processor
+func (gep *GenericEventProcessor) Stop() error {
+	logger.Info("Stopping generic event processor")
+	close(gep.stopChan)
+	gep.wg.Wait()
+	return nil
+}
+
+// processLoop is the main event processing loop
+func (gep *GenericEventProcessor) processLoop(ctx context.Context) {
+	defer gep.wg.Done()
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-gep.stopChan:
+			return
+		case event := <-gep.eventChan:
+			if event == nil {
+				continue
+			}
+			
+			atomic.AddUint64(&gep.stats.EventsReceived, 1)
+			
+			if err := gep.processEvent(ctx, event); err != nil {
+				logger.Errorf("Failed to process event: %v", err)
+				atomic.AddUint64(&gep.stats.EventsFailed, 1)
+				gep.errorChan <- fmt.Errorf("event processing failed: %w", err)
+			} else {
+				atomic.AddUint64(&gep.stats.EventsProcessed, 1)
+			}
+		}
+	}
+}
+
+// processEvent processes a single event through the pipeline
+func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types.EventData) error {
+	eventID := fmt.Sprintf("%s-%d-%d", event.TxHash.Hex(), event.BlockNumber, event.LogIndex)
+	
+	if gep.dedupCache.Has(eventID) {
+		atomic.AddUint64(&gep.stats.EventsDuplicate, 1)
+		logger.Debugf("Event already in cache: %s", eventID)
+		return nil
+	}
+	
+	processed, err := gep.db.IsEventProcessed(eventID)
+	if err != nil {
+		return fmt.Errorf("failed to check event status: %w", err)
+	}
+	if processed {
+		gep.dedupCache.Add(eventID)
+		atomic.AddUint64(&gep.stats.EventsDuplicate, 1)
+		logger.Debugf("Event already processed: %s", eventID)
+		return nil
+	}
+	
+	log, ok := event.Raw.(ethtypes.Log)
+	if !ok {
+		return fmt.Errorf("event.Raw is not of type types.Log")
+	}
+	extractedData, err := gep.extractor.ExtractEventData(event.EventName, log)
+	if err != nil {
+		return fmt.Errorf("failed to extract event data: %w", err)
+	}
+	
+	logger.Debugf("Extracted data for %s: %+v", event.EventName, extractedData)
+	
+	eventDef, exists := gep.eventDefs[event.EventName]
+	if exists && eventDef.Enrichment != nil {
+		if err := gep.enricher.EnrichEventData(ctx, event.EventName, extractedData); err != nil {
+			logger.Warnf("Failed to enrich event data: %v", err)
+		} else {
+			logger.Debugf("Enriched data: %+v", extractedData.Enrichment)
+		}
+	}
+	
+	routersUsed := 0
+	
+	if extractedData.Enrichment != nil && extractedData.Enrichment["fullIntent"] != nil {
+		logger.Debugf("Enriched data type: %T, value: %+v", extractedData.Enrichment["fullIntent"], extractedData.Enrichment["fullIntent"])
+		
+		intent, err := gep.convertToOracleIntent(extractedData.Enrichment["fullIntent"])
+		if err != nil {
+			logger.Errorf("Failed to convert enriched data to intent: %v", err)
+		} else {
+			gep.processWithRouters(ctx, intent, event)
+			routersUsed++
+		}
+	} else {
+		logger.Debugf("No enriched intent data available for event %s", event.EventName)
+	}
+	
+	if routersUsed == 0 {
+		logger.Debugf("No routers handled event %s", event.EventName)
+	}
+	
+	processedEvent := &database.ProcessedEvent{
+		EventID:         eventID,
+		EventName:       event.EventName,
+		BlockNumber:     event.BlockNumber,
+		TransactionHash: event.TxHash.Hex(),
+		LogIndex:        event.LogIndex,
+		ProcessedAt:     time.Now(),
+	}
+	
+	if symbol, ok := extractedData.Event["symbol"].(string); ok {
+		processedEvent.Symbol = symbol
+	}
+	
+	if priceValue, ok := extractedData.Event["price"]; ok && priceValue != nil {
+		switch v := priceValue.(type) {
+		case *big.Int:
+			processedEvent.Price = v.String()
+		case string:
+			processedEvent.Price = v
+		default:
+			processedEvent.Price = fmt.Sprintf("%v", v)
+		}
+	} else {
+		processedEvent.Price = "0"
+	}
+	
+	if err := gep.db.SaveProcessedEvent(processedEvent); err != nil {
+		return fmt.Errorf("failed to save processed event: %w", err)
+	}
+	
+	gep.dedupCache.Add(eventID)
+	gep.stats.LastProcessedTime = time.Now()
+	
+	return nil
+}
+
+// getDataFromSource extracts data from the specified source
+func (gep *GenericEventProcessor) getDataFromSource(data *config.ExtractedData, source string) (interface{}, error) {
+	if source == "event" {
+		return data.Event, nil
+	} else if source == "enrichment" {
+		return data.Enrichment, nil
+	} else if source == "processed" {
+		return data.Processed, nil
+	} else if strings.Contains(source, ".") {
+		parts := strings.Split(source, ".")
+		if len(parts) == 2 {
+			switch parts[0] {
+			case "event":
+				return data.Event[parts[1]], nil
+			case "enrichment":
+				return data.Enrichment[parts[1]], nil
+			case "processed":
+				return data.Processed[parts[1]], nil
+			}
+		}
+	}
+	
+	return nil, fmt.Errorf("invalid data source: %s", source)
+}
+
+// statsReporter periodically reports statistics
+func (gep *GenericEventProcessor) statsReporter(ctx context.Context) {
+	defer gep.wg.Done()
+	
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-gep.stopChan:
+			return
+		case <-ticker.C:
+			logger.Infof("Event processor stats: received=%d, processed=%d, duplicate=%d, failed=%d, updates=%d",
+				gep.stats.EventsReceived,
+				gep.stats.EventsProcessed,
+				gep.stats.EventsDuplicate,
+				gep.stats.EventsFailed,
+				gep.stats.UpdatesCreated,
+			)
+		}
+	}
+}
+
+// GetStats returns processor statistics
+func (gep *GenericEventProcessor) GetStats() types.ProcessorStats {
+	return gep.stats
+}
+
+// convertToOracleIntent converts enriched data to OracleIntent
+func (gep *GenericEventProcessor) convertToOracleIntent(data interface{}) (*types.OracleIntent, error) {
+	if values, ok := data.([]interface{}); ok && len(values) > 0 {
+		data = values[0]
+	}
+	
+	switch v := data.(type) {
+	case struct {
+		IntentType string
+		Version    string
+		ChainId    *big.Int
+		Nonce      *big.Int
+		Expiry     *big.Int
+		Symbol     string
+		Price      *big.Int
+		Timestamp  *big.Int
+		Source     string
+		Signature  []byte
+		Signer     common.Address
+	}:
+		return &types.OracleIntent{
+			Symbol:    v.Symbol,
+			Price:     v.Price,
+			Timestamp: v.Timestamp,
+			Nonce:     v.Nonce,
+			Expiry:    v.Expiry,
+			Signer:    v.Signer,
+			Signature: v.Signature,
+		}, nil
+		
+	case map[string]interface{}:
+		intent := &types.OracleIntent{}
+		
+		if v, ok := v["symbol"].(string); ok {
+			intent.Symbol = v
+		}
+		
+		if v, ok := v["price"]; ok {
+			switch p := v.(type) {
+			case *big.Int:
+				intent.Price = p
+			case float64:
+				intent.Price = big.NewInt(int64(p))
+			case string:
+				intent.Price = new(big.Int)
+				intent.Price.SetString(p, 10)
+			}
+		}
+		
+		if v, ok := v["timestamp"]; ok {
+			switch t := v.(type) {
+			case *big.Int:
+				intent.Timestamp = t
+			case float64:
+				intent.Timestamp = big.NewInt(int64(t))
+			}
+		}
+		
+		if v, ok := v["nonce"]; ok {
+			switch n := v.(type) {
+			case *big.Int:
+				intent.Nonce = n
+			case float64:
+				intent.Nonce = big.NewInt(int64(n))
+			}
+		}
+		
+		if v, ok := v["expiry"]; ok {
+			switch e := v.(type) {
+			case *big.Int:
+				intent.Expiry = e
+			case float64:
+				intent.Expiry = big.NewInt(int64(e))
+			}
+		}
+		
+		if v, ok := v["signer"].(string); ok {
+			intent.Signer = common.HexToAddress(v)
+		}
+		
+		if v, ok := v["signature"].([]byte); ok {
+			intent.Signature = v
+		}
+		
+		return intent, nil
+		
+	default:
+		return gep.convertStructToIntent(data)
+	}
+}
+
+// convertStructToIntent uses reflection to convert a struct to OracleIntent
+func (gep *GenericEventProcessor) convertStructToIntent(data interface{}) (*types.OracleIntent, error) {
+	val := reflect.ValueOf(data)
+	if val.Kind() == reflect.Ptr {
+		val = val.Elem()
+	}
+	
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("enriched data is not a struct, got %T", data)
+	}
+	
+	intent := &types.OracleIntent{}
+	
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+		fieldName := strings.ToLower(val.Type().Field(i).Name)
+		
+		switch fieldName {
+		case "intenttype":
+			if s, ok := field.Interface().(string); ok {
+				intent.IntentType = s
+			}
+		case "version":
+			if v, ok := field.Interface().(string); ok {
+				intent.Version = v
+			}
+		case "chainid":
+			if c, ok := field.Interface().(*big.Int); ok {
+				intent.ChainID = c
+			}
+		case "symbol":
+			if s, ok := field.Interface().(string); ok {
+				intent.Symbol = s
+			}
+		case "price":
+			if p, ok := field.Interface().(*big.Int); ok {
+				intent.Price = p
+			}
+		case "timestamp":
+			if t, ok := field.Interface().(*big.Int); ok {
+				intent.Timestamp = t
+			}
+		case "nonce":
+			if n, ok := field.Interface().(*big.Int); ok {
+				intent.Nonce = n
+			}
+		case "expiry":
+			if e, ok := field.Interface().(*big.Int); ok {
+				intent.Expiry = e
+			}
+		case "source":
+			if s, ok := field.Interface().(string); ok {
+				intent.Source = s
+			}
+		case "signer":
+			if addr, ok := field.Interface().(common.Address); ok {
+				intent.Signer = addr
+			}
+		case "signature":
+			if sig, ok := field.Interface().([]byte); ok {
+				intent.Signature = sig
+			}
+		}
+	}
+	
+	return intent, nil
+}
+
+// processWithRouters processes an intent through the existing router system
+func (gep *GenericEventProcessor) processWithRouters(ctx context.Context, intent *types.OracleIntent, event *types.EventData) {
+	routers := gep.routerRegistry.GetActiveRouters()
+	if len(routers) == 0 {
+		logger.Warn("No active routers configured")
+		return
+	}
+	
+	for _, r := range routers {
+		shouldRoute, reason := r.ShouldRoute(intent)
+		if !shouldRoute {
+			logger.Debugf("Router %s skipped: %s", r.ID(), reason)
+			continue
+		}
+		
+		logger.Infof("Router %s approved for %s: %s", r.ID(), intent.Symbol, reason)
+		
+		destinations := r.GetDestinations()
+		for _, dest := range destinations {
+			destConfig, exists := gep.destinations[dest.ChainID]
+			if !exists || destConfig == nil {
+				logger.Warnf("Destination config not found for chain %d", dest.ChainID)
+				continue
+			}
+			
+			for _, contractAddr := range dest.Contracts {
+				var contractConfig *config.ContractConfig
+				for i := range destConfig.Contracts {
+					if destConfig.Contracts[i].Address == contractAddr {
+						contractConfig = &destConfig.Contracts[i]
+						break
+					}
+				}
+				
+				if contractConfig == nil {
+					logger.Warnf("Contract config not found for %s", contractAddr)
+					continue
+				}
+				
+				updateReq := &types.UpdateRequest{
+					Intent:           intent,
+					DestinationChain: destConfig,
+					Contract:         contractConfig,
+					Priority:         1,
+					Retries:          0,
+					CreatedAt:        time.Now(),
+				}
+				
+				select {
+				case gep.updateChan <- updateReq:
+					logger.Infof("Queued update for %s on chain %d contract %s", 
+						intent.Symbol, dest.ChainID, contractAddr)
+				case <-ctx.Done():
+					return
+				default:
+					logger.Warnf("Update channel full, dropping request")
+				}
+			}
+		}
+		
+		r.OnRouted(intent)
+	}
+}

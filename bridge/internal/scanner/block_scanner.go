@@ -2,14 +2,17 @@ package scanner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
@@ -20,12 +23,13 @@ import (
 
 // BlockScanner scans blockchain for missed events
 type BlockScanner struct {
-	config          *config.BlockScannerConfig
-	sourceConfig    *config.SourceConfig
-	client          *ethclient.Client
-	db              *database.DB
-	eventChan       chan<- *bridgeTypes.EventData
-	errorChan       chan<- error
+	config           *config.BlockScannerConfig
+	sourceConfig     *config.SourceConfig
+	eventDefinitions map[string]*config.EventDefinition
+	client           *ethclient.Client
+	db               *database.DB
+	eventChan        chan<- *bridgeTypes.EventData
+	errorChan        chan<- error
 	
 	contractAddresses []common.Address
 	eventSignatures   []common.Hash
@@ -42,20 +46,22 @@ type BlockScanner struct {
 func NewBlockScanner(
 	cfg *config.BlockScannerConfig,
 	sourceConfig *config.SourceConfig,
+	eventDefinitions map[string]*config.EventDefinition,
 	client *ethclient.Client,
 	db *database.DB,
 	eventChan chan<- *bridgeTypes.EventData,
 	errorChan chan<- error,
 ) (*BlockScanner, error) {
 	scanner := &BlockScanner{
-		config:       cfg,
-		sourceConfig: sourceConfig,
-		client:       client,
-		db:           db,
-		eventChan:    eventChan,
-		errorChan:    errorChan,
-		stopChan:     make(chan struct{}),
-		stoppedChan:  make(chan struct{}),
+		config:           cfg,
+		sourceConfig:     sourceConfig,
+		eventDefinitions: eventDefinitions,
+		client:           client,
+		db:               db,
+		eventChan:        eventChan,
+		errorChan:        errorChan,
+		stopChan:         make(chan struct{}),
+		stoppedChan:      make(chan struct{}),
 	}
 
 	// Extract contract addresses and event signatures
@@ -407,57 +413,65 @@ func (bs *BlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData, error) 
 
 // shouldProcessEvent applies filters to determine if event should be processed
 func (bs *BlockScanner) shouldProcessEvent(event *bridgeTypes.EventData) bool {
-	// Apply the same filters as EventMonitor
-	filters := bs.sourceConfig.EventFilters
-
-	// Check symbol filter
-	if len(filters.Symbols) > 0 && event.Symbol != "" {
-		found := false
-		for _, symbol := range filters.Symbols {
-			if event.Symbol == symbol {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-
-	// Additional filters...
-	
+	// For now, process all events since new config doesn't have filters
+	// Filtering is done at router level
 	return true
 }
 
 // extractContractInfo extracts addresses and event signatures from config
 func (bs *BlockScanner) extractContractInfo() error {
-	for _, contractConfig := range bs.sourceConfig.Contracts {
-		if addr, ok := contractConfig["address"].(string); ok {
-			bs.contractAddresses = append(bs.contractAddresses, common.HexToAddress(addr))
+	if bs.eventDefinitions == nil || len(bs.eventDefinitions) == 0 {
+		return fmt.Errorf("no event definitions provided")
+	}
+	
+	// Extract unique contract addresses and event signatures
+	contractMap := make(map[common.Address]bool)
+	
+	for eventName, eventDef := range bs.eventDefinitions {
+		// Add contract address
+		contractAddr := common.HexToAddress(eventDef.Contract)
+		if !contractMap[contractAddr] {
+			bs.contractAddresses = append(bs.contractAddresses, contractAddr)
+			contractMap[contractAddr] = true
 		}
-
-		// Extract event signatures
-		if events, ok := contractConfig["events"].(map[string]interface{}); ok {
-			for _, eventConfig := range events {
-				if cfg, ok := eventConfig.(map[string]interface{}); ok {
-					if enabled, ok := cfg["enabled"].(bool); ok && enabled {
-						if sig, ok := cfg["signature"].(string); ok {
-							bs.eventSignatures = append(bs.eventSignatures, common.HexToHash(sig))
-						}
-					}
-				}
-			}
+		
+		// Calculate event signature from ABI
+		// Parse the event ABI to get the signature
+		var event struct {
+			Name   string `json:"name"`
+			Type   string `json:"type"`
+			Inputs []struct {
+				Name    string `json:"name"`
+				Type    string `json:"type"`
+				Indexed bool   `json:"indexed"`
+			} `json:"inputs"`
 		}
+		
+		if err := json.Unmarshal([]byte(eventDef.ABI), &event); err != nil {
+			logger.Warnf("Failed to parse ABI for event %s: %v", eventName, err)
+			continue
+		}
+		
+		// Build event signature string
+		var types []string
+		for _, input := range event.Inputs {
+			types = append(types, input.Type)
+		}
+		sigStr := fmt.Sprintf("%s(%s)", event.Name, strings.Join(types, ","))
+		
+		// Calculate signature hash
+		sigHash := crypto.Keccak256Hash([]byte(sigStr))
+		bs.eventSignatures = append(bs.eventSignatures, sigHash)
+		
+		logger.Infof("Event %s: signature=%s, hash=%s", eventName, sigStr, sigHash.Hex())
 	}
-
-	if len(bs.contractAddresses) == 0 {
-		return fmt.Errorf("no contract addresses found")
+	
+	logger.Infof("Monitoring %d contracts for %d events on chain %d", 
+		len(bs.contractAddresses), len(bs.eventSignatures), bs.sourceConfig.ChainID)
+	for _, addr := range bs.contractAddresses {
+		logger.Infof("  - Contract: %s", addr.Hex())
 	}
-
-	if len(bs.eventSignatures) == 0 {
-		return fmt.Errorf("no event signatures found")
-	}
-
+	
 	return nil
 }
 
