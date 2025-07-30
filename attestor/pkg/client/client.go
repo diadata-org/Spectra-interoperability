@@ -25,9 +25,6 @@ const (
 	oracleABIJSON = `[{"inputs":[{"internalType":"string","name":"key","type":"string"}],"name":"getValue","outputs":[{"internalType":"uint128","name":"","type":"uint128"},{"internalType":"uint128","name":"","type":"uint128"}],"stateMutability":"view","type":"function"}]`
 )
 
-// DebugLog logs a message if debug mode is enabled
-var DebugLog func(format string, v ...interface{})
-
 // OracleClient represents a client for interacting with the oracle contract
 type OracleClient struct {
 	rpcURL      string
@@ -98,9 +95,6 @@ func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big
 	// Create the contract address
 	contractAddress := common.HexToAddress(oc.oracleAddr)
 
-	if DebugLog != nil {
-		DebugLog("Calling getValue(%s) on contract %s", symbol, oc.oracleAddr)
-	}
 
 	// Pack the input data
 	data, err := oc.oracleABI.Pack("getValue", symbol)
@@ -121,9 +115,6 @@ func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big
 		return nil, nil, fmt.Errorf("contract call failed: %v", err)
 	}
 
-	if DebugLog != nil {
-		DebugLog("Got result: %s", result)
-	}
 
 	// Decode the hex result
 	resultBytes, err := hexutil.Decode(result)
@@ -152,9 +143,6 @@ func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big
 		return nil, nil, fmt.Errorf("failed to convert timestamp to big.Int")
 	}
 
-	if DebugLog != nil {
-		DebugLog("Unpacked price: %s, timestamp: %s", price.String(), timestamp.String())
-	}
 
 	return price, timestamp, nil
 }

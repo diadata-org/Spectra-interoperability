@@ -23,18 +23,6 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
-// TestDebugLog tests the DebugLog function
-func TestDebugLog(t *testing.T) {
-	// Enable debug mode
-	DebugMode = true
-
-	// This is just to ensure the function doesn't panic
-	DebugLog("Test debug log message: %s", "hello world")
-
-	// Disable debug mode and ensure it still works
-	DebugMode = false
-	DebugLog("This should not cause any issues")
-}
 
 // TestCreateEnvTemplate tests the CreateEnvTemplate function
 func TestCreateEnvTemplate(t *testing.T) {

@@ -25,15 +25,3 @@ func TestEnvironmentVariableHelper(t *testing.T) {
 	}
 }
 
-// TestDebugLogFunction tests the DebugLog function
-func TestDebugLogFunction(t *testing.T) {
-	// Enable debug mode
-	utils.DebugMode = true
-
-	// This is just to ensure the function doesn't panic
-	utils.DebugLog("Test debug log message: %s", "hello world")
-
-	// Disable debug mode and ensure it still works
-	utils.DebugMode = false
-	utils.DebugLog("This should not cause any issues")
-}
