@@ -713,6 +713,11 @@ func (b *Bridge) initializeChainStats() {
 	}
 }
 
+// GetRouterRegistry returns the router registry
+func (b *Bridge) GetRouterRegistry() *router.Registry {
+	return b.routerRegistry
+}
+
 // updateStats updates bridge statistics
 func (b *Bridge) updateStats() {
 	b.mu.Lock()

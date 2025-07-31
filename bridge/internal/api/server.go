@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sirupsen/logrus"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
@@ -18,34 +19,56 @@ import (
 
 // Server represents the API server
 type Server struct {
-	config         *config.APIConfig
-	db             *database.DB
-	healthMonitor  *health.HealthMonitor
-	metrics        *metrics.Collector
+	config          *config.APIConfig
+	cfg             *config.Config      // Full config for failover handler
+	db              *database.DB
+	healthMonitor   *health.HealthMonitor
+	metrics         *metrics.Collector
+	routerRegistry  interface{} // Will be *router.Registry when available
 	
-	router         *mux.Router
-	httpServer     *http.Server
+	router          *mux.Router
+	httpServer      *http.Server
+	failoverHandler *FailoverHandler
 }
 
 // NewServer creates a new API server
 func NewServer(
-	cfg *config.APIConfig,
+	cfg *config.Config,
 	db *database.DB,
 	healthMonitor *health.HealthMonitor,
 	metricsCollector *metrics.Collector,
+	routerRegistry interface{}, // Pass as interface{} to avoid import cycle
 ) *Server {
 	s := &Server{
-		config:        cfg,
-		db:            db,
-		healthMonitor: healthMonitor,
-		metrics:       metricsCollector,
-		router:        mux.NewRouter(),
+		config:         &cfg.API,
+		cfg:            cfg,
+		db:             db,
+		healthMonitor:  healthMonitor,
+		metrics:        metricsCollector,
+		routerRegistry: routerRegistry,
+		router:         mux.NewRouter(),
 	}
 	
+	// Create failover handler with config
+	logrus.Info("Creating failover handler")
+	
+	// Create new Metrics instance for failover handler
+	failoverMetrics := metrics.NewMetrics()
+	
+	failoverHandler, err := NewFailoverHandler(cfg, db, failoverMetrics)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to create failover handler")
+	} else {
+		s.failoverHandler = failoverHandler
+		logrus.Info("Failover handler created successfully")
+	}
+	
+	logrus.Info("Setting up routes")
 	s.setupRoutes()
+	logrus.Info("Routes setup complete")
 	
 	s.httpServer = &http.Server{
-		Addr:         cfg.ListenAddr,
+		Addr:         s.config.ListenAddr,
 		Handler:      s.router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
@@ -88,6 +111,15 @@ func (s *Server) setupRoutes() {
 	// Metrics endpoint
 	s.router.Handle("/metrics", promhttp.Handler())
 	
+	// Debug endpoint
+	s.router.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Debug endpoint working",
+			"failover_handler_exists": s.failoverHandler != nil,
+		})
+	}).Methods("GET")
+	
 	// API v1 routes
 	v1 := s.router.PathPrefix("/api/v1").Subrouter()
 	
@@ -110,6 +142,15 @@ func (s *Server) setupRoutes() {
 	// Symbol endpoints
 	v1.HandleFunc("/symbols", s.handleGetSymbols).Methods("GET")
 	v1.HandleFunc("/symbols/{symbol}/updates", s.handleGetSymbolUpdates).Methods("GET")
+	
+	// Failover endpoints (if available)
+	if s.failoverHandler != nil {
+		logrus.Info("Registering failover routes - handler is NOT nil")
+		s.failoverHandler.RegisterRoutes(v1)
+		logrus.Info("Failover routes registered with v1 subrouter")
+	} else {
+		logrus.Warn("Failover handler is nil, not registering failover routes")
+	}
 	
 	// Middleware
 	s.router.Use(s.loggingMiddleware)

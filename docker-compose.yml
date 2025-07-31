@@ -128,6 +128,29 @@ services:
     networks:
       - dia-network
 
+  # Hyperlane monitor service
+  hyperlane_monitor:
+    build:
+      context: ./hyperlane-monitor
+      dockerfile: Dockerfile
+    container_name: dia_hyperlane_monitor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bridge:
+        condition: service_started
+    environment:
+      - CONFIG_PATH=/app/config/config.json
+      - LOG_LEVEL=debug
+      - DATABASE_DSN=postgres://monitor:password@postgres:5432/hyperlane_monitor?sslmode=disable
+    volumes:
+      - ./hyperlane-monitor/config/config.json:/app/config/config.json:ro
+    ports:
+      - "9091:9091"  # Metrics port
+    restart: unless-stopped
+    networks:
+      - dia-network
+
 volumes:
   postgres_data:
     driver: local

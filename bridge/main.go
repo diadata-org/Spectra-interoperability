@@ -3,15 +3,21 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/bridge"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/utils"
 )
 
@@ -31,9 +37,33 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+	
+	// Initialize metrics collector
+	metricsCollector := metrics.NewCollector()
+	
+	// Start metrics server
+	metricsPort := 8081
+	metricsServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", metricsPort),
+		Handler: promhttp.Handler(),
+	}
+	
+	go func() {
+		log.Printf("Starting metrics server on port %d", metricsPort)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Metrics server error: %v", err)
+		}
+	}()
 
+	// Create database connection
+	db, err := database.NewDB(cfg.DatabaseURL) 
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+	
 	// Create bridge service
-	bridgeService, err := bridge.NewBridge(cfg)
+	bridgeService, err := bridge.NewBridge(cfg, db, metricsCollector)
 	if err != nil {
 		log.Fatalf("Failed to create bridge service: %v", err)
 	}
@@ -85,6 +115,12 @@ func main() {
 	log.Printf("Stopping bridge service...")
 	if err := bridgeService.Stop(shutdownCtx); err != nil {
 		log.Printf("Error during shutdown: %v", err)
+	}
+	
+	// Shutdown metrics server
+	log.Printf("Stopping metrics server...")
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Failed to shutdown metrics server: %v", err)
 	}
 
 	totalUptime := utils.GetUptimeStringVerbose(startTime)

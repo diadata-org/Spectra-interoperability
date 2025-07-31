@@ -10,9 +10,9 @@ import (
 
 // OracleIntent represents an oracle intent from the registry
 type OracleIntent struct {
-	IntentType string         `json:"intent_type"`
+	IntentType string         `json:"intentType"`
 	Version    string         `json:"version"`
-	ChainID    *big.Int       `json:"chain_id"`
+	ChainID    *big.Int       `json:"chainId"`
 	Nonce      *big.Int       `json:"nonce"`
 	Expiry     *big.Int       `json:"expiry"`
 	Symbol     string         `json:"symbol"`

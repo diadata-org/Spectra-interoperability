@@ -95,7 +95,8 @@ func main() {
 	// Start API server if enabled
 	var apiServer *api.Server
 	if cfg.API.Enabled {
-		apiServer = api.NewServer(&cfg.API, db, healthMonitor, metricsCollector)
+		logger.Info("Creating API server with failover support")
+		apiServer = api.NewServer(cfg, db, healthMonitor, metricsCollector, bridgeService.GetRouterRegistry())
 		if err := apiServer.Start(ctx); err != nil {
 			logger.WithError(err).Fatal("Failed to start API server")
 		}
