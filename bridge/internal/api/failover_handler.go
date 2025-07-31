@@ -146,7 +146,9 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 	startTime := time.Now()
 	defer func() {
 		// Record HTTP request metrics
-		h.metrics.RecordHTTPRequest("POST", "/api/v1/failover/trigger", "202", time.Since(startTime).Seconds(), 0)
+		if h.metrics != nil {
+			h.metrics.RecordHTTPRequest("POST", "/api/v1/failover/trigger", "202", time.Since(startTime).Seconds(), 0)
+		}
 	}()
 	
 	// Read the body first to debug it
@@ -184,10 +186,12 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 	requestID := uuid.New().String()
 	
 	// Record failover request metric
-	h.metrics.RecordFailoverRequest(
-		fmt.Sprintf("%d", req.SourceChainID),
-		fmt.Sprintf("%d", req.DestinationChainID),
-	)
+	if h.metrics != nil {
+		h.metrics.RecordFailoverRequest(
+			fmt.Sprintf("%d", req.SourceChainID),
+			fmt.Sprintf("%d", req.DestinationChainID),
+		)
+	}
 
 	logger.WithFields(logrus.Fields{
 		"request_id":   requestID,
@@ -334,13 +338,15 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	// Validate intent data
 	if intentData == nil {
 		h.updateStatus(requestID, "failed", "", "Intent data is nil")
-		h.metrics.RecordFailoverProcessing(
-			fmt.Sprintf("%d", req.SourceChainID),
-			fmt.Sprintf("%d", req.DestinationChainID),
-			time.Since(startTime).Seconds(),
-			false,
-			"intent_data_nil",
-		)
+		if h.metrics != nil {
+			h.metrics.RecordFailoverProcessing(
+				fmt.Sprintf("%d", req.SourceChainID),
+				fmt.Sprintf("%d", req.DestinationChainID),
+				time.Since(startTime).Seconds(),
+				false,
+				"intent_data_nil",
+			)
+		}
 		return
 	}
 	
@@ -409,13 +415,15 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	err = client.SendTransaction(ctx, signedTx)
 	if err != nil {
 		h.updateStatus(requestID, "failed", "", fmt.Sprintf("Failed to send transaction: %v", err))
-		h.metrics.RecordFailoverProcessing(
-			fmt.Sprintf("%d", req.SourceChainID),
-			fmt.Sprintf("%d", req.DestinationChainID),
-			time.Since(startTime).Seconds(),
-			false,
-			"send_transaction_failed",
-		)
+		if h.metrics != nil {
+			h.metrics.RecordFailoverProcessing(
+				fmt.Sprintf("%d", req.SourceChainID),
+				fmt.Sprintf("%d", req.DestinationChainID),
+				time.Since(startTime).Seconds(),
+				false,
+				"send_transaction_failed",
+			)
+		}
 		return
 	}
 
@@ -423,12 +431,14 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	h.updateStatus(requestID, "sent", txHash, "")
 	
 	// Record transaction submitted metric
-	h.metrics.RecordTransaction(
-		fmt.Sprintf("%d", destConfig.ChainID),
-		"PushOracleReceiver",
-		destConfig.GasLimit,
-		gasPrice.Uint64()*destConfig.GasLimit,
-	)
+	if h.metrics != nil {
+		h.metrics.RecordTransaction(
+			fmt.Sprintf("%d", destConfig.ChainID),
+			"PushOracleReceiver",
+			destConfig.GasLimit,
+			gasPrice.Uint64()*destConfig.GasLimit,
+		)
+	}
 
 	logger.WithFields(logrus.Fields{
 		"request_id": requestID,
@@ -443,56 +453,62 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	receipt, err := h.waitForReceipt(ctx, client, signedTx.Hash())
 	if err != nil {
 		h.updateStatus(requestID, "failed", txHash, fmt.Sprintf("Failed to get receipt: %v", err))
-		h.metrics.RecordFailoverProcessing(
-			fmt.Sprintf("%d", req.SourceChainID),
-			fmt.Sprintf("%d", req.DestinationChainID),
-			time.Since(startTime).Seconds(),
-			false,
-			"receipt_timeout",
-		)
+		if h.metrics != nil {
+			h.metrics.RecordFailoverProcessing(
+				fmt.Sprintf("%d", req.SourceChainID),
+				fmt.Sprintf("%d", req.DestinationChainID),
+				time.Since(startTime).Seconds(),
+				false,
+				"receipt_timeout",
+			)
+		}
 		return
 	}
 
 	// Record confirmation time
 	confirmDuration := time.Since(confirmStartTime).Seconds()
-	h.metrics.RecordTransactionConfirmation(
-		fmt.Sprintf("%d", destConfig.ChainID),
-		"PushOracleReceiver",
-		confirmDuration,
-	)
-	
-	// Record timeline phases
-	h.metrics.RecordTimelinePhase("bridge_processing", time.Since(startTime).Seconds(),
-		fmt.Sprintf("%d", destConfig.ChainID),
-		fmt.Sprintf("%d", req.SourceChainID),
-		fmt.Sprintf("%d", req.DestinationChainID))
+	if h.metrics != nil {
+		h.metrics.RecordTransactionConfirmation(
+			fmt.Sprintf("%d", destConfig.ChainID),
+			"PushOracleReceiver",
+			confirmDuration,
+		)
 		
-	h.metrics.RecordTimelinePhase("confirmation", confirmDuration,
-		fmt.Sprintf("%d", destConfig.ChainID),
-		fmt.Sprintf("%d", req.SourceChainID),
-		fmt.Sprintf("%d", req.DestinationChainID))
+		// Record timeline phases
+		h.metrics.RecordTimelinePhase("bridge_processing", time.Since(startTime).Seconds(),
+			fmt.Sprintf("%d", destConfig.ChainID),
+			fmt.Sprintf("%d", req.SourceChainID),
+			fmt.Sprintf("%d", req.DestinationChainID))
+			
+		h.metrics.RecordTimelinePhase("confirmation", confirmDuration,
+			fmt.Sprintf("%d", destConfig.ChainID),
+			fmt.Sprintf("%d", req.SourceChainID),
+			fmt.Sprintf("%d", req.DestinationChainID))
+	}
 
 	if receipt.Status == 1 {
 		h.updateStatus(requestID, "completed", txHash, "")
 		
 		// Record successful failover
-		h.metrics.RecordFailoverProcessing(
-			fmt.Sprintf("%d", req.SourceChainID),
-			fmt.Sprintf("%d", req.DestinationChainID),
-			time.Since(startTime).Seconds(),
-			true,
-			"",
-		)
-		
-		// Record total delivery time (if we have the original dispatch time)
-		// This would need to be passed from hyperlane-monitor
-		h.metrics.RecordTotalDeliveryTime(
-			time.Since(startTime).Seconds(), // This is just bridge processing time
-			fmt.Sprintf("%d", destConfig.ChainID),
-			fmt.Sprintf("%d", req.SourceChainID),
-			fmt.Sprintf("%d", req.DestinationChainID),
-			"failover",
-		)
+		if h.metrics != nil {
+			h.metrics.RecordFailoverProcessing(
+				fmt.Sprintf("%d", req.SourceChainID),
+				fmt.Sprintf("%d", req.DestinationChainID),
+				time.Since(startTime).Seconds(),
+				true,
+				"",
+			)
+			
+			// Record total delivery time (if we have the original dispatch time)
+			// This would need to be passed from hyperlane-monitor
+			h.metrics.RecordTotalDeliveryTime(
+				time.Since(startTime).Seconds(), // This is just bridge processing time
+				fmt.Sprintf("%d", destConfig.ChainID),
+				fmt.Sprintf("%d", req.SourceChainID),
+				fmt.Sprintf("%d", req.DestinationChainID),
+				"failover",
+			)
+		}
 		
 		logger.WithFields(logrus.Fields{
 			"request_id": requestID,
@@ -501,13 +517,15 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		}).Info("Failover transaction confirmed")
 	} else {
 		h.updateStatus(requestID, "failed", txHash, "Transaction reverted")
-		h.metrics.RecordFailoverProcessing(
-			fmt.Sprintf("%d", req.SourceChainID),
-			fmt.Sprintf("%d", req.DestinationChainID),
-			time.Since(startTime).Seconds(),
-			false,
-			"transaction_reverted",
-		)
+		if h.metrics != nil {
+			h.metrics.RecordFailoverProcessing(
+				fmt.Sprintf("%d", req.SourceChainID),
+				fmt.Sprintf("%d", req.DestinationChainID),
+				time.Since(startTime).Seconds(),
+				false,
+				"transaction_reverted",
+			)
+		}
 	}
 }
 

@@ -50,6 +50,9 @@ type Collector struct {
 	
 	// Intent lifecycle metrics
 	IntentMetrics *IntentMetrics
+	
+	// Failover metrics (shared instance)
+	FailoverMetrics *Metrics
 }
 
 // NewCollector creates a new metrics collector
@@ -176,6 +179,9 @@ func NewCollector() *Collector {
 		
 		// Initialize intent metrics
 		IntentMetrics: NewIntentMetrics(),
+		
+		// Initialize failover metrics (shared instance)
+		FailoverMetrics: NewMetrics(),
 	}
 }
 

@@ -19,13 +19,13 @@ import (
 
 // Server represents the API server
 type Server struct {
-	config          *config.APIConfig
-	cfg             *config.Config      // Full config for failover handler
-	db              *database.DB
-	healthMonitor   *health.HealthMonitor
-	metrics         *metrics.Collector
-	routerRegistry  interface{} // Will be *router.Registry when available
-	
+	config         *config.APIConfig
+	cfg            *config.Config // Full config for failover handler
+	db             *database.DB
+	healthMonitor  *health.HealthMonitor
+	metrics        *metrics.Collector
+	routerRegistry interface{} // Will be *router.Registry when available
+
 	router          *mux.Router
 	httpServer      *http.Server
 	failoverHandler *FailoverHandler
@@ -48,25 +48,33 @@ func NewServer(
 		routerRegistry: routerRegistry,
 		router:         mux.NewRouter(),
 	}
-	
-	// Create failover handler with config
+
 	logrus.Info("Creating failover handler")
-	
-	// Create new Metrics instance for failover handler
-	failoverMetrics := metrics.NewMetrics()
-	
+
+	var failoverMetrics *metrics.Metrics
+	if metricsCollector != nil && metricsCollector.FailoverMetrics != nil {
+		failoverMetrics = metricsCollector.FailoverMetrics
+		logrus.Info("Using shared metrics instance for failover handler")
+	} else {
+		logrus.Warn("Metrics collector not available, failover handler will run without metrics")
+	}
+
 	failoverHandler, err := NewFailoverHandler(cfg, db, failoverMetrics)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to create failover handler")
 	} else {
 		s.failoverHandler = failoverHandler
-		logrus.Info("Failover handler created successfully")
+		if failoverMetrics != nil {
+			logrus.Info("Failover handler created successfully with integrated metrics")
+		} else {
+			logrus.Info("Failover handler created successfully without metrics")
+		}
 	}
-	
+
 	logrus.Info("Setting up routes")
 	s.setupRoutes()
 	logrus.Info("Routes setup complete")
-	
+
 	s.httpServer = &http.Server{
 		Addr:         s.config.ListenAddr,
 		Handler:      s.router,
@@ -74,75 +82,74 @@ func NewServer(
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-	
+
 	return s
 }
 
 // Start starts the API server
 func (s *Server) Start(ctx context.Context) error {
 	logger.Infof("Starting API server on %s", s.config.ListenAddr)
-	
+
 	go func() {
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Errorf("API server error: %v", err)
 		}
 	}()
-	
+
 	return nil
 }
 
 // Stop gracefully stops the API server
 func (s *Server) Stop() error {
 	logger.Info("Stopping API server")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	return s.httpServer.Shutdown(ctx)
 }
 
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
-	// Health check endpoints
 	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")
 	s.router.HandleFunc("/health/ready", s.handleReadiness).Methods("GET")
 	s.router.HandleFunc("/health/live", s.handleLiveness).Methods("GET")
-	
+
 	// Metrics endpoint
 	s.router.Handle("/metrics", promhttp.Handler())
-	
+
 	// Debug endpoint
 	s.router.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "Debug endpoint working",
+			"message":                 "Debug endpoint working",
 			"failover_handler_exists": s.failoverHandler != nil,
 		})
 	}).Methods("GET")
-	
+
 	// API v1 routes
 	v1 := s.router.PathPrefix("/api/v1").Subrouter()
-	
+
 	// Status endpoints
 	v1.HandleFunc("/status", s.handleStatus).Methods("GET")
 	v1.HandleFunc("/status/components", s.handleComponentStatus).Methods("GET")
-	
+
 	// Event endpoints
 	v1.HandleFunc("/events", s.handleGetEvents).Methods("GET")
 	v1.HandleFunc("/events/{hash}", s.handleGetEvent).Methods("GET")
-	
+
 	// Transaction endpoints
 	v1.HandleFunc("/transactions", s.handleGetTransactions).Methods("GET")
 	v1.HandleFunc("/transactions/{hash}", s.handleGetTransaction).Methods("GET")
-	
+
 	// Chain endpoints
 	v1.HandleFunc("/chains", s.handleGetChains).Methods("GET")
 	v1.HandleFunc("/chains/{id}/status", s.handleGetChainStatus).Methods("GET")
-	
+
 	// Symbol endpoints
 	v1.HandleFunc("/symbols", s.handleGetSymbols).Methods("GET")
 	v1.HandleFunc("/symbols/{symbol}/updates", s.handleGetSymbolUpdates).Methods("GET")
-	
+
 	// Failover endpoints (if available)
 	if s.failoverHandler != nil {
 		logrus.Info("Registering failover routes - handler is NOT nil")
@@ -151,7 +158,7 @@ func (s *Server) setupRoutes() {
 	} else {
 		logrus.Warn("Failover handler is nil, not registering failover routes")
 	}
-	
+
 	// Middleware
 	s.router.Use(s.loggingMiddleware)
 	s.router.Use(s.metricsMiddleware)
@@ -164,17 +171,17 @@ func (s *Server) setupRoutes() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	health := s.healthMonitor.IsHealthy()
-	
+
 	response := map[string]interface{}{
-		"status": "ok",
-		"healthy": health,
+		"status":    "ok",
+		"healthy":   health,
 		"timestamp": time.Now().UTC(),
 	}
-	
+
 	if !health {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
-	
+
 	s.writeJSON(w, response)
 }
 
@@ -182,14 +189,14 @@ func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	// Check if all components are ready
 	status := s.healthMonitor.GetStatus()
 	ready := true
-	
+
 	for _, component := range status {
 		if !component.Healthy {
 			ready = false
 			break
 		}
 	}
-	
+
 	if ready {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ready"))
@@ -210,22 +217,22 @@ func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	// Get overall system status
 	componentStatus := s.healthMonitor.GetStatus()
-	
+
 	// Get basic statistics
 	stats, err := s.getSystemStats()
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get system stats", err)
 		return
 	}
-	
+
 	response := map[string]interface{}{
-		"status": "operational",
-		"version": "1.0.0", // TODO: Get from build info
-		"uptime": s.getUptime(),
+		"status":     "operational",
+		"version":    "1.0.0", // TODO: Get from build info
+		"uptime":     s.getUptime(),
 		"components": componentStatus,
 		"statistics": stats,
 	}
-	
+
 	s.writeJSON(w, response)
 }
 
@@ -242,23 +249,23 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	endBlock := s.parseUint64Param(r, "end_block", 0)
 	limit := s.parseIntParam(r, "limit", 100)
 	offset := s.parseIntParam(r, "offset", 0)
-	
+
 	// Validate parameters
 	if limit > 1000 {
 		limit = 1000
 	}
-	
+
 	// Query events
 	events, err := s.queryEvents(startBlock, endBlock, limit, offset)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to query events", err)
 		return
 	}
-	
+
 	s.writeJSON(w, map[string]interface{}{
 		"events": events,
-		"count": len(events),
-		"limit": limit,
+		"count":  len(events),
+		"limit":  limit,
 		"offset": offset,
 	})
 }
@@ -266,18 +273,18 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	hash := vars["hash"]
-	
+
 	event, err := s.getEventByHash(hash)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get event", err)
 		return
 	}
-	
+
 	if event == nil {
 		s.writeError(w, http.StatusNotFound, "Event not found", nil)
 		return
 	}
-	
+
 	s.writeJSON(w, event)
 }
 
@@ -289,42 +296,42 @@ func (s *Server) handleGetTransactions(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	limit := s.parseIntParam(r, "limit", 100)
 	offset := s.parseIntParam(r, "offset", 0)
-	
+
 	// Validate parameters
 	if limit > 1000 {
 		limit = 1000
 	}
-	
+
 	// Query transactions
 	transactions, err := s.queryTransactions(chainID, status, limit, offset)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to query transactions", err)
 		return
 	}
-	
+
 	s.writeJSON(w, map[string]interface{}{
 		"transactions": transactions,
-		"count": len(transactions),
-		"limit": limit,
-		"offset": offset,
+		"count":        len(transactions),
+		"limit":        limit,
+		"offset":       offset,
 	})
 }
 
 func (s *Server) handleGetTransaction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	hash := vars["hash"]
-	
+
 	transaction, err := s.getTransactionByHash(hash)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get transaction", err)
 		return
 	}
-	
+
 	if transaction == nil {
 		s.writeError(w, http.StatusNotFound, "Transaction not found", nil)
 		return
 	}
-	
+
 	s.writeJSON(w, transaction)
 }
 
@@ -336,7 +343,7 @@ func (s *Server) handleGetChains(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get chains", err)
 		return
 	}
-	
+
 	s.writeJSON(w, chains)
 }
 
@@ -347,13 +354,13 @@ func (s *Server) handleGetChainStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "Invalid chain ID", nil)
 		return
 	}
-	
+
 	status, err := s.db.GetChainState(chainID)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get chain status", err)
 		return
 	}
-	
+
 	s.writeJSON(w, status)
 }
 
@@ -365,28 +372,28 @@ func (s *Server) handleGetSymbols(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get symbols", err)
 		return
 	}
-	
+
 	s.writeJSON(w, symbols)
 }
 
 func (s *Server) handleGetSymbolUpdates(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	symbol := vars["symbol"]
-	
+
 	chainID := s.parseInt64Param(r, "chain_id", 0)
 	contractAddr := r.URL.Query().Get("contract")
 	limit := s.parseIntParam(r, "limit", 100)
-	
+
 	updates, err := s.getSymbolUpdates(symbol, chainID, contractAddr, limit)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to get symbol updates", err)
 		return
 	}
-	
+
 	s.writeJSON(w, map[string]interface{}{
-		"symbol": symbol,
+		"symbol":  symbol,
 		"updates": updates,
-		"count": len(updates),
+		"count":   len(updates),
 	})
 }
 
@@ -395,12 +402,12 @@ func (s *Server) handleGetSymbolUpdates(w http.ResponseWriter, r *http.Request) 
 func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Wrap response writer to capture status code
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-		
+
 		next.ServeHTTP(wrapped, r)
-		
+
 		duration := time.Since(start)
 		logger.Infof("%s %s %d %s", r.Method, r.URL.Path, wrapped.statusCode, duration)
 	})
@@ -409,10 +416,10 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 func (s *Server) metricsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 		next.ServeHTTP(wrapped, r)
-		
+
 		duration := time.Since(start).Seconds()
 		s.metrics.RecordHTTPRequest(r.Method, r.URL.Path, wrapped.statusCode, duration)
 	})
@@ -423,12 +430,12 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-		
+
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -445,16 +452,16 @@ func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 func (s *Server) writeError(w http.ResponseWriter, code int, message string, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	
+
 	response := map[string]interface{}{
 		"error": message,
-		"code": code,
+		"code":  code,
 	}
-	
+
 	if err != nil {
 		response["details"] = err.Error()
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 

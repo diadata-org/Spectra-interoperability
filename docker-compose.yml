@@ -62,7 +62,9 @@ services:
     environment:
       - CONFIG_PATH=/root/config.json
       - DATABASE_URL=postgres://bridge:${DB_PASSWORD:-password}@postgres:5432/oracle_bridge
-      # Private keys for destination chains
+      # Private key for transaction signing (overrides config file)
+      - BRIDGE_PRIVATE_KEY=${BRIDGE_PRIVATE_KEY}
+      # Legacy per-chain private keys (if using multiple keys)
       - OP_SEPOLIA_PRIVATE_KEY=${OP_SEPOLIA_PRIVATE_KEY}
       - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY}
       - BASE_PRIVATE_KEY=${BASE_PRIVATE_KEY}

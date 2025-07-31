@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -17,6 +19,11 @@ func Load(path string) (*Config, error) {
 	var config Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Override private key from environment if set
+	if envPrivateKey := os.Getenv("BRIDGE_PRIVATE_KEY"); envPrivateKey != "" {
+		config.PrivateKey = envPrivateKey
 	}
 
 	// Validate configuration
@@ -49,9 +56,16 @@ func (c *Config) Validate() error {
 		if len(dest.RPCURLs) == 0 {
 			return fmt.Errorf("destination[%d] rpc_urls is required", i)
 		}
-		if c.PrivateKey == "" {
-			return fmt.Errorf("private_key is required")
-		}
+	}
+
+	// Validate private key
+	if c.PrivateKey == "" {
+		return fmt.Errorf("private_key is required (set in config or BRIDGE_PRIVATE_KEY env var)")
+	}
+	
+	// Ensure private key has 0x prefix
+	if !strings.HasPrefix(c.PrivateKey, "0x") {
+		c.PrivateKey = "0x" + c.PrivateKey
 	}
 
 	// Set default values

@@ -41,6 +41,11 @@ func main() {
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to load configuration")
 	}
+	
+	// Log if using environment variable for private key
+	if os.Getenv("BRIDGE_PRIVATE_KEY") != "" {
+		logger.Info("Using private key from BRIDGE_PRIVATE_KEY environment variable")
+	}
 
 	// Initialize database
 	db, err := database.NewDB(cfg.Database.Driver, cfg.Database.DSN)

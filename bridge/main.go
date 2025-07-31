@@ -38,6 +38,11 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	
+	// Log if using environment variable for private key
+	if os.Getenv("BRIDGE_PRIVATE_KEY") != "" {
+		log.Printf("Using private key from BRIDGE_PRIVATE_KEY environment variable")
+	}
+	
 	// Initialize metrics collector
 	metricsCollector := metrics.NewCollector()
 	
