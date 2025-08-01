@@ -1,10 +1,16 @@
 package metrics
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	intentMetricsInstance *IntentMetrics
+	intentMetricsOnce     sync.Once
 )
 
 // IntentMetrics tracks oracle intent lifecycle metrics
@@ -47,11 +53,12 @@ type IntentMetrics struct {
 	gasPricePerSymbol      *prometheus.HistogramVec
 }
 
-// NewIntentMetrics creates a new intent metrics collector
+// NewIntentMetrics creates a new intent metrics collector (singleton)
 func NewIntentMetrics() *IntentMetrics {
-	return &IntentMetrics{
-		// Latency metrics with fine-grained buckets for subsecond measurements
-		intentToRegistrationLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
+	intentMetricsOnce.Do(func() {
+		intentMetricsInstance = &IntentMetrics{
+			// Latency metrics with fine-grained buckets for subsecond measurements
+			intentToRegistrationLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "bridge_intent_to_registration_latency_seconds",
 			Help:    "Time from intent creation to on-chain registration",
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300},
@@ -190,7 +197,9 @@ func NewIntentMetrics() *IntentMetrics {
 			Help:    "Gas price in gwei per symbol",
 			Buckets: []float64{1, 5, 10, 20, 50, 100, 200, 500, 1000},
 		}, []string{"symbol", "destination_chain"}),
-	}
+		}
+	})
+	return intentMetricsInstance
 }
 
 // IntentLifecycle tracks the complete lifecycle of an intent

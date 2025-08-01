@@ -2,19 +2,21 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Database         DatabaseConfig                     `json:"database" mapstructure:"database"`
-	ChainConfigs     map[string]ChainConfig            `json:"chain_configs" mapstructure:"chain_configs"`
-	MonitoringPairs  []MonitoringPairConfig            `json:"monitoring_pairs" mapstructure:"monitoring_pairs"`
-	MonitoringProfiles map[string]MonitoringProfile    `json:"monitoring_profiles" mapstructure:"monitoring_profiles"`
-	BridgeAPI        BridgeAPIConfig                   `json:"bridge_api" mapstructure:"bridge_api"`
-	Metrics          MetricsConfig                     `json:"metrics" mapstructure:"metrics"`
-	MetricsPort      int                               `json:"metrics_port" mapstructure:"metrics_port"`
+	Database           DatabaseConfig               `json:"database" mapstructure:"database"`
+	ChainConfigs       map[string]ChainConfig       `json:"chain_configs" mapstructure:"chain_configs"`
+	MonitoringPairs    []MonitoringPairConfig       `json:"monitoring_pairs" mapstructure:"monitoring_pairs"`
+	MonitoringProfiles map[string]MonitoringProfile `json:"monitoring_profiles" mapstructure:"monitoring_profiles"`
+	BridgeAPI          BridgeAPIConfig              `json:"bridge_api" mapstructure:"bridge_api"`
+	Metrics            MetricsConfig                `json:"metrics" mapstructure:"metrics"`
+	MetricsPort        int                          `json:"metrics_port" mapstructure:"metrics_port"`
 }
 
 type DatabaseConfig struct {
@@ -23,10 +25,10 @@ type DatabaseConfig struct {
 }
 
 type ChainConfig struct {
-	Name                 string   `json:"name" mapstructure:"name"`
-	RPCURLs              []string `json:"rpc_urls" mapstructure:"rpc_urls"`
-	ScanInterval         string   `json:"scan_interval,omitempty" mapstructure:"scan_interval"`
-	HealthCheckInterval  string   `json:"health_check_interval,omitempty" mapstructure:"health_check_interval"`
+	Name                string   `json:"name" mapstructure:"name"`
+	RPCURLs             []string `json:"rpc_urls" mapstructure:"rpc_urls"`
+	ScanInterval        string   `json:"scan_interval,omitempty" mapstructure:"scan_interval"`
+	HealthCheckInterval string   `json:"health_check_interval,omitempty" mapstructure:"health_check_interval"`
 }
 
 type MonitoringPairConfig struct {
@@ -42,36 +44,36 @@ type SourceConfig struct {
 }
 
 type DestinationConfig struct {
-	ChainID   int                `json:"chain_id" mapstructure:"chain_id"`
-	Receivers []ReceiverConfig   `json:"receivers" mapstructure:"receivers"`
+	ChainID   int              `json:"chain_id" mapstructure:"chain_id"`
+	Receivers []ReceiverConfig `json:"receivers" mapstructure:"receivers"`
 }
 
 type ReceiverConfig struct {
-	Address        string                 `json:"address" mapstructure:"address"`
-	Name           string                 `json:"name" mapstructure:"name"`
-	Monitoring     MonitoringConfig       `json:"monitoring" mapstructure:"monitoring"`
+	Address    string           `json:"address" mapstructure:"address"`
+	Name       string           `json:"name" mapstructure:"name"`
+	Monitoring MonitoringConfig `json:"monitoring" mapstructure:"monitoring"`
 }
 
 type MonitoringConfig struct {
-	Enabled            bool   `json:"enabled" mapstructure:"enabled"`
-	Profile            string `json:"profile,omitempty" mapstructure:"profile"`
-	CheckInterval      string `json:"check_interval,omitempty" mapstructure:"check_interval"`
-	InitialWait        string `json:"initial_wait,omitempty" mapstructure:"initial_wait"`
-	MaxDeliveryWait    string `json:"max_delivery_wait,omitempty" mapstructure:"max_delivery_wait"`
-	MaxCheckAttempts   int    `json:"max_check_attempts,omitempty" mapstructure:"max_check_attempts"`
-	AlertOnFailure     bool   `json:"alert_on_failure,omitempty" mapstructure:"alert_on_failure"`
-	AlertWebhook       string `json:"alert_webhook,omitempty" mapstructure:"alert_webhook"`
-	Reason             string `json:"reason,omitempty" mapstructure:"reason"`
+	Enabled          bool   `json:"enabled" mapstructure:"enabled"`
+	Profile          string `json:"profile,omitempty" mapstructure:"profile"`
+	CheckInterval    string `json:"check_interval,omitempty" mapstructure:"check_interval"`
+	InitialWait      string `json:"initial_wait,omitempty" mapstructure:"initial_wait"`
+	MaxDeliveryWait  string `json:"max_delivery_wait,omitempty" mapstructure:"max_delivery_wait"`
+	MaxCheckAttempts int    `json:"max_check_attempts,omitempty" mapstructure:"max_check_attempts"`
+	AlertOnFailure   bool   `json:"alert_on_failure,omitempty" mapstructure:"alert_on_failure"`
+	AlertWebhook     string `json:"alert_webhook,omitempty" mapstructure:"alert_webhook"`
+	Reason           string `json:"reason,omitempty" mapstructure:"reason"`
 }
 
 type MonitoringProfile struct {
-	CheckInterval       string `json:"check_interval"`
-	InitialWait         string `json:"initial_wait"`
-	MaxDeliveryWait     string `json:"max_delivery_wait"`
-	MaxCheckAttempts    int    `json:"max_check_attempts"`
-	ConcurrentChecks    int    `json:"concurrent_checks"`
-	Priority            string `json:"priority"`
-	ExponentialBackoff  bool   `json:"exponential_backoff"`
+	CheckInterval      string `json:"check_interval"`
+	InitialWait        string `json:"initial_wait"`
+	MaxDeliveryWait    string `json:"max_delivery_wait"`
+	MaxCheckAttempts   int    `json:"max_check_attempts"`
+	ConcurrentChecks   int    `json:"concurrent_checks"`
+	Priority           string `json:"priority"`
+	ExponentialBackoff bool   `json:"exponential_backoff"`
 }
 
 // BridgeAPIConfig holds Bridge service API settings
@@ -122,15 +124,47 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err := viper.UnmarshalKey("bridge_api", &config.BridgeAPI); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal bridge api config: %w", err)
 	}
-	
+
 	// Debug: print loaded bridge API config
-	fmt.Printf("Loaded Bridge API config: BaseURL=%s, Timeout=%s, RetryAttempts=%d\n", 
+	fmt.Printf("Loaded Bridge API config: BaseURL=%s, Timeout=%s, RetryAttempts=%d\n",
 		config.BridgeAPI.BaseURL, config.BridgeAPI.Timeout, config.BridgeAPI.RetryAttempts)
 	if err := viper.UnmarshalKey("metrics", &config.Metrics); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metrics config: %w", err)
 	}
 	config.MetricsPort = viper.GetInt("metrics_port")
-	
+
+	// Override database configuration from environment if set
+	if postgresHost := os.Getenv("POSTGRES_HOST"); postgresHost != "" {
+		postgresUser := os.Getenv("POSTGRES_USER")
+		if postgresUser == "" {
+			postgresUser = "postgres"
+		}
+		postgresPassword := os.Getenv("POSTGRES_PASSWORD")
+		postgresDB := os.Getenv("POSTGRES_DB")
+		if postgresDB == "" {
+			postgresDB = "hyperlane_monitor"
+		}
+		postgresPort := os.Getenv("POSTGRES_PORT")
+		if postgresPort == "" {
+			postgresPort = "5432"
+		}
+
+		// For cloud databases, we need to use sslmode=require
+		sslMode := "disable"
+		if strings.Contains(postgresHost, "supabase.co") || strings.Contains(postgresHost, "amazonaws.com") || strings.Contains(postgresHost, "rlwy.net") {
+			sslMode = "require"
+		}
+
+		// Add connection parameters to help with cloud databases
+		config.Database.DSN = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&connect_timeout=30",
+			postgresUser, postgresPassword, postgresHost, postgresPort, postgresDB, sslMode)
+	}
+
+	// Override Bridge API base URL from environment if set
+	if bridgeAPIURL := os.Getenv("BRIDGE_API_URL"); bridgeAPIURL != "" {
+		config.BridgeAPI.BaseURL = bridgeAPIURL
+	}
+
 	// Debug: print loaded pairs
 	fmt.Printf("Loaded %d monitoring pairs\n", len(config.MonitoringPairs))
 

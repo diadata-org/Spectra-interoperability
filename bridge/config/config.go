@@ -26,6 +26,33 @@ func Load(path string) (*Config, error) {
 		config.PrivateKey = envPrivateKey
 	}
 
+	// Override database configuration from environment if set
+	if postgresHost := os.Getenv("POSTGRES_HOST"); postgresHost != "" {
+		postgresUser := os.Getenv("POSTGRES_USER")
+		if postgresUser == "" {
+			postgresUser = "postgres"
+		}
+		postgresPassword := os.Getenv("POSTGRES_PASSWORD")
+		postgresDB := os.Getenv("POSTGRES_DB")
+		if postgresDB == "" {
+			postgresDB = "postgres"
+		}
+		postgresPort := os.Getenv("POSTGRES_PORT")
+		if postgresPort == "" {
+			postgresPort = "5432"
+		}
+
+		// For Supabase and cloud databases, we need to use sslmode=require
+		sslMode := "disable"
+		if strings.Contains(postgresHost, "supabase.co") || strings.Contains(postgresHost, "amazonaws.com") {
+			sslMode = "require"
+		}
+
+		// Add connection parameters to help with cloud databases
+		config.Database.DSN = fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=%s&connect_timeout=30",
+			postgresUser, postgresPassword, postgresHost, postgresPort, postgresDB, sslMode)
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid configuration: %w", err)
@@ -62,7 +89,7 @@ func (c *Config) Validate() error {
 	if c.PrivateKey == "" {
 		return fmt.Errorf("private_key is required (set in config or BRIDGE_PRIVATE_KEY env var)")
 	}
-	
+
 	// Ensure private key has 0x prefix
 	if !strings.HasPrefix(c.PrivateKey, "0x") {
 		c.PrivateKey = "0x" + c.PrivateKey

@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"sync"
 	
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -48,9 +49,15 @@ type Metrics struct {
 	DBConnectionStatus       prometheus.Gauge
 }
 
-// NewMetrics creates and registers all Prometheus metrics
+var (
+	metricsInstance *Metrics
+	metricsOnce     sync.Once
+)
+
+// NewMetrics creates and registers all Prometheus metrics (singleton)
 func NewMetrics() *Metrics {
-	return &Metrics{
+	metricsOnce.Do(func() {
+		metricsInstance = &Metrics{
 		// API request metrics
 		HTTPRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
 			Name: "bridge_http_requests_total",
@@ -171,7 +178,9 @@ func NewMetrics() *Metrics {
 			Name: "bridge_db_connection_status",
 			Help: "Database connection status (1 = connected, 0 = disconnected)",
 		}),
-	}
+		}
+	})
+	return metricsInstance
 }
 
 // RecordHTTPRequest records HTTP request metrics

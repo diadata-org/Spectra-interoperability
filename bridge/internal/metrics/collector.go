@@ -2,21 +2,27 @@ package metrics
 
 import (
 	"fmt"
-	
+	"sync"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+var (
+	collectorInstance *Collector
+	collectorOnce     sync.Once
 )
 
 // Collector holds all Prometheus metrics
 type Collector struct {
 	// Event metrics
-	eventsReceived   prometheus.Counter
-	eventsProcessed  prometheus.Counter
-	eventsDuplicate  prometheus.Counter
-	eventsInvalid    prometheus.Counter
-	eventsFailed     prometheus.Counter
+	eventsReceived          prometheus.Counter
+	eventsProcessed         prometheus.Counter
+	eventsDuplicate         prometheus.Counter
+	eventsInvalid           prometheus.Counter
+	eventsFailed            prometheus.Counter
 	eventProcessingDuration prometheus.Histogram
-	
+
 	// Transaction metrics
 	transactionsSent      prometheus.Counter
 	transactionsConfirmed prometheus.Counter
@@ -24,165 +30,153 @@ type Collector struct {
 	transactionGasUsed    prometheus.Counter
 	transactionDuration   prometheus.Histogram
 	insufficientBalance   prometheus.Counter
-	
+
 	// Chain metrics
 	blockLag        *prometheus.GaugeVec
 	chainHealth     *prometheus.GaugeVec
 	lastBlockNumber *prometheus.GaugeVec
-	
+
 	// Worker pool metrics
-	workerPoolSize    prometheus.Gauge
-	activeWorkers     prometheus.Gauge
-	taskQueueSize     prometheus.Gauge
+	workerPoolSize         prometheus.Gauge
+	activeWorkers          prometheus.Gauge
+	taskQueueSize          prometheus.Gauge
 	taskProcessingDuration prometheus.Histogram
-	
-	// HTTP metrics
-	httpRequestsTotal    *prometheus.CounterVec
-	httpRequestDuration  *prometheus.HistogramVec
-	
+
 	// Database metrics
-	dbConnections    prometheus.Gauge
-	dbQueryDuration  prometheus.Histogram
-	
+	dbConnections   prometheus.Gauge
+	dbQueryDuration prometheus.Histogram
+
 	// Health metrics
 	componentHealth  *prometheus.GaugeVec
 	recoveryAttempts *prometheus.CounterVec
-	
+
 	// Intent lifecycle metrics
 	IntentMetrics *IntentMetrics
-	
+
 	// Failover metrics (shared instance)
 	FailoverMetrics *Metrics
 }
 
-// NewCollector creates a new metrics collector
+// NewCollector creates a new metrics collector (singleton)
 func NewCollector() *Collector {
-	return &Collector{
-		// Event metrics
-		eventsReceived: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_events_received_total",
-			Help: "Total number of events received",
-		}),
-		eventsProcessed: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_events_processed_total",
-			Help: "Total number of events processed",
-		}),
-		eventsDuplicate: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_events_duplicate_total",
-			Help: "Total number of duplicate events",
-		}),
-		eventsInvalid: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_events_invalid_total",
-			Help: "Total number of invalid events",
-		}),
-		eventsFailed: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_events_failed_total",
-			Help: "Total number of failed events",
-		}),
-		eventProcessingDuration: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name:    "bridge_event_processing_duration_seconds",
-			Help:    "Duration of event processing",
-			Buckets: prometheus.DefBuckets,
-		}),
-		
-		// Transaction metrics
-		transactionsSent: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_transactions_sent_total",
-			Help: "Total number of transactions sent",
-		}),
-		transactionsConfirmed: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_transactions_confirmed_total",
-			Help: "Total number of transactions confirmed",
-		}),
-		transactionsFailed: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_transactions_failed_total",
-			Help: "Total number of transactions failed",
-		}),
-		transactionGasUsed: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_transaction_gas_used_total",
-			Help: "Total gas used by transactions",
-		}),
-		transactionDuration: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name:    "bridge_transaction_duration_seconds",
-			Help:    "Duration of transaction execution",
-			Buckets: []float64{1, 5, 10, 30, 60, 120, 300},
-		}),
-		insufficientBalance: promauto.NewCounter(prometheus.CounterOpts{
-			Name: "bridge_insufficient_balance_total",
-			Help: "Total number of transactions failed due to insufficient balance",
-		}),
-		
-		// Chain metrics
-		blockLag: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "bridge_chain_block_lag",
-			Help: "Block lag for each chain",
-		}, []string{"chain_id", "chain_name"}),
-		chainHealth: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "bridge_chain_health",
-			Help: "Health status of each chain (1=healthy, 0=unhealthy)",
-		}, []string{"chain_id", "chain_name"}),
-		lastBlockNumber: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "bridge_chain_last_block_number",
-			Help: "Last processed block number for each chain",
-		}, []string{"chain_id", "chain_name"}),
-		
-		// Worker pool metrics
-		workerPoolSize: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "bridge_worker_pool_size",
-			Help: "Number of workers in the pool",
-		}),
-		activeWorkers: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "bridge_active_workers",
-			Help: "Number of active workers",
-		}),
-		taskQueueSize: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "bridge_task_queue_size",
-			Help: "Number of tasks in the queue",
-		}),
-		taskProcessingDuration: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name:    "bridge_task_processing_duration_seconds",
-			Help:    "Duration of task processing",
-			Buckets: prometheus.DefBuckets,
-		}),
-		
-		// HTTP metrics
-		httpRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_http_requests_total",
-			Help: "Total number of HTTP requests",
-		}, []string{"method", "path", "status"}),
-		httpRequestDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_http_request_duration_seconds",
-			Help:    "Duration of HTTP requests",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"method", "path"}),
-		
-		// Database metrics
-		dbConnections: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "bridge_db_connections",
-			Help: "Number of database connections",
-		}),
-		dbQueryDuration: promauto.NewHistogram(prometheus.HistogramOpts{
-			Name:    "bridge_db_query_duration_seconds",
-			Help:    "Duration of database queries",
-			Buckets: prometheus.DefBuckets,
-		}),
-		
-		// Health metrics
-		componentHealth: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "bridge_component_health",
-			Help: "Health status of bridge components (1=healthy, 0=unhealthy)",
-		}, []string{"component", "type"}),
-		recoveryAttempts: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_recovery_attempts_total",
-			Help: "Total number of recovery attempts",
-		}, []string{"component", "result"}),
-		
-		// Initialize intent metrics
-		IntentMetrics: NewIntentMetrics(),
-		
-		// Initialize failover metrics (shared instance)
-		FailoverMetrics: NewMetrics(),
-	}
+	collectorOnce.Do(func() {
+		collectorInstance = &Collector{
+			// Event metrics
+			eventsReceived: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_events_received_total",
+				Help: "Total number of events received",
+			}),
+			eventsProcessed: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_events_processed_total",
+				Help: "Total number of events processed",
+			}),
+			eventsDuplicate: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_events_duplicate_total",
+				Help: "Total number of duplicate events",
+			}),
+			eventsInvalid: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_events_invalid_total",
+				Help: "Total number of invalid events",
+			}),
+			eventsFailed: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_events_failed_total",
+				Help: "Total number of failed events",
+			}),
+			eventProcessingDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+				Name:    "bridge_event_processing_duration_seconds",
+				Help:    "Duration of event processing",
+				Buckets: prometheus.DefBuckets,
+			}),
+
+			// Transaction metrics
+			transactionsSent: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_transactions_sent_total",
+				Help: "Total number of transactions sent",
+			}),
+			transactionsConfirmed: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_transactions_confirmed_total",
+				Help: "Total number of transactions confirmed",
+			}),
+			transactionsFailed: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_transactions_failed_total",
+				Help: "Total number of transactions failed",
+			}),
+			transactionGasUsed: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_transaction_gas_used_total",
+				Help: "Total gas used by transactions",
+			}),
+			transactionDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+				Name:    "bridge_transaction_duration_seconds",
+				Help:    "Duration of transaction execution",
+				Buckets: []float64{1, 5, 10, 30, 60, 120, 300},
+			}),
+			insufficientBalance: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_insufficient_balance_total",
+				Help: "Total number of transactions failed due to insufficient balance",
+			}),
+
+			// Chain metrics
+			blockLag: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_chain_block_lag",
+				Help: "Block lag for each chain",
+			}, []string{"chain_id", "chain_name"}),
+			chainHealth: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_chain_health",
+				Help: "Health status of each chain (1=healthy, 0=unhealthy)",
+			}, []string{"chain_id", "chain_name"}),
+			lastBlockNumber: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_chain_last_block_number",
+				Help: "Last processed block number for each chain",
+			}, []string{"chain_id", "chain_name"}),
+
+			// Worker pool metrics
+			workerPoolSize: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "bridge_worker_pool_size",
+				Help: "Number of workers in the pool",
+			}),
+			activeWorkers: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "bridge_active_workers",
+				Help: "Number of active workers",
+			}),
+			taskQueueSize: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "bridge_task_queue_size",
+				Help: "Number of tasks in the queue",
+			}),
+			taskProcessingDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+				Name:    "bridge_task_processing_duration_seconds",
+				Help:    "Duration of task processing",
+				Buckets: prometheus.DefBuckets,
+			}),
+
+			// Database metrics
+			dbConnections: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "bridge_db_connections",
+				Help: "Number of database connections",
+			}),
+			dbQueryDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+				Name:    "bridge_db_query_duration_seconds",
+				Help:    "Duration of database queries",
+				Buckets: prometheus.DefBuckets,
+			}),
+
+			// Health metrics
+			componentHealth: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_component_health",
+				Help: "Health status of bridge components (1=healthy, 0=unhealthy)",
+			}, []string{"component", "type"}),
+			recoveryAttempts: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_recovery_attempts_total",
+				Help: "Total number of recovery attempts",
+			}, []string{"component", "result"}),
+
+			// Initialize intent metrics
+			IntentMetrics: NewIntentMetrics(),
+
+			// Initialize failover metrics (shared instance)
+			FailoverMetrics: NewMetrics(),
+		}
+	})
+	return collectorInstance
 }
 
 // Event metric methods
@@ -285,9 +279,10 @@ func (c *Collector) ObserveTaskProcessingDuration(seconds float64) {
 // HTTP metric methods
 
 func (c *Collector) RecordHTTPRequest(method, path string, status int, duration float64) {
-	statusStr := formatHTTPStatus(status)
-	c.httpRequestsTotal.WithLabelValues(method, path, statusStr).Inc()
-	c.httpRequestDuration.WithLabelValues(method, path).Observe(duration)
+	if c.FailoverMetrics != nil {
+		statusStr := formatHTTPStatus(status)
+		c.FailoverMetrics.RecordHTTPRequest(method, path, statusStr, duration, 0)
+	}
 }
 
 // Database metric methods
@@ -327,7 +322,7 @@ func formatHTTPStatus(status int) string {
 // GetMetrics returns all metrics for external monitoring
 func (c *Collector) GetMetrics() map[string]interface{} {
 	metrics := make(map[string]interface{})
-	
+
 	// Add all counter values
 	metrics["events_received"] = c.eventsReceived
 	metrics["events_processed"] = c.eventsProcessed
@@ -339,6 +334,6 @@ func (c *Collector) GetMetrics() map[string]interface{} {
 	metrics["transactions_failed"] = c.transactionsFailed
 	metrics["transaction_gas_used"] = c.transactionGasUsed
 	metrics["insufficient_balance"] = c.insufficientBalance
-	
+
 	return metrics
 }
