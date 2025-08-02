@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/types"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/utils"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -36,8 +36,8 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	nonce := big.NewInt(nonceVal)
 	expiry := big.NewInt(now + 3600)
 
-	rpcURL := utils.GetEnv("RPC_URL", "https://testnet-rpc.diadata.org")
-	ethClient, err := ethclient.Dial(rpcURL)
+	cfg := config.Get()
+	ethClient, err := ethclient.Dial(cfg.RPC.URL)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
 	}
@@ -49,7 +49,7 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 
 	rpcChainId := chainID.Uint64()
 
-	contractAddr := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+	contractAddr := cfg.Registry.Address
 	if contractAddr == "" {
 		contractAddr = "0x0000000000000000000000000000000000000000"
 	}
@@ -220,8 +220,8 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	nonce := big.NewInt(nonceVal)
 	expiry := big.NewInt(now + 3600)
 
-	rpcURL := utils.GetEnv("RPC_URL", "https://testnet-rpc.diadata.org")
-	ethClient, err := ethclient.Dial(rpcURL)
+	cfg := config.Get()
+	ethClient, err := ethclient.Dial(cfg.RPC.URL)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
 	}
@@ -233,7 +233,7 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 
 	rpcChainId := chainID.Uint64()
 
-	contractAddr := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+	contractAddr := cfg.Registry.Address
 	if contractAddr == "" {
 		contractAddr = "0x0000000000000000000000000000000000000000"
 	}
@@ -375,11 +375,12 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJSON string) (string, error) {
 	startTime := time.Now()
 
-	l2RpcURL := utils.GetEnv("L2_RPC_URL", "https://testnet-rpc.diadata.org")
-	l2IntentContract := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+	cfg := config.Get()
+	registryRpcURL := cfg.RPC.RegistryURL
+	registryContract := cfg.Registry.Address
 
-	if l2IntentContract == "" {
-		return "", fmt.Errorf("L2_INTENT_REGISTRY_EIP712 environment variable not set")
+	if registryContract == "" {
+		return "", fmt.Errorf("registry address not configured")
 	}
 
 
@@ -400,8 +401,8 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 
 	logger.WithField("intent_count", intentCount).Info("Processing batch transaction")
 
-	// Connect to the L2 chain
-	ethClient, err := ethclient.Dial(l2RpcURL)
+	// Connect to the registry chain
+	ethClient, err := ethclient.Dial(registryRpcURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
 	}
@@ -499,7 +500,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 
 	tx := ethTypes.NewTransaction(
 		nonce,
-		common.HexToAddress(l2IntentContract),
+		common.HexToAddress(registryContract),
 		big.NewInt(0),
 		gasLimit,
 		gasPrice,
@@ -522,11 +523,12 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 }
 
 func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON string) (string, error) {
-	l2RpcURL := utils.GetEnv("L2_RPC_URL", "https://testnet-rpc.diadata.org")
-	l2IntentContract := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
+	cfg := config.Get()
+	registryRpcURL := cfg.RPC.RegistryURL
+	registryContract := cfg.Registry.Address
 
-	if l2IntentContract == "" {
-		return "", fmt.Errorf("L2_INTENT_REGISTRY_EIP712 environment variable not set")
+	if registryContract == "" {
+		return "", fmt.Errorf("registry address not configured")
 	}
 
 
@@ -537,8 +539,8 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 		return "", fmt.Errorf("failed to parse signed intent: %v", err)
 	}
 
-	// Connect to the L2 chain
-	ethClient, err := ethclient.Dial(l2RpcURL)
+	// Connect to the registry chain
+	ethClient, err := ethclient.Dial(registryRpcURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
 	}
@@ -602,7 +604,7 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 
 	tx := ethTypes.NewTransaction(
 		nonce,
-		common.HexToAddress(l2IntentContract),
+		common.HexToAddress(registryContract),
 		big.NewInt(0),
 		3000000,
 		gasPrice,

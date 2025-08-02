@@ -4,253 +4,190 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math/big"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"syscall"
-	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/api"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/client"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/intent"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/config"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/interfaces"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/metrics"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/oracle"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/registry"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/service"
+	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/signer"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/utils"
-	"github.com/prometheus/client_golang/prometheus"
-)
-
-const (
-	defaultRPCURL      = "https://testnet-rpc.diadata.org"
-	defaultOracleAddr  = "0x0087342f5f4c7AB23a37c045c3EF710749527c88"
-	defaultPollingTime = 0.3
-	defaultSymbols     = "BTC/USD,ETH/USD"
 )
 
 func main() {
-	useBatchMode := flag.Bool("batch", true, "Use batch mode to process all symbols in one transaction")
+	var configPath string
+	flag.StringVar(&configPath, "config", "", "Path to configuration file")
 	flag.Parse()
 
-	rpcURL := utils.GetEnv("RPC_URL", defaultRPCURL)
-	oracleAddr := utils.GetEnv("ORACLE_ADDRESS", defaultOracleAddr)
-	privateKey := utils.GetEnv("PRIVATE_KEY", "")
-	symbolsStr := utils.GetEnv("SYMBOLS", defaultSymbols)
-	pollingTimeStr := utils.GetEnv("POLLING_TIME", fmt.Sprintf("%g", defaultPollingTime))
+	// Load configuration
+	cfg, err := config.Init(configPath)
+	if err != nil {
+		logger.Fatalf("Failed to load configuration: %v", err)
+	}
 
 	// Initialize logger
-	logLevel := utils.GetEnv("LOG_LEVEL", "info")
-	if err := logger.Init(logLevel); err != nil {
-		logger.Warnf("Invalid log level %s, using default: %v", logLevel, err)
+	if err := logger.Init(cfg.Logging.Level); err != nil {
+		logger.Warnf("Invalid log level %s, using default: %v", cfg.Logging.Level, err)
 	}
 
-	symbols := strings.Split(symbolsStr, ",")
-	for i, s := range symbols {
-		symbols[i] = strings.TrimSpace(s)
+	// Validate configuration
+	if err := validateConfig(cfg); err != nil {
+		logger.Fatalf("Invalid configuration: %v", err)
 	}
 
-	logger.Info("Using EIP-712 signatures for intents")
-
-	eip712Contract := utils.GetEnv("L2_INTENT_REGISTRY_EIP712", "")
-	if eip712Contract == "" {
-		logger.Warn("L2_INTENT_REGISTRY_EIP712 environment variable not set")
-	} else {
-		logger.WithField("contract", eip712Contract).Info("Using EIP-712 contract")
-	}
-
-
-	if privateKey == "" {
-		logger.Fatal("PRIVATE_KEY environment variable is required")
-	}
-
-	pollingTimeFloat, err := strconv.ParseFloat(pollingTimeStr, 64)
+	// Create dependencies
+	deps, err := createDependencies(cfg)
 	if err != nil {
-		logger.Fatalf("Invalid polling time: %v", err)
-	}
-	pollingTime := time.Duration(pollingTimeFloat * float64(time.Second))
-
-	oracleClient, err := client.NewOracleClient(rpcURL, oracleAddr, "", privateKey)
-	if err != nil {
-		logger.Fatalf("Failed to create oracle client: %v", err)
+		logger.Fatalf("Failed to create dependencies: %v", err)
 	}
 
+	// Create attestor service
+	attestorService := service.NewAttestorService(
+		cfg,
+		deps.oracle,
+		deps.registry,
+		deps.signer,
+		deps.metrics,
+	)
+
+	// Create API server
+	apiServer := api.NewServer(cfg, attestorService)
+
+	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Start metrics server in background
-	metricsPort := utils.GetEnv("METRICS_PORT", "8080")
-	go metrics.StartMetricsServer(metricsPort)
+	// Start metrics server
+	go metrics.StartMetricsServer(cfg.Metrics.Port)
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	logger.WithFields(map[string]interface{}{
-		"symbols":      strings.Join(symbols, ", "),
-		"oracle":       oracleAddr,
-		"polling_time": pollingTime.String(),
-	}).Info("Starting attestation service")
-
-	if *useBatchMode {
-		logger.Info("Using batch mode: All symbols will be processed in a single transaction")
-	} else {
-		logger.Info("Using individual mode: Each symbol will be processed separately")
-	}
-
-	if *useBatchMode {
-		processMultipleAttestations(ctx, oracleClient, symbols)
-	} else {
-		for _, symbol := range symbols {
-			processAttestation(ctx, oracleClient, symbol)
+	// Start API server
+	go func() {
+		if err := apiServer.Start(); err != nil {
+			logger.Errorf("API server error: %v", err)
 		}
-	}
+	}()
 
+	// Start attestor service
+	go func() {
+		if err := attestorService.Start(ctx); err != nil {
+			logger.Errorf("Attestor service error: %v", err)
+		}
+	}()
+
+	// Create .env.example if needed
 	if err := utils.CreateEnvTemplate(); err != nil {
 		logger.Warnf("Failed to create .env.example file: %v", err)
 	}
 
-	ticker := time.NewTicker(pollingTime)
-	defer ticker.Stop()
+	// Wait for shutdown signal
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	for {
-		select {
-		case <-ticker.C:
-			if *useBatchMode {
-				processMultipleAttestations(ctx, oracleClient, symbols)
-			} else {
-				for _, symbol := range symbols {
-					processAttestation(ctx, oracleClient, symbol)
-				}
-			}
-		case sig := <-sigCh:
-			logger.WithField("signal", sig).Info("Received shutdown signal, exiting gracefully...")
-			return
-		}
+	logger.WithFields(map[string]interface{}{
+		"symbols":      cfg.Attestor.Symbols,
+		"oracle":       cfg.Oracle.Address,
+		"registry":     cfg.Registry.Address,
+		"polling_time": cfg.Attestor.PollingTime.String(),
+		"batch_mode":   cfg.Attestor.BatchMode,
+	}).Info("Attestor service started")
+
+	// Wait for signal
+	sig := <-sigCh
+	logger.WithField("signal", sig).Info("Received shutdown signal, exiting gracefully...")
+
+	// Cancel context to stop services
+	cancel()
+
+	// Stop services
+	if err := attestorService.Stop(); err != nil {
+		logger.Errorf("Error stopping attestor service: %v", err)
 	}
+	if err := apiServer.Stop(); err != nil {
+		logger.Errorf("Error stopping API server: %v", err)
+	}
+
+	logger.Info("Shutdown complete")
 }
 
-func processAttestation(ctx context.Context, oracleClient *client.OracleClient, symbol string) {
-	startTime := time.Now()
-	timer := prometheus.NewTimer(metrics.ProcessingDuration.WithLabelValues(symbol, "single"))
-	defer timer.ObserveDuration()
-
-	logger.WithField("symbol", symbol).Info("Processing attestation")
-
-	// Time oracle fetch
-	fetchTimer := prometheus.NewTimer(metrics.OracleValueFetchDuration.WithLabelValues(symbol))
-	price, timestamp, err := oracleClient.GetOracleValue(ctx, symbol)
-	fetchTimer.ObserveDuration()
-
-	if err != nil {
-		logger.WithFields(map[string]interface{}{
-			"symbol": symbol,
-			"error":  err,
-		}).Error("Failed to get oracle value")
-		metrics.IntentsCreated.WithLabelValues(symbol, "error").Inc()
-		return
-	}
-
-	volume := big.NewInt(1)
-
-	logger.WithFields(map[string]interface{}{
-		"symbol":    symbol,
-		"price":     price.String(),
-		"timestamp": timestamp.String(),
-	}).Debug("Retrieved oracle value")
-
-	signedIntentJSON, err := intent.AttestValue(ctx, oracleClient.GetPrivateKey(), oracleClient.GetFromAddress(), price, volume, symbol)
-	if err != nil {
-		logger.WithFields(map[string]interface{}{
-			"symbol": symbol,
-			"error":  err,
-		}).Error("Failed to create intent")
-		metrics.IntentsCreated.WithLabelValues(symbol, "error").Inc()
-		return
-	}
-	metrics.IntentsCreated.WithLabelValues(symbol, "success").Inc()
-
-	txHash, err := intent.PublishIntent(ctx, oracleClient.GetPrivateKey(), signedIntentJSON)
-	if err != nil {
-		logger.WithFields(map[string]interface{}{
-			"symbol": symbol,
-			"error":  err,
-		}).Error("Failed to publish intent")
-		metrics.IntentsPublished.WithLabelValues(symbol, "error").Inc()
-		return
-	}
-	metrics.IntentsPublished.WithLabelValues(symbol, "success").Inc()
-
-	logger.WithFields(map[string]interface{}{
-		"symbol":   symbol,
-		"tx_hash":  txHash,
-		"duration": time.Since(startTime).String(),
-	}).Info("Successfully published intent")
+// dependencies holds all the service dependencies
+type dependencies struct {
+	oracle   *oracle.ClientAdapter
+	registry *registry.Client
+	signer   *signer.EIP712Signer
+	metrics  interfaces.MetricsCollector
 }
 
-func processMultipleAttestations(ctx context.Context, oracleClient *client.OracleClient, symbols []string) {
-	startTime := time.Now()
-	timer := prometheus.NewTimer(metrics.ProcessingDuration.WithLabelValues("batch", "batch"))
-	defer timer.ObserveDuration()
-
-	logger.WithField("symbol_count", len(symbols)).Info("Processing batch attestation")
-
-	symbolsData := make([]intent.SymbolData, 0, len(symbols))
-
-	for _, symbol := range symbols {
-		fetchTimer := prometheus.NewTimer(metrics.OracleValueFetchDuration.WithLabelValues(symbol))
-		price, timestamp, err := oracleClient.GetOracleValue(ctx, symbol)
-		fetchTimer.ObserveDuration()
-
-		if err != nil {
-			logger.WithFields(map[string]interface{}{
-				"symbol": symbol,
-				"error":  err,
-			}).Error("Failed to get oracle value")
-			metrics.IntentsCreated.WithLabelValues(symbol, "error").Inc()
-			continue
-		}
-
-		volume := big.NewInt(1)
-
-		logger.WithFields(map[string]interface{}{
-			"symbol":    symbol,
-			"price":     price.String(),
-			"timestamp": timestamp.String(),
-		}).Debug("Retrieved oracle value")
-
-		symbolsData = append(symbolsData, intent.SymbolData{
-			Symbol: symbol,
-			Price:  price,
-			Volume: volume,
-		})
-		metrics.IntentsCreated.WithLabelValues(symbol, "success").Inc()
-	}
-
-	if len(symbolsData) == 0 {
-		logger.Warn("No valid symbol data found")
-		return
-	}
-
-	batchIntentJSON, err := intent.AttestMultipleValues(ctx, oracleClient.GetPrivateKey(),
-		oracleClient.GetFromAddress(), symbolsData)
+// createDependencies creates all the service dependencies
+func createDependencies(cfg *config.Config) (*dependencies, error) {
+	// Create oracle client
+	oracleClient, err := client.NewOracleClient(
+		cfg.RPC.URL,
+		cfg.Oracle.Address,
+		"", // signed address not used in new architecture
+		cfg.Attestor.PrivateKey,
+	)
 	if err != nil {
-		logger.WithField("error", err).Error("Failed to create batch intent")
-		return
+		return nil, fmt.Errorf("failed to create oracle client: %w", err)
 	}
 
-	txHash, err := intent.PublishMultipleIntents(ctx, oracleClient.GetPrivateKey(), batchIntentJSON)
+	// Create oracle adapter
+	oracleAdapter := oracle.NewClientAdapter(oracleClient)
+
+	// Create registry client
+	registryClient, err := registry.NewClient(
+		cfg.Attestor.PrivateKey,
+		cfg.RPC.RegistryURL,
+		cfg.Registry.Address,
+	)
 	if err != nil {
-		logger.WithField("error", err).Error("Failed to publish batch intent")
-		for _, data := range symbolsData {
-			metrics.IntentsPublished.WithLabelValues(data.Symbol, "error").Inc()
-		}
-		return
-	}
-	for _, data := range symbolsData {
-		metrics.IntentsPublished.WithLabelValues(data.Symbol, "success").Inc()
+		return nil, fmt.Errorf("failed to create registry client: %w", err)
 	}
 
-	logger.WithFields(map[string]interface{}{
-		"symbol_count": len(symbolsData),
-		"tx_hash":      txHash,
-		"duration":     time.Since(startTime).String(),
-	}).Info("Successfully published batch intent")
+	// Create signer
+	eip712Signer, err := signer.NewEIP712Signer(cfg.Attestor.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create signer: %w", err)
+	}
+
+	// Create metrics collector
+	metricsCollector := metrics.NewPrometheusCollector()
+
+	return &dependencies{
+		oracle:   oracleAdapter,
+		registry: registryClient,
+		signer:   eip712Signer,
+		metrics:  metricsCollector,
+	}, nil
+}
+
+// validateConfig validates the configuration
+func validateConfig(cfg *config.Config) error {
+	if cfg.Attestor.PrivateKey == "" {
+		return fmt.Errorf("private key not configured")
+	}
+
+	if cfg.Oracle.Address == "" {
+		return fmt.Errorf("oracle address not configured")
+	}
+
+	if cfg.Registry.Address == "" {
+		logger.Warn("Registry address not configured")
+	}
+
+	if len(cfg.Attestor.Symbols) == 0 {
+		return fmt.Errorf("no symbols configured")
+	}
+
+	if cfg.Attestor.PollingTime <= 0 {
+		return fmt.Errorf("invalid polling time: %v", cfg.Attestor.PollingTime)
+	}
+
+	return nil
 }

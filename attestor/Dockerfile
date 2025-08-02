@@ -2,7 +2,7 @@
 FROM golang:1.23-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git make
 
 # Set working directory
 WORKDIR /app
@@ -16,14 +16,14 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the binary
-RUN go build -o attestor main.go
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o attestor .
 
-# Runtime stage
+# Final stage
 FROM alpine:latest
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+# Install ca-certificates for HTTPS and wget for health checks
+RUN apk --no-cache add ca-certificates wget
 
 # Create non-root user
 RUN addgroup -g 1000 -S attestor && \
@@ -32,8 +32,11 @@ RUN addgroup -g 1000 -S attestor && \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from build stage
-COPY --from=builder /app/attestor /app/attestor
+# Copy binary from builder
+COPY --from=builder /app/attestor .
+
+# Copy config file (optional, can be mounted)
+COPY --from=builder /app/config.yaml.example ./config.yaml
 
 # Change ownership
 RUN chown -R attestor:attestor /app
@@ -41,8 +44,11 @@ RUN chown -R attestor:attestor /app
 # Switch to non-root user
 USER attestor
 
-# Expose metrics port
-EXPOSE 8080
+# Expose ports
+EXPOSE 8080 8081
 
 # Set entrypoint
-ENTRYPOINT ["/app/attestor"]
+ENTRYPOINT ["./attestor"]
+
+# Default command (can be overridden)
+CMD ["-config", "/app/config.yaml"]

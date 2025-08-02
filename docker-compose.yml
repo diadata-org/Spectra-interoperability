@@ -1,168 +1,92 @@
 version: '3.8'
 
 services:
-  # PostgreSQL database for bridge service
-  postgres:
-    image: postgres:15-alpine
-    container_name: dia_postgres
-    environment:
-      POSTGRES_USER: bridge
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
-      POSTGRES_DB: oracle_bridge
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U bridge"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - dia-network
-
-  # Attestor service - creates and publishes oracle intents
   attestor:
     build:
       context: ./attestor
       dockerfile: Dockerfile
-    container_name: dia_attestor
-    environment:
-      # Core configuration
-      - RPC_URL=${ATTESTOR_RPC_URL:-https://testnet-rpc.diadata.org}
-      - ORACLE_ADDRESS=${ORACLE_ADDRESS:-0x0087342f5f4c7AB23a37c045c3EF710749527c88}
-      - PRIVATE_KEY=${ATTESTOR_PRIVATE_KEY}
-      - SYMBOLS=${SYMBOLS:-BTC/USD,ETH/USD}
-      - POLLING_TIME=${POLLING_TIME:-0.3}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-      # L2 Registry configuration
-      - L2_RPC_URL=${L2_RPC_URL:-https://testnet-rpc.diadata.org}
-      - L2_INTENT_REGISTRY_EIP712=${L2_INTENT_REGISTRY_EIP712:-0xd2313dcabB0E9447d800546b953E05dD47EB2eB9}
-      # Metrics configuration
-      - METRICS_PORT=8080
-    ports:
-      - "8089:8080"  # Metrics port for attestor
+    container_name: oracle-attestor
     restart: unless-stopped
-    networks:
-      - dia-network
-    depends_on:
-      - postgres
-
-  # Bridge service - monitors and propagates oracle updates
-  bridge:
-    build:
-      context: ./bridge
-      dockerfile: Dockerfile
-    container_name: dia_bridge
-    depends_on:
-      postgres:
-        condition: service_healthy
-      attestor:
-        condition: service_started
     environment:
-      - CONFIG_PATH=/root/config.json
-      - DATABASE_URL=postgres://bridge:${DB_PASSWORD:-password}@postgres:5432/oracle_bridge
-      # Private key for transaction signing (overrides config file)
-      - BRIDGE_PRIVATE_KEY=${BRIDGE_PRIVATE_KEY}
-      # Legacy per-chain private keys (if using multiple keys)
-      - OP_SEPOLIA_PRIVATE_KEY=${OP_SEPOLIA_PRIVATE_KEY}
-      - ARBITRUM_PRIVATE_KEY=${ARBITRUM_PRIVATE_KEY}
-      - BASE_PRIVATE_KEY=${BASE_PRIVATE_KEY}
+      # Required environment variables
+      - ATTESTOR_ATTESTOR_PRIVATE_KEY=${ATTESTOR_ATTESTOR_PRIVATE_KEY}
+      - ATTESTOR_REGISTRY_ADDRESS=${ATTESTOR_REGISTRY_ADDRESS}
+      
+      # Optional environment variables with defaults
+      - ATTESTOR_RPC_URL=${ATTESTOR_RPC_URL:-https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz}
+      - ATTESTOR_RPC_REGISTRY_URL=${ATTESTOR_RPC_REGISTRY_URL:-https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz}
+      - ATTESTOR_ORACLE_ADDRESS=${ATTESTOR_ORACLE_ADDRESS:-0x0087342f5f4c7AB23a37c045c3EF710749527c88}
+      - ATTESTOR_ATTESTOR_SYMBOLS=${ATTESTOR_ATTESTOR_SYMBOLS:-BTC/USD,ETH/USD}
+      - ATTESTOR_ATTESTOR_POLLING_TIME=${ATTESTOR_ATTESTOR_POLLING_TIME:-5s}
+      - ATTESTOR_ATTESTOR_BATCH_MODE=${ATTESTOR_ATTESTOR_BATCH_MODE:-false}
+      - ATTESTOR_LOGGING_LEVEL=${ATTESTOR_LOGGING_LEVEL:-info}
+      - ATTESTOR_METRICS_PORT=${ATTESTOR_METRICS_PORT:-8080}
+      - ATTESTOR_API_PORT=${ATTESTOR_API_PORT:-8081}
     ports:
-      - "8090:8080"  # Metrics port
-      - "8091:8081"  # API port
+      - "8080:8080"  # Prometheus metrics
+      - "8081:8081"  # API server
     volumes:
-      - ./bridge/config.json:/root/config.json:ro
-    restart: unless-stopped
-    command: ["./bridge", "-config", "/root/config.json"]
+      # Optional: Mount custom config file
+      # - ./attestor/config.yaml:/app/config.yaml:ro
+      
+      # Optional: Mount for persistent logs
+      # - ./logs/attestor:/app/logs
     networks:
-      - dia-network
+      - oracle-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # Prometheus for metrics collection
+  # Optional: Prometheus for monitoring
   prometheus:
     image: prom/prometheus:latest
-    container_name: dia_prometheus
+    container_name: oracle-prometheus
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
+      - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
     networks:
-      - dia-network
+      - oracle-network
+    depends_on:
+      - attestor
 
-  # Grafana for visualization
+  # Optional: Grafana for visualization
   grafana:
     image: grafana/grafana:latest
-    container_name: dia_grafana
+    container_name: oracle-grafana
+    restart: unless-stopped
     ports:
-      - "3334:3000"
+      - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - oracle-network
     depends_on:
       - prometheus
-    networks:
-      - dia-network
-
-  # MinIO for object storage (if needed)
-  minio:
-    image: minio/minio:latest
-    container_name: dia_minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    networks:
-      - dia-network
-
-  # Hyperlane monitor service
-  hyperlane_monitor:
-    build:
-      context: ./hyperlane-monitor
-      dockerfile: Dockerfile
-    container_name: dia_hyperlane_monitor
-    depends_on:
-      postgres:
-        condition: service_healthy
-      bridge:
-        condition: service_started
-    environment:
-      - CONFIG_PATH=/app/config/config.json
-      - LOG_LEVEL=debug
-      - DATABASE_DSN=postgres://monitor:password@postgres:5432/hyperlane_monitor?sslmode=disable
-    volumes:
-      - ./hyperlane-monitor/config/config.json:/app/config/config.json:ro
-    ports:
-      - "9091:9091"  # Metrics port
-    restart: unless-stopped
-    networks:
-      - dia-network
-
-volumes:
-  postgres_data:
-    driver: local
-  prometheus_data:
-    driver: local
-  grafana_data:
-    driver: local
-  minio_data:
-    driver: local
 
 networks:
-  dia-network:
+  oracle-network:
     driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

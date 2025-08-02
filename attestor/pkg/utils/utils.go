@@ -24,7 +24,7 @@ POLLING_TIME=0.3
 
 # L2 Chain Configuration
 L2_RPC_URL=https://testnet-rpc.diadata.org
-L2_INTENT_REGISTRY_EIP712=
+INTENT_REGISTRY_ADDRESS=
 `
 	return os.WriteFile(".env.example", []byte(envContent), 0644)
 }

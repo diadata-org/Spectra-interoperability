@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -54,15 +55,16 @@ func init() {
 }
 
 // StartMetricsServer starts the Prometheus metrics server
-func StartMetricsServer(port string) {
+func StartMetricsServer(port int) {
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
-	logger.Infof("Starting metrics server on port %s", port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	addr := fmt.Sprintf(":%d", port)
+	logger.Infof("Starting metrics server on port %d", port)
+	if err := http.ListenAndServe(addr, nil); err != nil {
 		logger.Errorf("Failed to start metrics server: %v", err)
 	}
 }

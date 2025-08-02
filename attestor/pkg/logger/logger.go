@@ -91,3 +91,8 @@ func WithField(key string, value interface{}) *logrus.Entry {
 func WithFields(fields logrus.Fields) *logrus.Entry {
 	return log.WithFields(fields)
 }
+
+// WithError returns a logger with an error field
+func WithError(err error) *logrus.Entry {
+	return log.WithError(err)
+}
