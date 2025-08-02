@@ -31,8 +31,8 @@
     {
       "source": {
         "chain_id": 100640,
-        "oracle_trigger": "0x6FEe09480b35930ae7813E92187201A62513aA3F",
-        "oracle_registry": "0xd2313dcabB0E9447d800546b953E05dD47EB2eB9",
+        "oracle_trigger": "0x51Bb3fC83AB00aa01f8C6C021Adc48e283B0CBd6",
+        "oracle_registry": "0x5CC54Ab148b738f8d2D46414051184141D46FDEe",
         "start_block": 19896800
       },
       "destination": {
@@ -86,7 +86,7 @@
   },
   
   "bridge_api": {
-    "base_url": "http://dia_bridge:8080",
+    "base_url": "http://spectra-bridge:8080",
     "timeout": "30s",
     "retry_attempts": 3,
     "retry_delay": "5s"

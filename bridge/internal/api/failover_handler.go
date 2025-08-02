@@ -229,12 +229,17 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 
 	// Debug log the intent data
 	if req.IntentData != nil {
+		sigHex := ""
+		if req.IntentData.Signature != nil {
+			sigHex = fmt.Sprintf("0x%x", req.IntentData.Signature)
+		}
 		logger.WithFields(logrus.Fields{
 			"intent_type": req.IntentData.IntentType,
 			"symbol": req.IntentData.Symbol,
 			"signature_len": len(req.IntentData.Signature),
 			"signature_nil": req.IntentData.Signature == nil,
-			"signature": fmt.Sprintf("%x", req.IntentData.Signature),
+			"signature": sigHex,
+			"signer": req.IntentData.Signer.Hex(),
 		}).Info("Received intent data in failover request")
 	}
 
@@ -292,7 +297,7 @@ func (h *FailoverHandler) intentToContractStruct(intent *bridgetypes.OracleInten
 	if timestamp == nil {
 		timestamp = big.NewInt(0)
 	}
-	signature := intent.Signature
+	signature := []byte(intent.Signature)
 	if signature == nil {
 		signature = []byte{}
 	}
@@ -367,6 +372,13 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		h.updateStatus(requestID, "failed", "", fmt.Sprintf("Failed to parse ABI: %v", err))
 		return
 	}
+
+	// Log the signature before packing
+	logger.WithFields(logrus.Fields{
+		"signature_hex": fmt.Sprintf("0x%x", intentData.Signature),
+		"signature_len": len(intentData.Signature),
+		"signer": intentData.Signer.Hex(),
+	}).Info("About to pack intent for contract call")
 
 	// Pack the data (using helper function like receiver.go)
 	callData, err := contractABI.Pack("handleIntentUpdate", h.intentToContractStruct(intentData))

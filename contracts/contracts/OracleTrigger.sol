@@ -200,7 +200,7 @@ contract OracleTrigger is
             messageBody
         );
 
-        emit MessageDispatched(_destinationDomain, recipient, messageId);
+        emit MessageDispatched(_destinationDomain, recipient, messageId, intentHash, key);
     }
 
     /**
@@ -250,7 +250,7 @@ contract OracleTrigger is
             messageBody
         );
 
-        emit MessageDispatched(_destinationDomain, recipientAddress, messageId);
+        emit MessageDispatched(_destinationDomain, recipientAddress, messageId, intentHash, key);
     }
 
     /// @notice Sets the mailbox contract address

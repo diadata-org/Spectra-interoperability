@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'dia-hyperlane-monitor'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'hyperlane-monitor'
+    static_configs:
+      - targets: ['dia_hyperlane_monitor:9091']
+    scrape_interval: 5s
+
+  - job_name: 'bridge'
+    static_configs:
+      - targets: ['dia_bridge:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['dia_postgres:5432']

@@ -6,3 +6,6 @@ solc_version = "0.8.29"
 test = "test-foundry"
 gas_price = 10
 gas_reports = ["*"]
+optimizer = true
+optimizer_runs = 200
+via_ir = true

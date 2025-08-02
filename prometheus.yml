@@ -21,6 +21,14 @@ scrape_configs:
           service: 'attestor'
           component: 'oracle-attestor'
 
+  # Hyperlane monitor service metrics
+  - job_name: 'hyperlane-monitor'
+    static_configs:
+      - targets: ['hyperlane_monitor:9091']
+        labels:
+          service: 'hyperlane-monitor'
+          component: 'message-monitor'
+
   # PostgreSQL exporter (if added)
   - job_name: 'postgres'
     static_configs:

@@ -1,7 +1,10 @@
 package types
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -18,8 +21,46 @@ type OracleIntent struct {
 	Price      *big.Int       `json:"price"`
 	Timestamp  *big.Int       `json:"timestamp"`
 	Source     string         `json:"source"`
-	Signature  []byte         `json:"signature"`
+	Signature  HexBytes       `json:"signature"`
 	Signer     common.Address `json:"signer"`
+}
+
+// HexBytes is a byte slice that marshals/unmarshals as hex string
+type HexBytes []byte
+
+// MarshalJSON implements json.Marshaler
+func (h HexBytes) MarshalJSON() ([]byte, error) {
+	if h == nil {
+		return []byte("null"), nil
+	}
+	return json.Marshal("0x" + hex.EncodeToString(h))
+}
+
+// UnmarshalJSON implements json.Unmarshaler
+func (h *HexBytes) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*h = nil
+		return nil
+	}
+	
+	var str string
+	if err := json.Unmarshal(data, &str); err != nil {
+		// Try as base64 byte array for backward compatibility
+		var b []byte
+		if err := json.Unmarshal(data, &b); err != nil {
+			return err
+		}
+		*h = HexBytes(b)
+		return nil
+	}
+	
+	str = strings.TrimPrefix(str, "0x")
+	b, err := hex.DecodeString(str)
+	if err != nil {
+		return err
+	}
+	*h = HexBytes(b)
+	return nil
 }
 
 // HyperlaneMessage represents a tracked Hyperlane message

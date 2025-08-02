@@ -14,7 +14,7 @@
   },
   "event_definitions": {
     "IntentRegistered": {
-      "contract": "0xd2313dcabB0E9447d800546b953E05dD47EB2eB9",
+      "contract": "0x5CC54Ab148b738f8d2D46414051184141D46FDEe",
       "abi": "{\"name\":\"IntentRegistered\",\"type\":\"event\",\"inputs\":[{\"name\":\"intentHash\",\"type\":\"bytes32\",\"indexed\":true},{\"name\":\"symbol\",\"type\":\"string\",\"indexed\":true},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"signer\",\"type\":\"address\"}]}",
       "data_extraction": {
         "intentHash": "topics[1]",

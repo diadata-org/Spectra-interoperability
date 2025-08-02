@@ -3,145 +3,123 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
-	"github.com/diadata.org/Spectra-interoperability/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/bridge"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
-	"github.com/diadata.org/Spectra-interoperability/bridge/internal/health"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
-	"github.com/sirupsen/logrus"
-)
-
-var (
-	configPath = flag.String("config", "config.json", "Path to configuration file")
-	logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/utils"
 )
 
 func main() {
+	// Command line flags
+	var (
+		configPath = flag.String("config", "config.json", "Path to configuration file")
+		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+	)
 	flag.Parse()
 
-	// Configure logger
-	logger := logrus.New()
-	logger.SetFormatter(&logrus.JSONFormatter{})
-	
-	level, err := logrus.ParseLevel(*logLevel)
-	if err != nil {
-		logger.WithError(err).Fatal("Invalid log level")
-	}
-	logger.SetLevel(level)
+	// Initialize logger
+	logger.Init(*logLevel)
 
 	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		logger.WithError(err).Fatal("Failed to load configuration")
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	
 	// Log if using environment variable for private key
 	if os.Getenv("BRIDGE_PRIVATE_KEY") != "" {
-		logger.Info("Using private key from BRIDGE_PRIVATE_KEY environment variable")
+		log.Printf("Using private key from BRIDGE_PRIVATE_KEY environment variable")
 	}
+	
+	// Initialize metrics collector
+	metricsCollector := metrics.NewCollector()
+	
+	// Start metrics server
+	metricsPort := 8081
+	metricsServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", metricsPort),
+		Handler: promhttp.Handler(),
+	}
+	
+	go func() {
+		log.Printf("Starting metrics server on port %d", metricsPort)
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("Metrics server error: %v", err)
+		}
+	}()
 
-	// Initialize database
-	db, err := database.NewDB(cfg.Database.Driver, cfg.Database.DSN)
+	// Create database connection
+	db, err := database.NewDB(cfg.Database.Driver, cfg.Database.DSN) 
 	if err != nil {
-		logger.WithError(err).Fatal("Failed to initialize database")
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
-
-	// Run migrations
-	if err := db.Migrate(); err != nil {
-		logger.WithError(err).Fatal("Failed to run database migrations")
-	}
-
-	// Initialize metrics collector
-	var metricsCollector *metrics.Collector
-	if cfg.Metrics.Enabled {
-		metricsCollector = metrics.NewCollector()
-		logger.Info("Metrics collection enabled")
-	}
-
-	// Create bridge instance
+	
+	// Create bridge service
 	bridgeService, err := bridge.NewBridge(cfg, db, metricsCollector)
 	if err != nil {
-		logger.WithError(err).Fatal("Failed to create bridge")
+		log.Fatalf("Failed to create bridge service: %v", err)
 	}
 
-	// Create context with cancellation
+	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create Ethereum clients for health monitoring
-	sourceClient, err := rpc.NewMultiClient(cfg.Source.RPCURLs)
-	if err != nil {
-		logger.WithError(err).Fatal("Failed to connect to source chain")
-	}
-	defer sourceClient.Close()
-
-	destClients := make(map[int64]rpc.EthClient)
-	for _, destConfig := range cfg.GetEnabledDestinations() {
-		client, err := rpc.NewMultiClient(destConfig.RPCURLs)
-		if err != nil {
-			logger.WithError(err).Errorf("Failed to connect to destination chain %d", destConfig.ChainID)
-			continue
-		}
-		destClients[destConfig.ChainID] = client
-		defer client.Close()
-	}
-
-	// Create health monitor
-	healthMonitor := health.NewHealthMonitor(&cfg.HealthCheck, db, sourceClient, destClients)
-
-	// Start API server if enabled
-	var apiServer *api.Server
-	if cfg.API.Enabled {
-		logger.Info("Creating API server with failover support")
-		apiServer = api.NewServer(cfg, db, healthMonitor, metricsCollector, bridgeService.GetRouterRegistry())
-		if err := apiServer.Start(ctx); err != nil {
-			logger.WithError(err).Fatal("Failed to start API server")
-		}
-		logger.WithField("address", cfg.API.ListenAddr).Info("API server started")
-	}
-
-	// Handle shutdown gracefully
+	// Set up signal handling for graceful shutdown
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Start bridge service
+	startTime := time.Now()
+	log.Printf("Starting DIA Oracle Bridge Service...")
+	log.Printf("Source chain: %s (Chain ID: %d)", cfg.Source.Name, cfg.Source.ChainID)
+	log.Printf("Monitoring %d destination chains", len(cfg.Destinations))
+
+	// Start monitoring in a goroutine
 	go func() {
-		<-sigChan
-		logger.Info("Received shutdown signal")
-		cancel()
+		if err := bridgeService.Start(ctx); err != nil {
+			log.Printf("Bridge service error: %v", err)
+			cancel()
+		}
 	}()
 
-	// Start the bridge
-	logger.Info("Starting Oracle Bridge")
-	if err := bridgeService.Start(ctx); err != nil {
-		logger.WithError(err).Fatal("Bridge failed")
+	// Wait for shutdown signal
+	select {
+	case sig := <-sigChan:
+		uptime := utils.GetUptimeStringVerbose(startTime)
+		log.Printf("Received signal %v, shutting down gracefully... (uptime: %s)", sig, uptime)
+	case <-ctx.Done():
+		uptime := utils.GetUptimeStringVerbose(startTime)
+		log.Printf("Context cancelled, shutting down... (uptime: %s)", uptime)
 	}
 
-	// Wait for shutdown
-	<-ctx.Done()
-	logger.Info("Shutting down...")
-
-	// Give components time to cleanup
+	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
+	log.Printf("Stopping bridge service...")
 	if err := bridgeService.Stop(shutdownCtx); err != nil {
-		logger.WithError(err).Error("Error during bridge shutdown")
+		log.Printf("Error during shutdown: %v", err)
+	}
+	
+	// Shutdown metrics server
+	log.Printf("Stopping metrics server...")
+	if err := metricsServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Failed to shutdown metrics server: %v", err)
 	}
 
-	// Stop API server if running
-	if apiServer != nil {
-		if err := apiServer.Stop(); err != nil {
-			logger.WithError(err).Error("Error during API server shutdown")
-		}
-	}
-
-	logger.Info("Bridge stopped")
+	totalUptime := utils.GetUptimeStringVerbose(startTime)
+	log.Printf("Bridge service stopped successfully (total uptime: %s)", totalUptime)
 }

@@ -158,13 +158,14 @@ contract OracleIntentRegistry {
         // Check if this intent has already been processed
         require(!processedIntents[hash], "OracleIntentRegistry: intent already processed");
         
-        // Verify the signature
-        require(recoverSigner(hash, signature) == signer, "OracleIntentRegistry: invalid signature");
+        // Verify the signature and get the actual signer
+        address recoveredSigner = recoverSigner(hash, signature);
+        require(recoveredSigner == signer, "OracleIntentRegistry: invalid signature");
         
         // Mark the intent as processed
         processedIntents[hash] = true;
         
-        // Store the intent
+        // Store the intent with the recovered signer
         OracleIntent memory intent = OracleIntent({
             intentType: intentType,
             version: version,
@@ -176,7 +177,7 @@ contract OracleIntentRegistry {
             timestamp: timestamp,
             source: source,
             signature: signature,
-            signer: signer
+            signer: recoveredSigner
         });
         
         // Use the EIP-712 hash as the intent hash

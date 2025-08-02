@@ -42,10 +42,14 @@ interface IOracleTrigger {
     /// @param chainId The destination chain ID
     /// @param recipientAddress The recipient contract address on the destination chain
     /// @param messageId The message ID
+    /// @param intentHash The hash of the oracle intent being sent
+    /// @param symbol The symbol of the oracle data
     event MessageDispatched(
         uint32 chainId,
         address recipientAddress,
-        bytes32 indexed messageId
+        bytes32 indexed messageId,
+        bytes32 intentHash,
+        string symbol
     );
 
     /// @notice Emitted when the mailbox contract address is updated
