@@ -22,7 +22,7 @@ type Service struct {
 	destClients     map[int]*blockchain.ChainClient
 	eventListeners  []*EventListener
 	deliveryChecker *DeliveryChecker
-	bridgeClient    *failover.BridgeClient
+	bridgeClient    failover.BridgeClientInterface
 	metrics         *metrics.Metrics
 	wg              sync.WaitGroup
 	cancel          context.CancelFunc
@@ -66,12 +66,25 @@ func NewService(cfg *config.Config, db *database.Repository) (*Service, error) {
 		}
 	}
 
-	bridgeClient := failover.NewBridgeClient(
-		cfg.BridgeAPI.BaseURL,
-		config.GetDuration(cfg.BridgeAPI.Timeout, "30s"),
-		cfg.BridgeAPI.RetryAttempts,
-		config.GetDuration(cfg.BridgeAPI.RetryDelay, "5s"),
-	)
+	// Create bridge client (gRPC or REST)
+	var bridgeClient failover.BridgeClientInterface
+	
+	if cfg.BridgeAPI.UseGRPC && cfg.BridgeAPI.GRPCAddress != "" {
+		grpcClient, err := failover.NewGRPCBridgeClient(cfg.BridgeAPI.GRPCAddress)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create gRPC bridge client: %w", err)
+		}
+		bridgeClient = grpcClient
+		logger.WithField("address", cfg.BridgeAPI.GRPCAddress).Info("Using gRPC bridge client")
+	} else {
+		bridgeClient = failover.NewBridgeClient(
+			cfg.BridgeAPI.BaseURL,
+			config.GetDuration(cfg.BridgeAPI.Timeout, "30s"),
+			cfg.BridgeAPI.RetryAttempts,
+			config.GetDuration(cfg.BridgeAPI.RetryDelay, "5s"),
+		)
+		logger.WithField("url", cfg.BridgeAPI.BaseURL).Info("Using REST bridge client")
+	}
 
 	serviceMetrics := metrics.NewMetrics()
 
@@ -116,6 +129,7 @@ func (s *Service) Start(ctx context.Context) error {
 			logger.WithError(err).WithField("pair", config.GetPairID(
 				pairCfg.Source.ChainID,
 				pairCfg.Destination.ChainID,
+				pairCfg.Source.OracleTrigger,
 			)).Error("Failed to create pair monitor")
 			continue
 		}
@@ -177,7 +191,7 @@ func (s *Service) Stop() {
 // initializeDatabase ensures all configuration is saved to database
 func (s *Service) initializeDatabase() error {
 	for _, pairCfg := range s.config.MonitoringPairs {
-		pairID := config.GetPairID(pairCfg.Source.ChainID, pairCfg.Destination.ChainID)
+		pairID := config.GetPairID(pairCfg.Source.ChainID, pairCfg.Destination.ChainID, pairCfg.Source.OracleTrigger)
 
 		// Save monitoring pair
 		pair := &database.MonitoringPair{
@@ -231,7 +245,7 @@ func (s *Service) initializeDatabase() error {
 
 // createPairMonitor creates monitoring for a source-destination pair
 func (s *Service) createPairMonitor(pairCfg config.MonitoringPairConfig) error {
-	pairID := config.GetPairID(pairCfg.Source.ChainID, pairCfg.Destination.ChainID)
+	pairID := config.GetPairID(pairCfg.Source.ChainID, pairCfg.Destination.ChainID, pairCfg.Source.OracleTrigger)
 
 	// Get pair from database
 	pairs, err := s.db.GetMonitoringPairs()

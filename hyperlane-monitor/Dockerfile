@@ -1,10 +1,14 @@
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 RUN apk add --no-cache git make
 
 WORKDIR /build
 
 COPY go.mod go.sum ./
+
+# Copy proto directory for local replace
+COPY proto ./proto
+
 RUN go mod download
 
 COPY . .

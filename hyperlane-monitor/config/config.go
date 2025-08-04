@@ -79,6 +79,8 @@ type MonitoringProfile struct {
 // BridgeAPIConfig holds Bridge service API settings
 type BridgeAPIConfig struct {
 	BaseURL       string `json:"base_url" mapstructure:"base_url"`
+	GRPCAddress   string `json:"grpc_address" mapstructure:"grpc_address"`
+	UseGRPC       bool   `json:"use_grpc" mapstructure:"use_grpc"`
 	Timeout       string `json:"timeout" mapstructure:"timeout"`
 	RetryAttempts int    `json:"retry_attempts" mapstructure:"retry_attempts"`
 	RetryDelay    string `json:"retry_delay" mapstructure:"retry_delay"`
@@ -218,8 +220,9 @@ func GetDuration(value, defaultValue string) time.Duration {
 }
 
 // GetPairID generates a unique ID for a monitoring pair
-func GetPairID(sourceChainID, destChainID int) string {
-	return fmt.Sprintf("%d_%d", sourceChainID, destChainID)
+func GetPairID(sourceChainID, destChainID int, oracleTrigger string) string {
+	// Include oracle trigger address to support multiple triggers per chain pair
+	return fmt.Sprintf("%d_%d_%s", sourceChainID, destChainID, oracleTrigger)
 }
 
 // GetChainConfig retrieves a chain configuration by ID

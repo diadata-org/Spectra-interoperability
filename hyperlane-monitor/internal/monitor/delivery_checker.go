@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"sync"
@@ -23,18 +22,27 @@ type DeliveryChecker struct {
 	db               *database.Repository
 	destClients      map[int]*blockchain.ChainClient
 	pairReceivers    map[string]map[string]*types.ReceiverConfig
-	bridgeClient     *failover.BridgeClient
+	bridgeClient     failover.BridgeClientInterface
 	metrics          *metrics.Metrics
 	checkInterval    time.Duration
 	batchSize        int
 	mu               sync.RWMutex
 }
 
+// getMapKeys is a helper function to get keys from a map
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // NewDeliveryChecker creates a new delivery checker
 func NewDeliveryChecker(
 	db *database.Repository,
 	destClients map[int]*blockchain.ChainClient,
-	bridgeClient *failover.BridgeClient,
+	bridgeClient failover.BridgeClientInterface,
 	serviceMetrics *metrics.Metrics,
 	checkInterval time.Duration,
 ) *DeliveryChecker {
@@ -249,38 +257,53 @@ func (d *DeliveryChecker) triggerFailover(ctx context.Context, msg *database.Hyp
 	}).Info("Triggering failover for message with stored data")
 	
 	// Record wait phase completion and start of bridge processing
-	waitDuration := time.Since(msg.CreatedAt).Seconds()
-	d.metrics.RecordTimelinePhase("wait", waitDuration,
-		fmt.Sprintf("%d", msg.SourceChainID),
-		fmt.Sprintf("%d", msg.SourceChainID),
-		fmt.Sprintf("%d", msg.DestinationChainID))
+	if d.metrics != nil {
+		waitDuration := time.Since(msg.CreatedAt).Seconds()
+		d.metrics.RecordTimelinePhase("wait", waitDuration,
+			fmt.Sprintf("%d", msg.SourceChainID),
+			fmt.Sprintf("%d", msg.SourceChainID),
+			fmt.Sprintf("%d", msg.DestinationChainID))
+	}
 	
 	// Extract intent from JSONB - it's stored with key "intent"
-	var intentData types.OracleIntent
+	var intentData *types.OracleIntent
 	if msg.IntentData != nil {
+		// Debug log the raw intent data
+		logger.WithFields(logger.Fields{
+			"intent_data_keys": fmt.Sprintf("%v", getMapKeys(msg.IntentData)),
+			"intent_data_type": fmt.Sprintf("%T", msg.IntentData),
+		}).Debug("Raw intent data from database")
+		
 		// IntentData is already a map[string]interface{} (JSONB type)
 		if intentRaw, exists := msg.IntentData["intent"]; exists {
-			// Marshal and unmarshal to convert to our struct
-			intentBytes, err := json.Marshal(intentRaw)
-			if err == nil {
-				if err := json.Unmarshal(intentBytes, &intentData); err != nil {
-					logger.WithError(err).Error("Failed to unmarshal intent data")
-				} else {
-					logger.WithFields(logger.Fields{
-						"intent_type": intentData.IntentType,
-						"symbol": intentData.Symbol,
-						"price": intentData.Price,
-						"signature_len": len(intentData.Signature),
-					}).Info("Successfully extracted intent from JSONB")
-				}
+			logger.WithFields(logger.Fields{
+				"intent_raw_type": fmt.Sprintf("%T", intentRaw),
+			}).Debug("Found intent key in JSONB")
+			
+			// Use our converter to handle the conversion properly
+			converted, err := ConvertJSONToOracleIntent(intentRaw)
+			if err != nil {
+				logger.WithError(err).WithFields(logger.Fields{
+					"intent_raw": fmt.Sprintf("%+v", intentRaw),
+				}).Error("Failed to convert intent data")
+			} else {
+				intentData = converted
+				logger.WithFields(logger.Fields{
+					"intent_type": intentData.IntentType,
+					"symbol": intentData.Symbol,
+					"price": intentData.Price,
+					"signature_len": len(intentData.Signature),
+				}).Info("Successfully extracted intent from JSONB")
 			}
 		} else {
-			logger.Warn("No 'intent' key found in JSONB data")
+			logger.WithFields(logger.Fields{
+				"available_keys": fmt.Sprintf("%v", getMapKeys(msg.IntentData)),
+			}).Warn("No 'intent' key found in JSONB data")
 		}
 	}
 	
 	// If we couldn't extract from JSONB, create from message fields
-	if intentData.IntentType == "" {
+	if intentData == nil || intentData.IntentType == "" {
 		logger.Info("Creating intent from message fields as fallback")
 		price := new(big.Int)
 		if _, ok := price.SetString(msg.Price, 10); !ok {
@@ -288,7 +311,7 @@ func (d *DeliveryChecker) triggerFailover(ctx context.Context, msg *database.Hyp
 			price = big.NewInt(0)
 		}
 		
-		intentData = types.OracleIntent{
+		intentData = &types.OracleIntent{
 			IntentType: "PriceUpdate",
 			Version:    "1.0",
 			Symbol:     msg.Symbol,
@@ -322,7 +345,7 @@ func (d *DeliveryChecker) triggerFailover(ctx context.Context, msg *database.Hyp
 		SourceChainID:      msg.SourceChainID,
 		DestinationChainID: msg.DestinationChainID,
 		ReceiverAddress:    msg.ReceiverAddress,
-		IntentData:         &intentData,
+		IntentData:         intentData,
 		Reason:             fmt.Sprintf("Hyperlane delivery timeout after %v", time.Since(msg.CreatedAt)),
 	}
 	
@@ -335,24 +358,34 @@ func (d *DeliveryChecker) triggerFailover(ctx context.Context, msg *database.Hyp
 	// Send to Bridge API
 	response, err := d.bridgeClient.TriggerFailover(ctx, request)
 	if err != nil {
+		if d.metrics != nil {
 		d.metrics.RecordFailoverAttempt(false, time.Since(startTime).Seconds())
+	}
 		return fmt.Errorf("failed to trigger failover: %w", err)
 	}
 
 	// Update message status
-	if err := d.db.UpdateMessageFailover(msg.MessageID, response.RequestID); err != nil {
-		d.metrics.RecordFailoverAttempt(false, time.Since(startTime).Seconds())
-		return fmt.Errorf("failed to update message failover status: %w", err)
+	if d.db != nil {
+		if err := d.db.UpdateMessageFailover(msg.MessageID, response.RequestID); err != nil {
+			if d.metrics != nil {
+				d.metrics.RecordFailoverAttempt(false, time.Since(startTime).Seconds())
+			}
+			return fmt.Errorf("failed to update message failover status: %w", err)
+		}
 	}
 
-	d.metrics.RecordFailoverAttempt(true, time.Since(startTime).Seconds())
+	if d.metrics != nil {
+		d.metrics.RecordFailoverAttempt(true, time.Since(startTime).Seconds())
+	}
 	
 	// Record bridge processing phase
-	bridgeProcessingDuration := time.Since(startTime).Seconds()
-	d.metrics.RecordTimelinePhase("bridge_processing", bridgeProcessingDuration,
-		fmt.Sprintf("%d", msg.SourceChainID),
-		fmt.Sprintf("%d", msg.SourceChainID),
-		fmt.Sprintf("%d", msg.DestinationChainID))
+	if d.metrics != nil {
+		bridgeProcessingDuration := time.Since(startTime).Seconds()
+		d.metrics.RecordTimelinePhase("bridge_processing", bridgeProcessingDuration,
+			fmt.Sprintf("%d", msg.SourceChainID),
+			fmt.Sprintf("%d", msg.SourceChainID),
+			fmt.Sprintf("%d", msg.DestinationChainID))
+	}
 	
 	logger.WithFields(logger.Fields{
 		"message_id":  msg.MessageID,

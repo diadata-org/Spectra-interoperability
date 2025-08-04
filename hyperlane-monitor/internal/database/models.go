@@ -1,8 +1,10 @@
 package database
 
 import (
+	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/types"
@@ -109,15 +111,24 @@ func (j *JSONB) Scan(value interface{}) error {
 	
 	switch v := value.(type) {
 	case []byte:
-		return json.Unmarshal(v, j)
+		// Use json.Decoder with UseNumber to preserve numeric precision
+		decoder := json.NewDecoder(bytes.NewReader(v))
+		decoder.UseNumber()
+		return decoder.Decode(j)
 	case string:
-		return json.Unmarshal([]byte(v), j)
+		// Use json.Decoder with UseNumber to preserve numeric precision
+		decoder := json.NewDecoder(strings.NewReader(v))
+		decoder.UseNumber()
+		return decoder.Decode(j)
 	default:
 		// If it's already parsed (e.g., by the driver), convert to JSON and back
 		jsonBytes, err := json.Marshal(v)
 		if err != nil {
 			return err
 		}
-		return json.Unmarshal(jsonBytes, j)
+		// Use json.Decoder with UseNumber to preserve numeric precision
+		decoder := json.NewDecoder(bytes.NewReader(jsonBytes))
+		decoder.UseNumber()
+		return decoder.Decode(j)
 	}
 }

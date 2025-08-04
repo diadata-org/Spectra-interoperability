@@ -3,44 +3,75 @@
     "driver": "postgres",
     "dsn": "postgres://monitor:password@postgres:5432/hyperlane_monitor?sslmode=disable"
   },
-  
   "chain_configs": {
     "100640": {
       "name": "DIA Testnet",
-      "rpc_urls": ["https://testnet-rpc.diadata.org"],
+      "rpc_urls": [
+        "https://testnet-rpc.diadata.org"
+      ],
       "scan_interval": "10s"
+    },
+    "421614": {
+      "name": "Arbitrum Sepolia",
+      "rpc_urls": [
+        "https://sepolia-rollup.arbitrum.io/rpc"
+      ],
+      "health_check_interval": "30s"
     },
     "11155111": {
       "name": "Ethereum Sepolia",
-      "rpc_urls": ["https://rpc.sepolia.org"],
+      "rpc_urls": [
+        "https://rpc.sepolia.org"
+      ],
       "scan_interval": "12s"
     },
     "11155420": {
       "name": "Optimism Sepolia",
-      "rpc_urls": ["https://sepolia.optimism.io"],
-      "health_check_interval": "30s"
-    },
-    "421614": {
-      "name": "Arbitrum Sepolia",
-      "rpc_urls": ["https://sepolia-rollup.arbitrum.io/rpc"],
+      "rpc_urls": [
+        "https://sepolia.optimism.io"
+      ],
       "health_check_interval": "30s"
     }
   },
-  
   "monitoring_pairs": [
     {
       "source": {
         "chain_id": 100640,
-        "oracle_trigger": "0x51Bb3fC83AB00aa01f8C6C021Adc48e283B0CBd6",
-        "oracle_registry": "0x5CC54Ab148b738f8d2D46414051184141D46FDEe",
+        "oracle_trigger": "0x0648978350821C1F66e93ad128974376c4DCE7f4",
+        "oracle_registry": "0xC1ca83b5df6ce7e21Fb462C86f0C90E182d6db5d",
         "start_block": 19896800
       },
       "destination": {
         "chain_id": 11155420,
         "receivers": [
           {
-            "address": "0xf359f17fc18f7d7c3ed6b2faadbe66ec0c7894de",
+            "address": "0x477aB67d10fFa09DC0f0aC02AEc2E785E80A0ffB",
             "name": "Main Oracle Receiver",
+            "monitoring": {
+              "enabled": true,
+              "profile": "critical",
+              "check_interval": "30s",
+              "initial_wait": "0s",
+              "max_delivery_wait": "0s",
+              "alert_on_failure": true
+            }
+          }
+        ]
+      }
+    },
+    {
+      "source": {
+        "chain_id": 100640,
+        "oracle_trigger": "0xa6F65c065d9bAFe8E5E2Aeca20F0CB2F064278C7",
+        "oracle_registry": "0xC1ca83b5df6ce7e21Fb462C86f0C90E182d6db5d",
+        "start_block": 21785000
+      },
+      "destination": {
+        "chain_id": 11155420,
+        "receivers": [
+          {
+            "address": "0x477aB67d10fFa09DC0f0aC02AEc2E785E80A0ffB",
+            "name": "Bridge Oracle Receiver",
             "monitoring": {
               "enabled": true,
               "profile": "critical",
@@ -54,7 +85,6 @@
       }
     }
   ],
-  
   "monitoring_profiles": {
     "critical": {
       "check_interval": "15s",
@@ -84,18 +114,17 @@
       "exponential_backoff": true
     }
   },
-  
   "bridge_api": {
     "base_url": "http://spectra-bridge:8080",
+    "grpc_address": "spectra-bridge:8082",
+    "use_grpc": true,
     "timeout": "30s",
     "retry_attempts": 3,
     "retry_delay": "5s"
   },
-  
   "metrics": {
     "enabled": true,
     "port": "9091"
   },
-  
   "metrics_port": 9091
 }
