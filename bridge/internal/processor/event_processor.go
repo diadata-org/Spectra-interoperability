@@ -14,6 +14,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/contracts"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/router"
 )
@@ -31,6 +32,7 @@ type EventProcessor struct {
 	dedupCache         *DedupCache
 	stats              *ProcessingStats
 	routerRegistry     *router.Registry
+	metricsCollector   *metrics.Collector
 	
 	stopChan           chan struct{}
 	stoppedChan        chan struct{}
@@ -58,22 +60,24 @@ func NewEventProcessor(
 	updateChan chan<- *types.UpdateRequest,
 	errorChan chan<- error,
 	routerRegistry *router.Registry,
+	metricsCollector *metrics.Collector,
 ) (*EventProcessor, error) {
 	dedupCache := NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration())
 
 	return &EventProcessor{
-		config:         cfg,
-		db:             db,
-		registryClient: registryClient,
-		destinations:   destinations,
-		eventChan:      eventChan,
-		updateChan:     updateChan,
-		errorChan:      errorChan,
-		dedupCache:     dedupCache,
-		stats:          &ProcessingStats{},
-		routerRegistry: routerRegistry,
-		stopChan:       make(chan struct{}),
-		stoppedChan:    make(chan struct{}),
+		config:           cfg,
+		db:               db,
+		registryClient:   registryClient,
+		destinations:     destinations,
+		eventChan:        eventChan,
+		updateChan:       updateChan,
+		errorChan:        errorChan,
+		dedupCache:       dedupCache,
+		stats:            &ProcessingStats{},
+		routerRegistry:   routerRegistry,
+		metricsCollector: metricsCollector,
+		stopChan:         make(chan struct{}),
+		stoppedChan:      make(chan struct{}),
 	}, nil
 }
 
@@ -126,6 +130,9 @@ func (ep *EventProcessor) processLoop(ctx context.Context) {
 			
 		case event := <-ep.eventChan:
 			atomic.AddUint64(&ep.stats.EventsReceived, 1)
+			if ep.metricsCollector != nil {
+				ep.metricsCollector.IncEventsReceived()
+			}
 			
 			batch = append(batch, event)
 			if len(batch) == 1 {
@@ -159,6 +166,9 @@ func (ep *EventProcessor) processBatch(ctx context.Context, events []*types.Even
 		if err := ep.processEvent(ctx, event); err != nil {
 			logger.Errorf("Failed to process event: %v", err)
 			atomic.AddUint64(&ep.stats.EventsFailed, 1)
+			if ep.metricsCollector != nil {
+				ep.metricsCollector.IncEventsFailed()
+			}
 			ep.errorChan <- fmt.Errorf("event processing failed: %w", err)
 		}
 	}
@@ -271,6 +281,9 @@ func (ep *EventProcessor) processEvent(ctx context.Context, event *types.EventDa
 
 	atomic.AddUint64(&ep.stats.EventsProcessed, 1)
 	atomic.AddUint64(&ep.stats.UpdatesCreated, uint64(updatesCreated))
+	if ep.metricsCollector != nil {
+		ep.metricsCollector.IncEventsProcessed()
+	}
 	
 	ep.stats.mu.Lock()
 	ep.stats.LastProcessedTime = time.Now()

@@ -17,6 +17,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/pipeline"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/router"
@@ -42,6 +43,7 @@ type GenericEventProcessor struct {
 	updateChan      chan<- *types.UpdateRequest
 	
 	dedupCache      *DedupCache
+	metricsCollector *metrics.Collector
 	
 	stats           types.ProcessorStats
 	
@@ -61,6 +63,7 @@ func NewGenericEventProcessor(
 	eventChan <-chan *types.EventData,
 	errorChan chan<- error,
 	updateChan chan<- *types.UpdateRequest,
+	metricsCollector *metrics.Collector,
 ) (*GenericEventProcessor, error) {
 	extractor, err := pipeline.NewDataExtractor(eventDefs)
 	if err != nil {
@@ -80,22 +83,23 @@ func NewGenericEventProcessor(
 	}
 	
 	return &GenericEventProcessor{
-		config:         cfg,
-		eventDefs:      eventDefs,
-		destinations:   destinations,
-		db:             db,
-		routerRegistry: routerRegistry,
-		sourceClient:   sourceClient,
-		destClients:    destClients,
-		extractor:      extractor,
-		enricher:       enricher,
-		transformer:    transformer,
-		txBuilder:      txBuilder,
-		eventChan:      eventChan,
-		errorChan:      errorChan,
-		updateChan:     updateChan,
-		dedupCache:     NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration()),
-		stopChan:       make(chan struct{}),
+		config:           cfg,
+		eventDefs:        eventDefs,
+		destinations:     destinations,
+		db:               db,
+		routerRegistry:   routerRegistry,
+		sourceClient:     sourceClient,
+		destClients:      destClients,
+		extractor:        extractor,
+		enricher:         enricher,
+		transformer:      transformer,
+		txBuilder:        txBuilder,
+		eventChan:        eventChan,
+		errorChan:        errorChan,
+		updateChan:       updateChan,
+		dedupCache:       NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration()),
+		metricsCollector: metricsCollector,
+		stopChan:         make(chan struct{}),
 	}, nil
 }
 
@@ -136,13 +140,22 @@ func (gep *GenericEventProcessor) processLoop(ctx context.Context) {
 			}
 			
 			atomic.AddUint64(&gep.stats.EventsReceived, 1)
+			if gep.metricsCollector != nil {
+				gep.metricsCollector.IncEventsReceived()
+			}
 			
 			if err := gep.processEvent(ctx, event); err != nil {
 				logger.Errorf("Failed to process event: %v", err)
 				atomic.AddUint64(&gep.stats.EventsFailed, 1)
+				if gep.metricsCollector != nil {
+					gep.metricsCollector.IncEventsFailed()
+				}
 				gep.errorChan <- fmt.Errorf("event processing failed: %w", err)
 			} else {
 				atomic.AddUint64(&gep.stats.EventsProcessed, 1)
+				if gep.metricsCollector != nil {
+					gep.metricsCollector.IncEventsProcessed()
+				}
 			}
 		}
 	}

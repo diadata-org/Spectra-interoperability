@@ -196,9 +196,15 @@ func (l *EventListener) processMessageDispatchedEvent(ctx context.Context, event
 	}).Debug("Checking receiver configuration")
 	
 	// Check if this receiver is monitored (case-insensitive comparison)
+	logger.WithFields(logger.Fields{
+		"message_id": event.MessageId.Hex(),
+		"recipient": event.RecipientAddress.Hex(),
+		"configured_receivers": len(l.receivers),
+	}).Info("Checking recipient against configured receivers")
+	
 	var receiverConfig *types.ReceiverConfig
 	for addr, cfg := range l.receivers {
-		logger.Debugf("Comparing %s with %s", addr, event.RecipientAddress.Hex())
+		logger.Infof("Comparing recipient %s with configured %s", event.RecipientAddress.Hex(), addr)
 		if strings.EqualFold(addr, event.RecipientAddress.Hex()) {
 			receiverConfig = cfg
 			break
@@ -206,7 +212,10 @@ func (l *EventListener) processMessageDispatchedEvent(ctx context.Context, event
 	}
 	
 	if receiverConfig == nil {
-		logger.Debugf("Receiver %s not found in configured receivers for pair %s", event.RecipientAddress.Hex(), l.pair.PairID)
+		logger.Warnf("Receiver %s not found in configured receivers for pair %s", event.RecipientAddress.Hex(), l.pair.PairID)
+		for addr, cfg := range l.receivers {
+			logger.Infof("  Configured receiver: %s (%s)", addr, cfg.Name)
+		}
 		return nil
 	}
 	

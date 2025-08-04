@@ -43,11 +43,33 @@ func (s *Server) Start(port int) error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(loggingInterceptor),
+	)
 	pb.RegisterBridgeServiceServer(grpcServer, s)
 
 	logger.WithField("port", port).Info("Starting gRPC server")
+	logger.WithField("address", lis.Addr().String()).Info("gRPC server listening on address")
 	return grpcServer.Serve(lis)
+}
+
+// loggingInterceptor logs all incoming gRPC requests
+func loggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	start := time.Now()
+	logger.WithFields(logrus.Fields{
+		"method": info.FullMethod,
+		"start": start.Format(time.RFC3339),
+	}).Info("gRPC request received")
+	
+	resp, err := handler(ctx, req)
+	
+	logger.WithFields(logrus.Fields{
+		"method": info.FullMethod,
+		"duration": time.Since(start).String(),
+		"error": err,
+	}).Info("gRPC request completed")
+	
+	return resp, err
 }
 
 // TriggerFailover handles failover requests via gRPC

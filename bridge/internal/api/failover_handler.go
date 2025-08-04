@@ -403,10 +403,11 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		return
 	}
 
-	// Create transaction
+	// Create transaction - use receiver address from request
+	receiverAddr := common.HexToAddress(req.ReceiverAddress)
 	tx := types.NewTransaction(
 		nonce,
-		destConfig.ReceiverAddress,
+		receiverAddr,
 		big.NewInt(0),
 		destConfig.GasLimit,
 		gasPrice,

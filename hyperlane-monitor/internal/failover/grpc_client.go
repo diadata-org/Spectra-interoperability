@@ -24,6 +24,8 @@ type GRPCBridgeClient struct {
 
 // NewGRPCBridgeClient creates a new gRPC bridge client
 func NewGRPCBridgeClient(address string) (*GRPCBridgeClient, error) {
+	grpcLogger.WithField("address", address).Info("Creating gRPC bridge client")
+	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -33,10 +35,13 @@ func NewGRPCBridgeClient(address string) (*GRPCBridgeClient, error) {
 		grpc.WithBlock(),
 	)
 	if err != nil {
+		grpcLogger.WithError(err).Error("Failed to connect to gRPC server")
 		return nil, fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
 
 	client := pb.NewBridgeServiceClient(conn)
+	
+	grpcLogger.Info("gRPC bridge client created successfully")
 	
 	return &GRPCBridgeClient{
 		client: client,
@@ -127,13 +132,17 @@ func (c *GRPCBridgeClient) TriggerFailover(ctx context.Context, req *types.Failo
 		"source":       req.SourceChainID,
 		"destination":  req.DestinationChainID,
 		"has_intent":   protoIntent != nil,
-	}).Debug("Sending gRPC failover request")
+		"receiver":     req.ReceiverAddress,
+	}).Info("Sending gRPC failover request")
 
 	// Send request
+	grpcLogger.Info("About to call TriggerFailover RPC")
 	resp, err := c.client.TriggerFailover(ctx, grpcReq)
 	if err != nil {
+		grpcLogger.WithError(err).Error("TriggerFailover RPC failed")
 		return nil, fmt.Errorf("failover request failed: %w", err)
 	}
+	grpcLogger.Info("TriggerFailover RPC completed successfully")
 
 	grpcLogger.WithFields(logrus.Fields{
 		"request_id": resp.RequestId,

@@ -198,6 +198,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		eventChan,
 		errorChan,
 		bridge.updateChan,
+		metricsCollector,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
