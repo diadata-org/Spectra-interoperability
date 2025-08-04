@@ -14,7 +14,7 @@
   },
   "event_definitions": {
     "IntentRegistered": {
-      "contract": "0x5CC54Ab148b738f8d2D46414051184141D46FDEe",
+      "contract": "0xC1ca83b5df6ce7e21Fb462C86f0C90E182d6db5d",
       "abi": "{\"name\":\"IntentRegistered\",\"type\":\"event\",\"inputs\":[{\"name\":\"intentHash\",\"type\":\"bytes32\",\"indexed\":true},{\"name\":\"symbol\",\"type\":\"string\",\"indexed\":true},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"signer\",\"type\":\"address\"}]}",
       "data_extraction": {
         "intentHash": "topics[1]",
@@ -68,45 +68,14 @@
       "contracts": [
         {
           "name": "receiver",
-          "address": "0xf359f17fc18f7d7c3ed6b2faadbe66ec0c7894de",
+          "address": "0x477aB67d10fFa09DC0f0aC02AEc2E785E80A0ffB",
           "type": "pushoracle",
           "enabled": true
         }
       ]
     }
   },
-  "routers": [
-    {
-      "id": "oracle-price-router",
-      "name": "Oracle Price Router",
-      "type": "generic",
-      "enabled": true,
-      "triggers": {
-        "symbols": [
-          "BTC/USD",
-          "ETH/USD"
-        ],
-        "price_deviation": 0.01,
-        "max_update_frequency": "30s",
-        "min_update_frequency": "5s"
-      },
-      "processing": {
-        "batch_size": 10,
-        "batch_timeout": "5s",
-        "max_retries": 3,
-        "retry_delay": "1s"
-      },
-      "destinations": [
-        {
-          "chain_id": 11155420,
-          "contracts": [
-            "0xf359f17fc18f7d7c3ed6b2faadbe66ec0c7894de"
-          ],
-          "gas_limit": 500000
-        }
-      ]
-    }
-  ],
+  "routers": [],
   "event_monitor": {
     "enabled": true,
     "reconnect_interval": "5s",

@@ -109,6 +109,11 @@ func (s *Server) Stop() error {
 	return s.httpServer.Shutdown(ctx)
 }
 
+// GetFailoverHandler returns the failover handler instance
+func (s *Server) GetFailoverHandler() *FailoverHandler {
+	return s.failoverHandler
+}
+
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")

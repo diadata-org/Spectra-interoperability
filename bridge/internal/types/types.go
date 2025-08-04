@@ -3,6 +3,7 @@ package types
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"strings"
 	"time"
@@ -61,6 +62,69 @@ func (h *HexBytes) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*h = HexBytes(b)
+	return nil
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to handle big integers properly
+func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
+	// Use an alias to avoid recursion
+	type Alias OracleIntent
+	aux := &struct {
+		ChainID   json.Number `json:"chainId"`
+		Nonce     json.Number `json:"nonce"`
+		Expiry    json.Number `json:"expiry"`
+		Price     json.Number `json:"price"`
+		Timestamp json.Number `json:"timestamp"`
+		*Alias
+	}{
+		Alias: (*Alias)(oi),
+	}
+	
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	
+	// Convert json.Number to *big.Int
+	if aux.ChainID != "" {
+		val, ok := new(big.Int).SetString(string(aux.ChainID), 10)
+		if !ok {
+			return fmt.Errorf("invalid chainId: %s", aux.ChainID)
+		}
+		oi.ChainID = val
+	}
+	
+	if aux.Nonce != "" {
+		val, ok := new(big.Int).SetString(string(aux.Nonce), 10)
+		if !ok {
+			return fmt.Errorf("invalid nonce: %s", aux.Nonce)
+		}
+		oi.Nonce = val
+	}
+	
+	if aux.Expiry != "" {
+		val, ok := new(big.Int).SetString(string(aux.Expiry), 10)
+		if !ok {
+			return fmt.Errorf("invalid expiry: %s", aux.Expiry)
+		}
+		oi.Expiry = val
+	}
+	
+	if aux.Price != "" {
+		val, ok := new(big.Int).SetString(string(aux.Price), 10)
+		if !ok {
+			return fmt.Errorf("invalid price: %s", aux.Price)
+		}
+		oi.Price = val
+	}
+	
+	if aux.Timestamp != "" {
+		val, ok := new(big.Int).SetString(string(aux.Timestamp), 10)
+		if !ok {
+			return fmt.Errorf("invalid timestamp: %s", aux.Timestamp)
+		}
+		oi.Timestamp = val
+	}
+	
 	return nil
 }
 

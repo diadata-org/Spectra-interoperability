@@ -526,17 +526,17 @@ func (r *ReceiverClient) GetFromAddress() common.Address {
 // intentToContractStruct converts a bridgeTypes.OracleIntent to the contract struct format
 func (r *ReceiverClient) intentToContractStruct(intent *bridgeTypes.OracleIntent) interface{} {
 	return struct {
-		IntentType string         `json:"intentType"`
-		Version    string         `json:"version"`
-		ChainId    *big.Int       `json:"chainId"`
-		Nonce      *big.Int       `json:"nonce"`
-		Expiry     *big.Int       `json:"expiry"`
-		Symbol     string         `json:"symbol"`
-		Price      *big.Int       `json:"price"`
-		Timestamp  *big.Int       `json:"timestamp"`
-		Source     string         `json:"source"`
-		Signature  []byte         `json:"signature"`
-		Signer     common.Address `json:"signer"`
+		IntentType string
+		Version    string
+		ChainId    *big.Int
+		Nonce      *big.Int
+		Expiry     *big.Int
+		Symbol     string
+		Price      *big.Int
+		Timestamp  *big.Int
+		Source     string
+		Signature  []byte
+		Signer     common.Address
 	}{
 		IntentType: intent.IntentType,
 		Version:    intent.Version,

@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 # Install dependencies
 RUN apk add --no-cache git
@@ -9,6 +9,9 @@ WORKDIR /app
 
 # Copy go mod files
 COPY go.mod go.sum ./
+
+# Copy proto directory for local replace
+COPY proto ./proto
 
 # Download dependencies
 RUN go mod download
@@ -30,8 +33,8 @@ WORKDIR /root/
 # Copy the binary from builder
 COPY --from=builder /app/bridge .
 
-# Expose API port
-EXPOSE 8080
+# Expose API port and gRPC port
+EXPOSE 8080 8082
 
 # Run the bridge
 CMD ["./bridge"]

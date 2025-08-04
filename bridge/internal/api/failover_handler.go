@@ -302,19 +302,19 @@ func (h *FailoverHandler) intentToContractStruct(intent *bridgetypes.OracleInten
 		signature = []byte{}
 	}
 
-	// Try with abi tags that match the contract
+	// No struct tags needed - field order and types must match contract exactly
 	return struct {
-		IntentType string         `abi:"intentType"`
-		Version    string         `abi:"version"`
-		ChainId    *big.Int       `abi:"chainId"`
-		Nonce      *big.Int       `abi:"nonce"`
-		Expiry     *big.Int       `abi:"expiry"`
-		Symbol     string         `abi:"symbol"`
-		Price      *big.Int       `abi:"price"`
-		Timestamp  *big.Int       `abi:"timestamp"`
-		Source     string         `abi:"source"`
-		Signature  []byte         `abi:"signature"`
-		Signer     common.Address `abi:"signer"`
+		IntentType string
+		Version    string
+		ChainId    *big.Int
+		Nonce      *big.Int
+		Expiry     *big.Int
+		Symbol     string
+		Price      *big.Int
+		Timestamp  *big.Int
+		Source     string
+		Signature  []byte
+		Signer     common.Address
 	}{
 		IntentType: intent.IntentType,
 		Version:    intent.Version,
@@ -575,6 +575,41 @@ func (h *FailoverHandler) updateStatus(requestID, status, txHash, errorMsg strin
 			fs.Error = errorMsg
 		}
 	}
+}
+
+// ProcessFailoverRequest processes a failover request (used by both REST and gRPC)
+func (h *FailoverHandler) ProcessFailoverRequest(requestID string, req FailoverRequest) {
+	// Get destination config
+	destConfig, exists := h.destinations[int64(req.DestinationChainID)]
+	if !exists {
+		h.updateStatus(requestID, "failed", "", fmt.Sprintf("Destination chain %d not configured", req.DestinationChainID))
+		return
+	}
+
+	// Get client for destination chain
+	client, exists := h.clients[int64(req.DestinationChainID)]
+	if !exists {
+		h.updateStatus(requestID, "failed", "", fmt.Sprintf("No client for destination chain %d", req.DestinationChainID))
+		return
+	}
+
+	// Process the failover
+	h.processFailover(requestID, req, destConfig, client)
+}
+
+// GetStatus returns the status of a failover request
+func (h *FailoverHandler) GetStatus(requestID string) *FailoverStatus {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	
+	status, exists := h.requestStatus[requestID]
+	if !exists {
+		return nil
+	}
+	
+	// Return a copy to avoid race conditions
+	statusCopy := *status
+	return &statusCopy
 }
 
 // GetFailoverStatus handles GET /api/v1/failover/status/{requestId}

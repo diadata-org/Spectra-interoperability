@@ -14,8 +14,10 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/contracts"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/grpc"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/processor"
@@ -58,6 +60,9 @@ type Bridge struct {
 
 	// Metrics tracking
 	metricsTracker *MetricsTracker
+	// API components
+	apiServer       *api.Server
+	metrics         *metrics.Metrics
 }
 
 // DestinationClient represents a client for a destination chain
@@ -198,6 +203,11 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
 	}
 	bridge.eventProcessor = eventProcessor
+
+	// Store metrics collector for API server
+	if metricsCollector != nil {
+		bridge.metrics = metricsCollector.FailoverMetrics
+	}
 
 	// Initialize chain stats
 	bridge.initializeChainStats()
@@ -796,10 +806,39 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 		logger.Info("Metrics collection is enabled")
 	}
 
-	// TODO: Implement HTTP server with health, stats, and metrics endpoints
-	// Example implementation:
-	// apiServer := api.NewAPIServer(b, b.config.Bridge.MetricsPort)
-	// go apiServer.Start()
+	// Start API server if configured
+	if b.config.API.ListenAddr != "" {
+		// Create metrics collector for API
+		var metricsCollector *metrics.Collector
+		if b.metrics != nil {
+			metricsCollector = &metrics.Collector{
+				FailoverMetrics: b.metrics,
+			}
+		}
+		
+		// API server needs nil health monitor and router registry for now
+		apiServer := api.NewServer(b.config, b.db, nil, metricsCollector, b.routerRegistry)
+		
+		go func() {
+			if err := apiServer.Start(ctx); err != nil {
+				logger.Errorf("API server error: %v", err)
+			}
+		}()
+		
+		b.apiServer = apiServer
+		
+		// Start gRPC server if failover handler is available
+		if apiServer.GetFailoverHandler() != nil {
+			grpcServer := grpc.NewServer(apiServer.GetFailoverHandler())
+			go func() {
+				grpcPort := 8082 // Use port 8082 for gRPC
+				logger.Infof("Starting gRPC server on port %d", grpcPort)
+				if err := grpcServer.Start(grpcPort); err != nil {
+					logger.Errorf("Failed to start gRPC server: %v", err)
+				}
+			}()
+		}
+	}
 }
 
 // processScannerEvents processes events from the block scanner
