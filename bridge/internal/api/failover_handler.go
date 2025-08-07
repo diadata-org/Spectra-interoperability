@@ -39,6 +39,7 @@ type FailoverHandler struct {
 	requestStatus map[string]*FailoverStatus
 	mu            sync.RWMutex
 	metrics       *metrics.Metrics
+	intentMetrics *metrics.IntentMetrics
 }
 
 // DestinationConfig holds configuration for a destination chain
@@ -59,7 +60,7 @@ type FailoverStatus struct {
 }
 
 // NewFailoverHandler creates a new failover handler
-func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *metrics.Metrics) (*FailoverHandler, error) {
+func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *metrics.Metrics, intentMetrics *metrics.IntentMetrics) (*FailoverHandler, error) {
 	// Parse private key
 	privateKey, err := crypto.HexToECDSA(cfg.PrivateKey[2:]) // Remove 0x prefix
 	if err != nil {
@@ -73,6 +74,7 @@ func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *met
 		clients:       make(map[int64]*ethclient.Client),
 		requestStatus: make(map[string]*FailoverStatus),
 		metrics:       serviceMetrics,
+		intentMetrics: intentMetrics,
 	}
 
 	// Configure destinations
@@ -366,6 +368,39 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		"signer":      intentData.Signer.Hex(),
 	}).Info("Processing failover with intent data")
 	
+	// Track intent lifecycle using the intent's timestamp
+	if h.intentMetrics != nil && intentData.Timestamp != nil {
+		intentTime := time.Unix(intentData.Timestamp.Int64(), 0)
+		intentHash := req.IntentHash
+		
+		// Record intent as created (using the original timestamp)
+		h.intentMetrics.RecordIntentCreated(
+			intentHash,
+			intentData.Symbol,
+			"hyperlane", // source is hyperlane failover
+			intentTime,
+		)
+		
+		// For failover path, we don't have the actual blockchain registration timestamp
+		// The intent was already registered before reaching the bridge via failover
+		// So we skip recording the registration metric here to avoid incorrect data
+		
+		// Record the age of the intent when received
+		intentAge := time.Since(intentTime).Seconds()
+		h.intentMetrics.RecordIntentAge(
+			intentData.Symbol,
+			"hyperlane",
+			"failover",
+			intentAge,
+		)
+		
+		logger.WithFields(logrus.Fields{
+			"intent_hash": intentHash,
+			"intent_age_seconds": intentAge,
+			"intent_timestamp": intentTime.Format(time.RFC3339),
+		}).Info("Processing intent with age tracking")
+	}
+	
 	// Use the same ABI as receiver.go
 	contractABI, err := abi.JSON(strings.NewReader(contracts.PushOracleReceiverABI))
 	if err != nil {
@@ -452,6 +487,22 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			gasPrice.Uint64()*destConfig.GasLimit,
 		)
 	}
+	
+	// Record intent submission in lifecycle
+	if h.intentMetrics != nil && intentData.Timestamp != nil {
+		intentTime := time.Unix(intentData.Timestamp.Int64(), 0)
+		lifecycle := &metrics.IntentLifecycle{
+			IntentHash:       req.IntentHash,
+			Symbol:          intentData.Symbol,
+			SourceChain:     fmt.Sprintf("%d", req.SourceChainID),
+			DestinationChain: fmt.Sprintf("%d", destConfig.ChainID),
+			IntentTime:       intentTime, // Set the original intent time
+			SubmissionTime:   time.Now(),
+			TxHash:          txHash,
+			GasPrice:        float64(gasPrice.Uint64()) / 1e9, // Convert to Gwei
+		}
+		h.intentMetrics.RecordIntentSubmitted(lifecycle)
+	}
 
 	logger.WithFields(logrus.Fields{
 		"request_id": requestID,
@@ -521,6 +572,22 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 				fmt.Sprintf("%d", req.DestinationChainID),
 				"failover",
 			)
+		}
+		
+		// Record intent confirmation in lifecycle
+		if h.intentMetrics != nil && intentData.Timestamp != nil {
+			intentTime := time.Unix(intentData.Timestamp.Int64(), 0)
+			lifecycle := &metrics.IntentLifecycle{
+				IntentHash:       req.IntentHash,
+				Symbol:          intentData.Symbol,
+				SourceChain:     fmt.Sprintf("%d", req.SourceChainID),
+				DestinationChain: fmt.Sprintf("%d", destConfig.ChainID),
+				IntentTime:       intentTime, // Set the original intent time for end-to-end calculation
+				SubmissionTime:   time.Now().Add(-time.Duration(confirmDuration * float64(time.Second))), // Approximate submission time
+				ConfirmationTime: time.Now(),
+				TxHash:          txHash,
+			}
+			h.intentMetrics.RecordIntentConfirmed(lifecycle, receipt.GasUsed)
 		}
 		
 		logger.WithFields(logrus.Fields{

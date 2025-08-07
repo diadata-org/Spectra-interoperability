@@ -22,6 +22,7 @@ type IntentMetrics struct {
 	processingToSubmissionLatency  *prometheus.HistogramVec // Time from processing to submission
 	submissionToConfirmationLatency *prometheus.HistogramVec // Time from submission to confirmation
 	endToEndLatency                *prometheus.HistogramVec // Total time from intent creation to confirmation
+	intentAgeWhenReceived          *prometheus.HistogramVec // Age of intent when received by bridge
 	
 	// Stage timestamps - tracks when each stage occurred
 	intentTimestamp         *prometheus.GaugeVec
@@ -93,6 +94,12 @@ func NewIntentMetrics() *IntentMetrics {
 			Help:    "Total time from intent creation to on-chain confirmation",
 			Buckets: []float64{1, 5, 10, 30, 60, 120, 300, 600, 1200},
 		}, []string{"symbol", "source_chain", "destination_chain"}),
+		
+		intentAgeWhenReceived: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "bridge_intent_age_when_received_seconds",
+			Help:    "Age of intent when received by bridge (measures data freshness)",
+			Buckets: []float64{1, 5, 10, 30, 60, 120, 180, 300, 600},
+		}, []string{"symbol", "source", "delivery_path"}),
 		
 		// Timestamp gauges
 		intentTimestamp: promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -334,6 +341,11 @@ func (m *IntentMetrics) RecordRouterDecision(routerID string, decision bool, rea
 // RecordPriceDeviation records price deviation between intent and submission
 func (m *IntentMetrics) RecordPriceDeviation(symbol string, deviationPercent float64) {
 	m.priceDeviation.WithLabelValues(symbol).Observe(deviationPercent)
+}
+
+// RecordIntentAge records the age of an intent when received by the bridge
+func (m *IntentMetrics) RecordIntentAge(symbol, source, deliveryPath string, ageSeconds float64) {
+	m.intentAgeWhenReceived.WithLabelValues(symbol, source, deliveryPath).Observe(ageSeconds)
 }
 
 // Helper function to categorize gas prices

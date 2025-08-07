@@ -812,9 +812,10 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 		// Create metrics collector for API
 		var metricsCollector *metrics.Collector
 		if b.metrics != nil {
-			metricsCollector = &metrics.Collector{
-				FailoverMetrics: b.metrics,
-			}
+			// Use the singleton metrics collector which includes IntentMetrics
+			metricsCollector = metrics.NewCollector()
+			// Override the FailoverMetrics with the bridge's instance
+			metricsCollector.FailoverMetrics = b.metrics
 		}
 		
 		// API server needs nil health monitor and router registry for now

@@ -52,20 +52,29 @@ func NewServer(
 	logrus.Info("Creating failover handler")
 
 	var failoverMetrics *metrics.Metrics
-	if metricsCollector != nil && metricsCollector.FailoverMetrics != nil {
-		failoverMetrics = metricsCollector.FailoverMetrics
-		logrus.Info("Using shared metrics instance for failover handler")
+	var intentMetrics *metrics.IntentMetrics
+	if metricsCollector != nil {
+		if metricsCollector.FailoverMetrics != nil {
+			failoverMetrics = metricsCollector.FailoverMetrics
+			logrus.Info("Using shared metrics instance for failover handler")
+		}
+		if metricsCollector.IntentMetrics != nil {
+			intentMetrics = metricsCollector.IntentMetrics
+			logrus.Info("Using shared intent metrics instance for failover handler")
+		}
 	} else {
 		logrus.Warn("Metrics collector not available, failover handler will run without metrics")
 	}
 
-	failoverHandler, err := NewFailoverHandler(cfg, db, failoverMetrics)
+	failoverHandler, err := NewFailoverHandler(cfg, db, failoverMetrics, intentMetrics)
 	if err != nil {
 		logrus.WithError(err).Error("Failed to create failover handler")
 	} else {
 		s.failoverHandler = failoverHandler
-		if failoverMetrics != nil {
-			logrus.Info("Failover handler created successfully with integrated metrics")
+		if failoverMetrics != nil && intentMetrics != nil {
+			logrus.Info("Failover handler created successfully with integrated metrics and intent metrics")
+		} else if failoverMetrics != nil {
+			logrus.Info("Failover handler created successfully with integrated metrics only")
 		} else {
 			logrus.Info("Failover handler created successfully without metrics")
 		}
