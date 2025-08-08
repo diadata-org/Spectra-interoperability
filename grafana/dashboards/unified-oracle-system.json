@@ -1632,6 +1632,55 @@
           "sort": "none"
         }
       },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineInterpolation": "linear",
+            "barAlignment": 0,
+            "lineWidth": 1,
+            "fillOpacity": 100,
+            "gradientMode": "none",
+            "spanNulls": false,
+            "showPoints": "never",
+            "pointSize": 5,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "axisLabel": "",
+            "axisColorMode": "text",
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "axisCenteredZero": false,
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "targets": [
         {
           "datasource": {
@@ -1639,8 +1688,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_intent_age_when_received_seconds_bucket[5m])) by (le))",
-          "legendFormat": "Intent to Bridge Receipt",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"intent_to_event\",receiver_key=~\"$receiver\"}[5m])) by (le))",
+          "legendFormat": "Intent to Event",
           "range": true,
           "refId": "A"
         },
@@ -1650,8 +1699,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_timeline_phase_duration_seconds_bucket{phase=\"bridge_processing\"}[5m])) by (le))",
-          "legendFormat": "Bridge Processing",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"event_detection\",receiver_key=~\"$receiver\"}[5m])) by (le))",
+          "legendFormat": "Event Detection",
           "range": true,
           "refId": "B"
         },
@@ -1661,82 +1710,25 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_timeline_phase_duration_seconds_bucket{phase=\"confirmation\"}[5m])) by (le))",
-          "legendFormat": "Transaction Confirmation",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"wait\",receiver_key=~\"$receiver\"}[5m])) by (le))",
+          "legendFormat": "Hyperlane Wait",
           "range": true,
           "refId": "C"
-        }
-      ],
-      "title": "Complete Intent Lifecycle Timeline - From Intent Timestamp to Final Delivery",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 60
-              },
-              {
-                "color": "red",
-                "value": 300
-              }
-            ]
-          },
-          "unit": "s"
         },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 55
-      },
-      "id": 110,
-      "options": {
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showThresholdLabels": false,
-        "showThresholdMarkers": true
-      },
-      "pluginVersion": "10.0.2",
-      "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_end_to_end_latency_seconds_bucket[5m])) by (le))",
-          "legendFormat": "P95 End-to-End Latency",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"bridge_processing\",receiver_key=~\"$receiver\"}[5m])) by (le))",
+          "legendFormat": "Bridge Processing",
           "range": true,
-          "refId": "A"
+          "refId": "D"
         }
       ],
-      "title": "End-to-End Intent Latency (P95)",
-      "type": "gauge"
+      "title": "Complete Intent Lifecycle Timeline - From Intent Timestamp to Final Delivery",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -1772,7 +1764,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
+        "w": 12,
         "x": 0,
         "y": 55
       },
@@ -1827,8 +1819,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 8,
+        "w": 12,
+        "x": 12,
         "y": 55
       },
       "id": 107,
@@ -1853,8 +1845,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_intent_age_when_received_seconds_bucket[5m])) by (le))",
-          "legendFormat": "Intent to Bridge Receipt",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"intent_to_event\",receiver_key=~\"$receiver\"}[5m])) by (le))",
+          "legendFormat": "Intent to Event",
           "range": true,
           "refId": "A"
         },
@@ -1864,7 +1856,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_timeline_phase_duration_seconds_bucket{phase=\"bridge_processing\"}[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"bridge_processing\",receiver_key=~\"$receiver\"}[5m])) by (le))",
           "legendFormat": "Bridge Processing",
           "range": true,
           "refId": "B"
@@ -1875,8 +1867,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum(rate(bridge_timeline_phase_duration_seconds_bucket{phase=\"confirmation\"}[5m])) by (le))",
-          "legendFormat": "Transaction Confirmation",
+          "expr": "histogram_quantile(0.95, sum(rate(oracle_bridge_timeline_phase_duration_seconds_bucket{phase=\"wait\",receiver_key=~\"$receiver\"}[5m])) by (le))",
+          "legendFormat": "Hyperlane Wait",
           "range": true,
           "refId": "C"
         }
@@ -1918,9 +1910,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 55
+        "w": 12,
+        "x": 0,
+        "y": 63
       },
       "id": 108,
       "options": {
@@ -2069,7 +2061,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 71
       },
       "id": 109,
       "options": {
@@ -2151,9 +2143,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 73
+        "y": 81
       },
-      "id": 110,
+      "id": 111,
       "panels": [],
       "title": "System Health & Performance",
       "type": "row"
@@ -2217,7 +2209,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 74
+        "y": 82
       },
       "id": 40,
       "options": {
@@ -2304,7 +2296,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 74
+        "y": 82
       },
       "id": 41,
       "options": {
@@ -2391,7 +2383,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 82
+        "y": 90
       },
       "id": 42,
       "options": {
@@ -2478,7 +2470,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 82
+        "y": 90
       },
       "id": 43,
       "options": {
@@ -2535,6 +2527,33 @@
         "regex": "",
         "skipUrlSync": false,
         "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(oracle_bridge_timeline_phase_duration_seconds_bucket, receiver_key)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Receiver",
+        "multi": false,
+        "name": "receiver",
+        "options": [],
+        "query": {
+          "query": "label_values(oracle_bridge_timeline_phase_duration_seconds_bucket, receiver_key)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
