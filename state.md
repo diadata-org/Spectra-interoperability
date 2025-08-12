@@ -3,7 +3,7 @@
 ## Attestor Service
 **Path:** `attestor/`
 
-Reads prices from DIA Oracle V2 (`0x0087342f5f4c7AB23a37c045c3EF710749527c88`), signs EIP-712 intents
+Reads prices from DIAOracleV2Meta (`0x0087342f5f4c7AB23a37c045c3EF710749527c88`), signs EIP-712 intents
 
 ```solidity
 struct OracleIntent {
@@ -33,6 +33,10 @@ Stores signed OracleIntents used by OracleTrigger
 
 Dispatches Hyperlane messages to destination chains
 
+**Changes:**
+- Added support for OracleIntent
+- Gets price from OracleIntentRegistry instead of DIAOracleV2Meta
+
 ```solidity
 function dispatch(
     uint32 _destinationDomain,
@@ -49,12 +53,20 @@ Monitors `MessageDispatched` events, triggers Bridge failover on delivery timeou
 ## Bridge Service
 **Path:** `bridge/`
 
+Works in 2 ways:
+1. GRPC messages from hyperlane-monitor for failover
+2. Inbuilt router to route messages from destination to source,Randomness functionality is  configured here
+
 Provides failover via direct intent updates to PushOracleReceiverV2 using EIP-712 signatures
 
 ## PushOracleReceiverV2
 **Contract:** `contracts/contracts/PushOracleReceiverV2.sol`
 
 Receives data via `handle()` (Hyperlane) or `handleIntentUpdate()` (direct failover)
+
+**Changes:**
+- Added support to receive OracleIntent
+- Added function to register signed intent
 
 **Deployed instances:**
 - **Apple:** `0xe60ccF4248640a2838eDf04516161d706e14bCAF`
@@ -81,3 +93,5 @@ Receives data via `handle()` (Hyperlane) or `handleIntentUpdate()` (direct failo
 
 5. **Remove require statements** - Replace `require()` with custom errors for gas efficiency
    - `contracts/contracts/` - All contract files
+
+6. **Unit tests** - Add comprehensive unit tests
