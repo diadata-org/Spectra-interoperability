@@ -285,6 +285,15 @@ type EventData struct {
 	Price           *big.Int       `json:"price"`
 	Timestamp       *big.Int       `json:"timestamp"`
 	Signer          common.Address `json:"signer"`
+	
+	// IntArraySet event specific fields
+	RequestId       *big.Int       `json:"request_id,omitempty"`
+	Round           *big.Int       `json:"round,omitempty"`
+	Seed            string         `json:"seed,omitempty"`
+	Signature       string         `json:"signature,omitempty"`
+	RandomInts      []*big.Int     `json:"random_ints,omitempty"`
+	RawData         []byte         `json:"raw_data,omitempty"`
+	
 	Data            map[string]interface{} `json:"data"`
 	Raw             interface{}    `json:"raw"`
 	IsGapFill       bool           `json:"is_gap_fill"`

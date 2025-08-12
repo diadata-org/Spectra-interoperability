@@ -357,6 +357,27 @@ func (c *BaseContractClient) getFieldValue(request *bridgeTypes.UpdateRequest, m
 		return request.Intent.Expiry, nil
 	case "intenthash":
 		return request.IntentHash, nil
+	// IntArraySet event fields
+	case "requestid":
+		if request.Event != nil && request.Event.RequestId != nil {
+			return request.Event.RequestId, nil
+		}
+		return nil, fmt.Errorf("requestId not available in event data")
+	case "randomints":
+		if request.Event != nil && request.Event.RandomInts != nil {
+			return request.Event.RandomInts, nil
+		}
+		return nil, fmt.Errorf("randomInts not available in event data")
+	case "round":
+		if request.Event != nil && request.Event.Round != nil {
+			return request.Event.Round, nil
+		}
+		return nil, fmt.Errorf("round not available in event data")
+	case "seed":
+		if request.Event != nil {
+			return request.Event.Seed, nil
+		}
+		return nil, fmt.Errorf("seed not available in event data")
 	default:
 		return nil, fmt.Errorf("field %s not found", fieldName)
 	}
@@ -403,6 +424,31 @@ func (c *BaseContractClient) convertValue(value interface{}, targetType abi.Type
 			return common.FromHex(v), nil
 		default:
 			return nil, fmt.Errorf("cannot convert %T to bytes", value)
+		}
+	case abi.SliceTy:
+		// Handle arrays like int256[]
+		switch v := value.(type) {
+		case []*big.Int:
+			return v, nil
+		case []interface{}:
+			// Convert slice of interfaces to slice of big.Int
+			result := make([]*big.Int, len(v))
+			for i, item := range v {
+				if bigInt, ok := item.(*big.Int); ok {
+					result[i] = bigInt
+				} else if str, ok := item.(string); ok {
+					n, ok := new(big.Int).SetString(str, 10)
+					if !ok {
+						return nil, fmt.Errorf("cannot convert %s to big.Int", str)
+					}
+					result[i] = n
+				} else {
+					return nil, fmt.Errorf("cannot convert array element %T to big.Int", item)
+				}
+			}
+			return result, nil
+		default:
+			return nil, fmt.Errorf("cannot convert %T to slice", value)
 		}
 	default:
 		return value, nil

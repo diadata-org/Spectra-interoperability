@@ -125,6 +125,12 @@ type FailoverRequest struct {
 	ReceiverAddress    string                     `json:"receiver_address"`
 	IntentData         *bridgetypes.OracleIntent  `json:"intent_data"`
 	Reason             string                     `json:"reason"`
+	
+	// Phase tracking timestamps
+	DetectionTimestamp       int64  `json:"detection_timestamp"`
+	MonitoringStartTimestamp int64  `json:"monitoring_start_timestamp"`
+	FailoverTimestamp        int64  `json:"failover_timestamp"`
+	ReceiverKey              string `json:"receiver_key"`
 }
 
 // FailoverResponse represents the response to a failover request
@@ -377,22 +383,58 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		h.intentMetrics.RecordIntentCreated(
 			intentHash,
 			intentData.Symbol,
-			"hyperlane", // source is hyperlane failover
+			"hyperlane",
 			intentTime,
 		)
 		
-		// For failover path, we don't have the actual blockchain registration timestamp
-		// The intent was already registered before reaching the bridge via failover
-		// So we skip recording the registration metric here to avoid incorrect data
-		
 		// Record the age of the intent when received
 		intentAge := time.Since(intentTime).Seconds()
+		receiverKey := req.ReceiverKey
+		if receiverKey == "" {
+			receiverKey = "unknown"
+		}
 		h.intentMetrics.RecordIntentAge(
 			intentData.Symbol,
 			"hyperlane",
-			"failover",
+			receiverKey,
 			intentAge,
 		)
+		
+		// Record phase tracking metrics if timestamps are provided
+		if req.DetectionTimestamp > 0 && req.MonitoringStartTimestamp > 0 && req.FailoverTimestamp > 0 {
+			detectionTime := time.Unix(req.DetectionTimestamp, 0)
+			monitoringStartTime := time.Unix(req.MonitoringStartTimestamp, 0)
+			failoverTime := time.Unix(req.FailoverTimestamp, 0)
+			
+			// Calculate phase durations
+			intentToEventDuration := detectionTime.Sub(intentTime).Seconds()
+			eventDetectionDuration := monitoringStartTime.Sub(detectionTime).Seconds()
+			hyperlaneWaitDuration := failoverTime.Sub(monitoringStartTime).Seconds()
+			
+			// Record phase durations using the unified metric
+			if h.metrics != nil {
+				// Intent to Event phase
+				h.metrics.RecordTimelinePhaseDuration("intent_to_event", intentToEventDuration, receiverKey)
+				
+				// Event Detection phase
+				h.metrics.RecordTimelinePhaseDuration("event_detection", eventDetectionDuration, receiverKey)
+				
+				// Hyperlane Wait phase
+				h.metrics.RecordTimelinePhaseDuration("wait", hyperlaneWaitDuration, receiverKey)
+			}
+			
+			// Log phase durations
+			logger.WithFields(logrus.Fields{
+				"intent_hash": intentHash,
+				"receiver_key": receiverKey,
+				"intent_to_event": intentToEventDuration,
+				"event_detection": eventDetectionDuration,
+				"hyperlane_wait": hyperlaneWaitDuration,
+				"detection_to_monitoring": monitoringStartTime.Sub(detectionTime).Seconds(),
+				"monitoring_to_failover": failoverTime.Sub(monitoringStartTime).Seconds(),
+				"total_time": failoverTime.Sub(intentTime).Seconds(),
+			}).Info("Phase tracking metrics")
+		}
 		
 		logger.WithFields(logrus.Fields{
 			"intent_hash": intentHash,
@@ -572,6 +614,12 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 				fmt.Sprintf("%d", req.DestinationChainID),
 				"failover",
 			)
+		}
+		
+		// Record bridge processing phase duration
+		if h.metrics != nil && req.ReceiverKey != "" {
+			bridgeProcessingDuration := time.Since(startTime).Seconds()
+			h.metrics.RecordTimelinePhaseDuration("bridge_processing", bridgeProcessingDuration, req.ReceiverKey)
 		}
 		
 		// Record intent confirmation in lifecycle

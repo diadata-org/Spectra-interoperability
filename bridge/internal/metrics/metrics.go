@@ -29,6 +29,7 @@ type Metrics struct {
 	TransactionFees           *prometheus.HistogramVec
 	
 	// Timeline metrics for Grafana dashboard
+	TimelinePhaseDuration       *prometheus.HistogramVec
 	BridgeProcessingDuration    *prometheus.HistogramVec
 	TransactionConfirmationTime *prometheus.HistogramVec
 	TotalDeliveryTime          *prometheus.HistogramVec
@@ -118,15 +119,20 @@ func NewMetrics() *Metrics {
 		}, []string{"chain", "contract_type"}),
 		
 		// Timeline metrics for Grafana dashboard
+		TimelinePhaseDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "oracle_bridge_timeline_phase_duration_seconds",
+			Help:    "Duration of each phase in the oracle intent lifecycle",
+			Buckets: []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600},
+		}, []string{"phase", "receiver_key"}),
 		BridgeProcessingDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "bridge_processing_duration_seconds",
 			Help:    "Time taken by the Bridge to process failover request",
-			Buckets: prometheus.DefBuckets,
+			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
 		}, []string{"chain", "destination_domain"}),
 		TransactionConfirmationTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "transaction_confirmation_duration_seconds",
 			Help:    "Time taken for transaction to be confirmed on-chain",
-			Buckets: prometheus.DefBuckets,
+			Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120},
 		}, []string{"chain", "destination_domain"}),
 		TotalDeliveryTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "hyperlane_total_delivery_time_seconds",
@@ -232,6 +238,11 @@ func (m *Metrics) RecordTimelinePhase(phase string, duration float64, chain, sou
 	case "confirmation":
 		m.TransactionConfirmationTime.WithLabelValues(chain, destDomain).Observe(duration)
 	}
+}
+
+// RecordTimelinePhaseDuration records phase duration with receiver key
+func (m *Metrics) RecordTimelinePhaseDuration(phase string, duration float64, receiverKey string) {
+	m.TimelinePhaseDuration.WithLabelValues(phase, receiverKey).Observe(duration)
 }
 
 // RecordTotalDeliveryTime records the total end-to-end delivery time

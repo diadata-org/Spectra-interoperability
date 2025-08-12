@@ -642,8 +642,21 @@ func (bs *EnhancedBlockScanner) Stop() error {
 
 // parseLog converts a raw log to EventData
 func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData, error) {
+	if len(log.Topics) == 0 {
+		return nil, fmt.Errorf("log has no topics")
+	}
+
+	// Get event signature from first topic
+	eventSig := log.Topics[0]
+	
+	// Find matching event definition
+	eventName, _ := bs.findEventDefinition(eventSig)
+	if eventName == "" {
+		return nil, fmt.Errorf("unknown event signature: %s", eventSig.Hex())
+	}
+
 	event := &bridgeTypes.EventData{
-		EventName:       "IntentRegistered",
+		EventName:       eventName,
 		ContractAddress: log.Address,
 		BlockNumber:     log.BlockNumber,
 		TxHash:          log.TxHash,
@@ -651,10 +664,66 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 		Raw:             log,
 	}
 
-	// Extract indexed data
+	// Parse event data based on event type
+	switch eventName {
+	case "IntentRegistered":
+		return bs.parseIntentRegisteredEvent(event, log)
+	case "IntArraySet":
+		return bs.parseIntArraySetEvent(event, log)
+	default:
+		return nil, fmt.Errorf("unsupported event type: %s", eventName)
+	}
+}
+
+// findEventDefinition finds the event definition that matches the given signature
+func (bs *EnhancedBlockScanner) findEventDefinition(eventSig common.Hash) (string, *config.EventDefinition) {
+	for eventName, eventDef := range bs.eventDefinitions {
+		// Calculate event signature from ABI
+		if calculatedSig := bs.calculateEventSignature(eventDef.ABI); calculatedSig == eventSig {
+			return eventName, eventDef
+		}
+	}
+	return "", nil
+}
+
+// calculateEventSignature calculates the keccak256 hash of the event signature
+func (bs *EnhancedBlockScanner) calculateEventSignature(eventABI string) common.Hash {
+	// Parse the event ABI to get the signature
+	var event struct {
+		Name   string `json:"name"`
+		Type   string `json:"type"`
+		Inputs []struct {
+			Name    string `json:"name"`
+			Type    string `json:"type"`
+			Indexed bool   `json:"indexed"`
+		} `json:"inputs"`
+	}
+	
+	if err := json.Unmarshal([]byte(eventABI), &event); err != nil {
+		logger.Warnf("Failed to parse ABI: %v", err)
+		return common.Hash{}
+	}
+	
+	// Build event signature string
+	var types []string
+	for _, input := range event.Inputs {
+		types = append(types, input.Type)
+	}
+	sigStr := fmt.Sprintf("%s(%s)", event.Name, strings.Join(types, ","))
+	
+	// Calculate signature hash
+	return crypto.Keccak256Hash([]byte(sigStr))
+}
+
+// parseIntentRegisteredEvent parses an IntentRegistered event
+func (bs *EnhancedBlockScanner) parseIntentRegisteredEvent(event *bridgeTypes.EventData, log types.Log) (*bridgeTypes.EventData, error) {
+	// Extract indexed data: intentHash (topics[1]), symbol (topics[2])
 	if len(log.Topics) > 1 {
 		event.IntentHash = [32]byte(log.Topics[1])
 	}
+	
+	// Symbol is indexed but as a string hash - we'll extract it later via enrichment
+	// For now, leave it empty
 
 	// Parse non-indexed data from log.Data
 	// The data contains: price (uint256), timestamp (uint256), signer (address)
@@ -664,8 +733,65 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 		event.Signer = common.BytesToAddress(log.Data[64:96])
 	}
 
-	// Symbol is indexed but as a string hash, we'll need to get it from the contract or leave empty
-	// For now, leave it empty and let the bridge fetch full event details if needed
+	return event, nil
+}
+
+// parseIntArraySetEvent parses an IntArraySet event
+func (bs *EnhancedBlockScanner) parseIntArraySetEvent(event *bridgeTypes.EventData, log types.Log) (*bridgeTypes.EventData, error) {
+	logger.Infof("[DEBUG] parseIntArraySetEvent called for tx %s at block %d", log.TxHash.Hex(), log.BlockNumber)
+	logger.Infof("[DEBUG] IntArraySet event topics: %v", log.Topics)
+	logger.Infof("[DEBUG] IntArraySet event data length: %d", len(log.Data))
+	
+	// IntArraySet event structure:
+	// - requestId (uint256) - non-indexed
+	// - round (int256) - indexed (topics[1])
+	// - seed (string) - non-indexed
+	// - signature (string) - non-indexed
+	
+	// Extract indexed data: round (topics[1])
+	if len(log.Topics) > 1 {
+		// Round is indexed as topics[1]
+		roundBytes := log.Topics[1][:]
+		event.Round = new(big.Int).SetBytes(roundBytes)
+		logger.Infof("[DEBUG] IntArraySet extracted round: %s", event.Round.String())
+	}
+
+	// Parse non-indexed data: requestId, seed, signature
+	// This requires proper ABI decoding since strings have dynamic length
+	if len(log.Data) > 0 {
+		// For now, we'll store the raw data and let the enrichment process decode it properly
+		// The enrichment will call getIntArray to get the full structured data
+		event.RawData = log.Data
+		
+		// Try to extract requestId from the beginning (first 32 bytes)
+		if len(log.Data) >= 32 {
+			event.RequestId = new(big.Int).SetBytes(log.Data[0:32])
+			logger.Infof("[DEBUG] IntArraySet extracted requestId: %s", event.RequestId.String())
+		}
+	}
+
+	// CRITICAL: IntArraySet events don't have IntentHash, use RequestId as unique identifier
+	if event.RequestId != nil {
+		// Convert RequestId to a hash-like format for database compatibility
+		requestIdBytes := event.RequestId.Bytes()
+		// Pad to 32 bytes if needed
+		if len(requestIdBytes) < 32 {
+			padded := make([]byte, 32)
+			copy(padded[32-len(requestIdBytes):], requestIdBytes)
+			copy(event.IntentHash[:], padded)
+		} else {
+			copy(event.IntentHash[:], requestIdBytes[:32])
+		}
+		logger.Infof("[DEBUG] IntArraySet using RequestId %s as IntentHash %x", event.RequestId.String(), event.IntentHash)
+	}
+
+	logger.Infof("[DEBUG] parseIntArraySetEvent completed successfully for RequestId: %s", 
+		func() string {
+			if event.RequestId != nil {
+				return event.RequestId.String()
+			}
+			return "nil"
+		}())
 
 	return event, nil
 }

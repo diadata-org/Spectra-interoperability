@@ -177,6 +177,14 @@ func CreateRouterFromConfig(cfg config.RouterConfig) (Router, error) {
 	case "composite":
 		return nil, fmt.Errorf("composite router not yet implemented")
 
+	case "generic":
+		// Create GenericRouter and wrap it to implement Router interface
+		genericRouter, err := NewGenericRouter(&cfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create generic router: %w", err)
+		}
+		return NewGenericRouterWrapper(genericRouter, destinations), nil
+
 	default:
 		return nil, fmt.Errorf("unknown router type: %s", cfg.Type)
 	}

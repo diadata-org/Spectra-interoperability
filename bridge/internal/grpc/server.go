@@ -80,7 +80,11 @@ func (s *Server) TriggerFailover(ctx context.Context, req *pb.FailoverRequest) (
 		"source":       req.SourceChainId,
 		"destination":  req.DestinationChainId,
 		"receiver":     req.ReceiverAddress,
-	}).Info("Received gRPC failover request")
+		"detection_timestamp": req.DetectionTimestamp,
+		"monitoring_start_timestamp": req.MonitoringStartTimestamp,
+		"failover_timestamp": req.FailoverTimestamp,
+		"receiver_key": req.ReceiverKey,
+	}).Info("Received gRPC failover request with phase timestamps")
 
 	// Validate request
 	if req.MessageId == "" {
@@ -98,14 +102,18 @@ func (s *Server) TriggerFailover(ctx context.Context, req *pb.FailoverRequest) (
 
 	// Create internal failover request
 	internalReq := api.FailoverRequest{
-		MessageID:          req.MessageId,
-		IntentHash:         req.IntentHash,
-		PairID:             req.PairId,
-		SourceChainID:      int(req.SourceChainId),
-		DestinationChainID: int(req.DestinationChainId),
-		ReceiverAddress:    req.ReceiverAddress,
-		IntentData:         intent,
-		Reason:             req.Reason,
+		MessageID:                req.MessageId,
+		IntentHash:               req.IntentHash,
+		PairID:                   req.PairId,
+		SourceChainID:            int(req.SourceChainId),
+		DestinationChainID:       int(req.DestinationChainId),
+		ReceiverAddress:          req.ReceiverAddress,
+		IntentData:               intent,
+		Reason:                   req.Reason,
+		DetectionTimestamp:       req.DetectionTimestamp,
+		MonitoringStartTimestamp: req.MonitoringStartTimestamp,
+		FailoverTimestamp:        req.FailoverTimestamp,
+		ReceiverKey:              req.ReceiverKey,
 	}
 
 	// Generate request ID
