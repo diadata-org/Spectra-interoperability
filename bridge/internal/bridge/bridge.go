@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -50,7 +52,7 @@ type Bridge struct {
 	workerPool *WorkerPool
 
 	// Router system
-	routerRegistry *router.Registry
+	routerRegistry *router.GenericRegistry
 
 	// Block scanner
 	blockScanner BlockScanner
@@ -132,8 +134,8 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	workerPool := NewWorkerPool(cfg.WorkerPool.MaxWorkers)
 
 	// Create router registry and load routers
-	routerRegistry := router.NewRegistry()
-	if err := routerRegistry.LoadFromConfig(cfg.Routers); err != nil {
+	routerRegistry := router.NewGenericRegistry()
+	if err := routerRegistry.LoadRouters(cfg.Routers); err != nil {
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
@@ -213,7 +215,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	// Initialize chain stats
 	bridge.initializeChainStats()
 
-	logger.Infof("Bridge initialized with %d routers", len(routerRegistry.GetAll()))
+	logger.Infof("Bridge initialized with %d routers", routerRegistry.Count())
 
 	return bridge, nil
 }
@@ -370,116 +372,9 @@ func (b *Bridge) Stop(ctx context.Context) error {
 
 // processIntentEvent processes a single IntentRegistered event
 func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.IntentRegisteredEvent) {
-	logger.Debugf("Processing intent event: %s for symbol %s", event.IntentHash.Hex(), event.Symbol)
-
-	// Get the full intent data
-	intent, err := b.registryClient.GetIntent(ctx, event.IntentHash)
-	if err != nil {
-		logger.Errorf("Failed to get intent %s: %v", event.IntentHash.Hex(), err)
-		return
-	}
-
-	// Check if intent has expired before routing
-	// currentTime := time.Now().Unix()
-	// if intent.Expiry.Int64() < currentTime {
-	// 	expiryTime := time.Unix(intent.Expiry.Int64(), 0)
-	// 	logger.Warnf("Skipping expired intent %s for %s: expired at %s (current: %s)",
-	// 		event.IntentHash.Hex(),
-	// 		intent.Symbol,
-	// 		expiryTime.Format(time.RFC3339),
-	// 		time.Unix(currentTime, 0).Format(time.RFC3339))
-
-	// 	if b.metricsTracker != nil {
-	// 		b.metricsTracker.RecordIntentFailed(intent, "routing", "intent_expired")
-	// 	}
-	// 	return // Skip expired intent
-	// }
-
-	// Track intent lifecycle start
-	if b.metricsTracker != nil {
-		b.metricsTracker.StartIntentLifecycle(intent, fmt.Sprintf("%d", b.config.Source.ChainID))
-	}
-
-	// Use routers to determine routing
-	routers := b.routerRegistry.GetActiveRouters()
-	if len(routers) == 0 {
-		logger.Warn("No active routers configured")
-		return
-	}
-
-	routedCount := 0
-	for _, r := range routers {
-		routerStart := time.Now()
-		shouldRoute, reason := r.ShouldRoute(intent)
-
-		// Track router decision
-		if b.metricsTracker != nil {
-			b.metricsTracker.RecordRouterDecision(r.ID(), intent, shouldRoute, reason, routerStart)
-		}
-
-		if !shouldRoute {
-			logger.Debugf("Router %s skipped: %s", r.ID(), reason)
-			continue
-		}
-
-		logger.Infof("Router %s approved for %s: %s", r.ID(), intent.Symbol, reason)
-
-		// Track processing start
-		if b.metricsTracker != nil {
-			b.metricsTracker.RecordIntentProcessing(intent, r.ID())
-		}
-
-		// Create update requests for router's destinations
-		for _, dest := range r.GetDestinations() {
-			destClient := b.destinationClients[dest.ChainID]
-			if destClient == nil {
-				logger.Warnf("Destination client not found for chain %d", dest.ChainID)
-				continue
-			}
-
-			// Create update request for each contract
-			for _, contractAddr := range dest.Contracts {
-				// Find contract config
-				var contractConfig *config.ContractConfig
-				for i := range destClient.config.Contracts {
-					if destClient.config.Contracts[i].Address == contractAddr {
-						contractConfig = &destClient.config.Contracts[i]
-						break
-					}
-				}
-
-				if contractConfig == nil {
-					logger.Warnf("Contract config not found for %s", contractAddr)
-					continue
-				}
-
-				updateReq := &bridgetypes.UpdateRequest{
-					Intent:           intent,
-					DestinationChain: destClient.config,
-					Contract:         contractConfig,
-					Priority:         1,
-					Retries:          0,
-					CreatedAt:        time.Now(),
-				}
-
-				select {
-				case b.updateChan <- updateReq:
-					routedCount++
-					logger.Debugf("Router %s: Queued update for %s on chain %d contract %s",
-						r.ID(), intent.Symbol, dest.ChainID, contractAddr)
-				default:
-					logger.Warnf("Update channel full, dropping request")
-				}
-			}
-		}
-
-		// Notify router that intent was processed
-		r.OnRouted(intent)
-	}
-
-	if routedCount > 0 {
-		logger.Infof("Routed intent %s to %d destinations", event.IntentHash.Hex(), routedCount)
-	}
+	logger.Debugf("Legacy processIntentEvent called for intent: %s - routing now handled by GenericEventProcessor", event.IntentHash.Hex())
+	// This function is now deprecated as routing is handled by the GenericEventProcessor
+	// using the new router system directly from event processing
 }
 
 // processUpdates processes update requests
@@ -493,8 +388,19 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 		case <-b.shutdownChan:
 			return
 		case updateReq := <-b.updateChan:
+			// Create task ID based on available data
+			var taskID string
+			if updateReq.Intent != nil {
+				taskID = fmt.Sprintf("%s-%d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
+			} else if updateReq.Event != nil {
+				// For events like IntArraySet that don't have Intent
+				taskID = fmt.Sprintf("%s-%d-%d", updateReq.Event.EventName, updateReq.DestinationChain.ChainID, time.Now().Unix())
+			} else {
+				taskID = fmt.Sprintf("unknown-%d-%d", updateReq.DestinationChain.ChainID, time.Now().Unix())
+			}
+			
 			b.workerPool.Submit(&WorkerTask{
-				ID:      fmt.Sprintf("%s-%d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID),
+				ID:      taskID,
 				Request: updateReq,
 				Handler: b.handleUpdateRequest,
 			})
@@ -510,63 +416,99 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		return fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
 	}
 
-	logger.Infof("Processing update for %s on chain %d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
+	// Get identifier for logging based on request type
+	var identifier string
+	if updateReq.Intent != nil {
+		identifier = updateReq.Intent.Symbol
+	} else if updateReq.Event != nil {
+		identifier = fmt.Sprintf("%s(requestId:%s)", updateReq.Event.EventName, updateReq.Event.RequestId.String())
+	} else {
+		identifier = "unknown"
+	}
+	
+	logger.Infof("Processing update for %s on chain %d", identifier, updateReq.DestinationChain.ChainID)
 
-	// Check if intent has expired before processing
-	currentTime := time.Now().Unix()
-	if updateReq.Intent.Expiry.Int64() < currentTime {
-		expiryTime := time.Unix(updateReq.Intent.Expiry.Int64(), 0)
-		logger.Warnf("Skipping expired intent for %s: expired at %s (current: %s)",
-			updateReq.Intent.Symbol,
-			expiryTime.Format(time.RFC3339),
-			time.Unix(currentTime, 0).Format(time.RFC3339))
+	// Check if intent has expired before processing (only for Intent-based requests)
+	if updateReq.Intent != nil {
+		currentTime := time.Now().Unix()
+		if updateReq.Intent.Expiry.Int64() < currentTime {
+			expiryTime := time.Unix(updateReq.Intent.Expiry.Int64(), 0)
+			logger.Warnf("Skipping expired intent for %s: expired at %s (current: %s)",
+				updateReq.Intent.Symbol,
+				expiryTime.Format(time.RFC3339),
+				time.Unix(currentTime, 0).Format(time.RFC3339))
 
-		if b.metricsTracker != nil {
-			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "validation", "intent_expired")
+			if b.metricsTracker != nil {
+				b.metricsTracker.RecordIntentFailed(updateReq.Intent, "validation", "intent_expired")
+			}
+			return nil // Skip expired intent
 		}
-		return nil // Skip expired intent
 	}
 
-	// Check if signer is authorized
-	logger.Infof("Checking signer authorization for %s on chain %d, contract %s",
-		updateReq.Intent.Signer.Hex(), updateReq.DestinationChain.ChainID,
-		destClient.receiverClient.GetAddress().Hex())
-	isAuthorized, err := destClient.receiverClient.IsAuthorizedSigner(ctx, updateReq.Intent.Signer)
-	if err != nil {
-		logger.Errorf("Failed to check signer authorization: %v", err)
-		return fmt.Errorf("failed to check signer authorization: %w", err)
-	}
-	if !isAuthorized {
-		logger.Errorf("Signer %s is not authorized on contract %s",
-			updateReq.Intent.Signer.Hex(), destClient.receiverClient.GetAddress().Hex())
-		return fmt.Errorf("signer %s is not authorized", updateReq.Intent.Signer.Hex())
-	}
-	logger.Infof("Signer %s is authorized", updateReq.Intent.Signer.Hex())
+	// Check if signer is authorized (only for Intent-based requests with actual signers)
+	if updateReq.Intent != nil && updateReq.Intent.Signer != (common.Address{}) {
+		logger.Infof("Checking signer authorization for %s on chain %d, contract %s",
+			updateReq.Intent.Signer.Hex(), updateReq.DestinationChain.ChainID,
+			destClient.receiverClient.GetAddress().Hex())
+		isAuthorized, err := destClient.receiverClient.IsAuthorizedSigner(ctx, updateReq.Intent.Signer)
+		if err != nil {
+			logger.Errorf("Failed to check signer authorization: %v", err)
+			return fmt.Errorf("failed to check signer authorization: %w", err)
+		}
+		if !isAuthorized {
+			logger.Errorf("Signer %s is not authorized on contract %s",
+				updateReq.Intent.Signer.Hex(), destClient.receiverClient.GetAddress().Hex())
+			return fmt.Errorf("signer %s is not authorized", updateReq.Intent.Signer.Hex())
+		}
+		logger.Infof("Signer %s is authorized", updateReq.Intent.Signer.Hex())
 
-	// Get gas price
+		// Get gas price
+		gasPrice, err := b.getGasPrice(ctx, destClient)
+		if err != nil {
+			return fmt.Errorf("failed to get gas price: %w", err)
+		}
+
+		// Update auth
+		logger.Infof("Updating auth for symbol %s on chain %d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
+		if err := destClient.receiverClient.UpdateAuth(ctx, gasPrice); err != nil {
+			return fmt.Errorf("failed to update auth: %w", err)
+		}
+	} else {
+		logger.Infof("Skipping authorization check for non-signer request: %s", identifier)
+	}
+
+	// Get gas price for transaction
 	gasPrice, err := b.getGasPrice(ctx, destClient)
 	if err != nil {
 		return fmt.Errorf("failed to get gas price: %w", err)
 	}
 
-	// Update auth
-	logger.Infof("Updating auth for symbol %s on chain %d", updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
-	if err := destClient.receiverClient.UpdateAuth(ctx, gasPrice); err != nil {
-		return fmt.Errorf("failed to update auth: %w", err)
+	// Send transaction using router method configuration or fallback to legacy
+	var tx *types.Transaction
+	if updateReq.DestinationMethodConfig != nil {
+		// Use router-specified method (e.g., fulfillRandomInt for randomness)
+		gasLimit := uint64(300000) // Default
+		if updateReq.DestinationMethodConfig.GasLimit > 0 {
+			gasLimit = uint64(updateReq.DestinationMethodConfig.GasLimit)
+		}
+		
+		logger.Infof("Sending transaction for %s on chain %d using method %s with gas limit %d", 
+			identifier, updateReq.DestinationChain.ChainID, updateReq.DestinationMethodConfig.Name, gasLimit)
+		
+		tx, err = b.callRouterMethod(ctx, destClient, updateReq, gasPrice, gasLimit)
+	} else {
+		// Fallback to legacy HandleIntentUpdate for oracle intents
+		logger.Infof("Sending transaction for %s on chain %d with gas limit 300000 (legacy)", identifier, updateReq.DestinationChain.ChainID)
+		tx, err = destClient.receiverClient.HandleIntentUpdate(
+			ctx,
+			updateReq.Intent,
+			300000, // Default gas limit (would need to be per-contract in production)
+			gasPrice,
+		)
 	}
-
-	// Send transaction
-	logger.Infof("Sending transaction for symbol %s on chain %d with gas limit 300000",
-		updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
-	tx, err := destClient.receiverClient.HandleIntentUpdate(
-		ctx,
-		updateReq.Intent,
-		300000, // Default gas limit (would need to be per-contract in production)
-		gasPrice,
-	)
 	if err != nil {
 		// Log intent details for debugging
-		if strings.Contains(err.Error(), "simulation failed") {
+		if strings.Contains(err.Error(), "simulation failed") && updateReq.Intent != nil {
 			logger.Errorf("Intent details that failed simulation: symbol=%s, price=%s, timestamp=%s, nonce=%s, expiry=%s, signer=%s",
 				updateReq.Intent.Symbol,
 				updateReq.Intent.Price.String(),
@@ -575,13 +517,13 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 				updateReq.Intent.Expiry.String(),
 				updateReq.Intent.Signer.Hex())
 		}
-		if b.metricsTracker != nil {
+		if b.metricsTracker != nil && updateReq.Intent != nil {
 			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "submission", "transaction_failed")
 		}
 		return fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	logger.Infof("Transaction sent: %s for %s on chain %d", tx.Hash().Hex(), updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID)
+	logger.Infof("Transaction sent: %s for %s on chain %d", tx.Hash().Hex(), identifier, updateReq.DestinationChain.ChainID)
 
 	// Add a defer to catch any panics
 	defer func() {
@@ -591,7 +533,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	}()
 
 	// Track submission
-	if b.metricsTracker != nil {
+	if b.metricsTracker != nil && updateReq.Intent != nil {
 		logger.Debugf("Recording intent submission for tx %s", tx.Hash().Hex())
 		b.metricsTracker.RecordIntentSubmitted(
 			updateReq.Intent,
@@ -607,31 +549,106 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	// Wait for transaction receipt
 	receipt, err := b.waitForReceipt(ctx, destClient.client, tx.Hash())
 	if err != nil {
-		if b.metricsTracker != nil {
+		if b.metricsTracker != nil && updateReq.Intent != nil {
 			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "confirmation", "receipt_timeout")
 		}
 		return fmt.Errorf("failed to get transaction receipt: %w", err)
 	}
 
 	if receipt.Status == 0 {
-		if b.metricsTracker != nil {
+		if b.metricsTracker != nil && updateReq.Intent != nil {
 			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "confirmation", "transaction_reverted")
 		}
 		return fmt.Errorf("transaction failed: %s", tx.Hash().Hex())
 	}
 
 	// Track confirmation
-	if b.metricsTracker != nil {
+	if b.metricsTracker != nil && updateReq.Intent != nil {
 		b.metricsTracker.RecordIntentConfirmed(updateReq.Intent, tx.Hash().Hex(), receipt.GasUsed)
 	}
 
 	// Update last update time
-	destClient.updateLastUpdate(updateReq.Intent.Symbol)
+	if updateReq.Intent != nil {
+		destClient.updateLastUpdate(updateReq.Intent.Symbol)
+	}
 
 	logger.Infof("Successfully updated %s on chain %d, gas used: %d",
-		updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID, receipt.GasUsed)
+		identifier, updateReq.DestinationChain.ChainID, receipt.GasUsed)
 
 	return nil
+}
+
+// callRouterMethod calls a contract method using router configuration
+func (b *Bridge) callRouterMethod(ctx context.Context, destClient *DestinationClient, updateReq *bridgetypes.UpdateRequest, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+	methodConfig := updateReq.DestinationMethodConfig
+	
+	// Build method parameters from router configuration
+	params, err := b.buildMethodParams(methodConfig, updateReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build method params: %w", err)
+	}
+	
+	// Call the contract method
+	return b.callContractMethod(ctx, destClient, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit)
+}
+
+// buildMethodParams builds method parameters from router configuration
+func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig, updateReq *bridgetypes.UpdateRequest) ([]interface{}, error) {
+	var params []interface{}
+	
+	// For fulfillRandomInt method, we need requestId and randomInts
+	if methodConfig.Name == "fulfillRandomInt" {
+		// Get requestId from event
+		if updateReq.Event != nil && updateReq.Event.RequestId != nil {
+			params = append(params, updateReq.Event.RequestId)
+		} else {
+			return nil, fmt.Errorf("requestId not found in event data")
+		}
+		
+		// Get randomInts from enrichment data
+		if updateReq.ExtractedData != nil && updateReq.ExtractedData.Enrichment != nil {
+			if randomInts, exists := updateReq.ExtractedData.Enrichment["randomInts"]; exists {
+				params = append(params, randomInts)
+			} else {
+				return nil, fmt.Errorf("randomInts not found in enrichment data")
+			}
+		} else {
+			return nil, fmt.Errorf("enrichment data not available")
+		}
+	} else {
+		return nil, fmt.Errorf("unsupported method: %s", methodConfig.Name)
+	}
+	
+	return params, nil
+}
+
+// callContractMethod calls a generic contract method
+func (b *Bridge) callContractMethod(ctx context.Context, destClient *DestinationClient, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+	// Parse the method ABI
+	parsedABI, err := abi.JSON(strings.NewReader(fmt.Sprintf(`[%s]`, abiJSON)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse method ABI: %w", err)
+	}
+	
+	// Verify the method exists
+	if _, exists := parsedABI.Methods[methodName]; !exists {
+		return nil, fmt.Errorf("method %s not found in ABI", methodName)
+	}
+	
+	// Get auth transactor
+	auth := destClient.receiverClient.GetAuth()
+	auth.GasLimit = gasLimit
+	auth.GasPrice = gasPrice
+	auth.Context = ctx
+	
+	// Create transaction
+	contractAddress := destClient.receiverClient.GetAddress()
+	tx, err := bind.NewBoundContract(contractAddress, parsedABI, destClient.client, destClient.client, destClient.client).Transact(auth, methodName, params...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send transaction: %w", err)
+	}
+	
+	return tx, nil
 }
 
 // updateLastUpdate updates the last update time for a symbol
@@ -725,7 +742,7 @@ func (b *Bridge) initializeChainStats() {
 }
 
 // GetRouterRegistry returns the router registry
-func (b *Bridge) GetRouterRegistry() *router.Registry {
+func (b *Bridge) GetRouterRegistry() *router.GenericRegistry {
 	return b.routerRegistry
 }
 

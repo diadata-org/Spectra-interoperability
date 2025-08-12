@@ -15,5 +15,5 @@ type GenericRouterInterface interface {
 	BuildUpdateRequest(eventName string, data *config.ExtractedData, dest config.RouterDestination) (*types.UpdateRequest, error)
 	ProcessingConfig() *config.ProcessingConfig
 	OnRouted(eventName string, data *config.ExtractedData)
-	GetStats() RouterStats
+	GetStats() GenericRouterStats
 }

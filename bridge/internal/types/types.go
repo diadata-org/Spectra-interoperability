@@ -259,6 +259,11 @@ type UpdateRequest struct {
 	Priority         int                       `json:"priority"`
 	Retries          int                       `json:"retries"`
 	CreatedAt        time.Time                 `json:"created_at"`
+	
+	// New router system fields
+	RouterID                string                           `json:"router_id,omitempty"`
+	DestinationMethodConfig *config.DestinationMethodConfig `json:"destination_method_config,omitempty"`
+	ExtractedData           *config.ExtractedData           `json:"extracted_data,omitempty"`
 }
 
 // UpdateResult represents the result of an update operation

@@ -518,6 +518,11 @@ func (r *ReceiverClient) GetAddress() common.Address {
 	return r.address
 }
 
+// GetAuth returns the transactor auth
+func (r *ReceiverClient) GetAuth() *bind.TransactOpts {
+	return r.auth
+}
+
 // GetFromAddress returns the transaction sender address
 func (r *ReceiverClient) GetFromAddress() common.Address {
 	return r.auth.From

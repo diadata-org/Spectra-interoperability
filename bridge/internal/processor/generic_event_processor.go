@@ -29,7 +29,7 @@ type GenericEventProcessor struct {
 	eventDefs       map[string]*config.EventDefinition
 	destinations    map[int64]*config.DestinationConfig
 	db              *database.DB
-	routerRegistry  *router.Registry
+	routerRegistry  *router.GenericRegistry
 	sourceClient    *ethclient.Client
 	destClients     map[int64]*ethclient.Client
 	
@@ -57,7 +57,7 @@ func NewGenericEventProcessor(
 	eventDefs map[string]*config.EventDefinition,
 	destinations map[int64]*config.DestinationConfig,
 	db *database.DB,
-	routerRegistry *router.Registry,
+	routerRegistry *router.GenericRegistry,
 	sourceClient *ethclient.Client,
 	destClients map[int64]*ethclient.Client,
 	eventChan <-chan *types.EventData,
@@ -202,20 +202,73 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 		}
 	}
 	
-	routersUsed := 0
+	// Use new router system - route events directly
+	routingResults := gep.routerRegistry.RouteEvent(event.EventName, extractedData)
 	
-	if extractedData.Enrichment != nil && extractedData.Enrichment["fullIntent"] != nil {
-		logger.Debugf("Enriched data type: %T, value: %+v", extractedData.Enrichment["fullIntent"], extractedData.Enrichment["fullIntent"])
-		
-		intent, err := gep.convertToOracleIntent(extractedData.Enrichment["fullIntent"])
-		if err != nil {
-			logger.Errorf("Failed to convert enriched data to intent: %v", err)
+	routersUsed := 0
+	for _, result := range routingResults {
+		if result.Routed {
+			logger.Infof("Router %s approved event %s: %s", result.RouterID, event.EventName, result.Reason)
+			
+			// Process destinations for this router
+			for _, dest := range result.Destinations {
+				destConfig, exists := gep.destinations[dest.ChainID]
+				if !exists || destConfig == nil {
+					logger.Warnf("Destination config not found for chain %d", dest.ChainID)
+					continue
+				}
+				
+				// Find contract config
+				var contractConfig *config.ContractConfig
+				for i := range destConfig.Contracts {
+					if destConfig.Contracts[i].Address == dest.Contract {
+						contractConfig = &destConfig.Contracts[i]
+						break
+					}
+				}
+				
+				if contractConfig == nil {
+					logger.Warnf("Contract config not found for %s", dest.Contract)
+					continue
+				}
+				
+				// Create update request using the router's method configuration
+				updateReq := &types.UpdateRequest{
+					ID:        fmt.Sprintf("%s-%s-%d", result.RouterID, event.EventName, time.Now().Unix()),
+					Event:     event,
+					DestinationChain: destConfig,
+					Contract:         contractConfig,
+					Priority:         1,
+					Retries:          0,
+					CreatedAt:        time.Now(),
+					RouterID:         result.RouterID,
+					DestinationMethodConfig: &dest.Method,
+					ExtractedData:    extractedData,
+				}
+				
+				// For IntArraySet events, create a minimal Intent structure for compatibility
+				if event.EventName == "IntArraySet" && updateReq.Intent == nil {
+					updateReq.Intent = &types.OracleIntent{
+						Symbol:    fmt.Sprintf("RandomRequest-%s", event.RequestId.String()),
+						Signer:    common.Address{}, // No signer required for randomness
+						Expiry:    big.NewInt(time.Now().Add(24*time.Hour).Unix()), // 24h expiry
+					}
+				}
+				
+				select {
+				case gep.updateChan <- updateReq:
+					routersUsed++
+					logger.Infof("Queued update for event %s via router %s to chain %d contract %s", 
+						event.EventName, result.RouterID, dest.ChainID, dest.Contract)
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					logger.Warnf("Update channel full, dropping request for router %s", result.RouterID)
+				}
+			}
 		} else {
-			gep.processWithRouters(ctx, intent, event)
-			routersUsed++
+			logger.Debugf("Router %s skipped event %s: %s", result.RouterID, event.EventName, result.Reason)
 		}
-	} else {
-		logger.Debugf("No enriched intent data available for event %s", event.EventName)
 	}
 	
 	if routersUsed == 0 {
@@ -472,66 +525,3 @@ func (gep *GenericEventProcessor) convertStructToIntent(data interface{}) (*type
 	return intent, nil
 }
 
-// processWithRouters processes an intent through the existing router system
-func (gep *GenericEventProcessor) processWithRouters(ctx context.Context, intent *types.OracleIntent, event *types.EventData) {
-	routers := gep.routerRegistry.GetActiveRouters()
-	if len(routers) == 0 {
-		logger.Warn("No active routers configured")
-		return
-	}
-	
-	for _, r := range routers {
-		shouldRoute, reason := r.ShouldRoute(intent)
-		if !shouldRoute {
-			logger.Debugf("Router %s skipped: %s", r.ID(), reason)
-			continue
-		}
-		
-		logger.Infof("Router %s approved for %s: %s", r.ID(), intent.Symbol, reason)
-		
-		destinations := r.GetDestinations()
-		for _, dest := range destinations {
-			destConfig, exists := gep.destinations[dest.ChainID]
-			if !exists || destConfig == nil {
-				logger.Warnf("Destination config not found for chain %d", dest.ChainID)
-				continue
-			}
-			
-			for _, contractAddr := range dest.Contracts {
-				var contractConfig *config.ContractConfig
-				for i := range destConfig.Contracts {
-					if destConfig.Contracts[i].Address == contractAddr {
-						contractConfig = &destConfig.Contracts[i]
-						break
-					}
-				}
-				
-				if contractConfig == nil {
-					logger.Warnf("Contract config not found for %s", contractAddr)
-					continue
-				}
-				
-				updateReq := &types.UpdateRequest{
-					Intent:           intent,
-					DestinationChain: destConfig,
-					Contract:         contractConfig,
-					Priority:         1,
-					Retries:          0,
-					CreatedAt:        time.Now(),
-				}
-				
-				select {
-				case gep.updateChan <- updateReq:
-					logger.Infof("Queued update for %s on chain %d contract %s", 
-						intent.Symbol, dest.ChainID, contractAddr)
-				case <-ctx.Done():
-					return
-				default:
-					logger.Warnf("Update channel full, dropping request")
-				}
-			}
-		}
-		
-		r.OnRouted(intent)
-	}
-}
