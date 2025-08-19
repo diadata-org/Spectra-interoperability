@@ -351,22 +351,22 @@ contract RequestOracleTest is Test {
 
     function test_removeFromWhitelist_Success() public {
         uint32 origin = 1;
-        address receiver = address(0x123);
+        address testReceiver = address(0x123);
 
         // Add to whitelist first
         vm.prank(owner);
-        requestOracle.addToWhitelist(origin, receiver);
-        assertTrue(requestOracle.whitelistedReceivers(origin, receiver));
+        requestOracle.addToWhitelist(origin, testReceiver);
+        assertTrue(requestOracle.whitelistedReceivers(origin, testReceiver));
 
         // Remove from whitelist and check event
         vm.prank(owner);
         vm.expectEmit(true, true, false, true);
-        emit RequestOracle.WhitelistUpdated(origin, receiver, false);
+        emit RequestOracle.WhitelistUpdated(origin, testReceiver, false);
 
-        requestOracle.removeFromWhitelist(origin, receiver);
+        requestOracle.removeFromWhitelist(origin, testReceiver);
 
         // Confirm removal
-        assertFalse(requestOracle.whitelistedReceivers(origin, receiver));
+        assertFalse(requestOracle.whitelistedReceivers(origin, testReceiver));
     }
 }
 
