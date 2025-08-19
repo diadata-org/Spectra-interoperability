@@ -7,11 +7,6 @@ import { IMailbox } from "./interfaces/IMailbox.sol";
 import { IOracleTrigger } from "./interfaces/oracle/IOracleTrigger.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
 
-interface IDIAOracleV2 {
-    function getValue(
-        string memory key
-    ) external view returns (uint128, uint128);
-}
 
 // Interface for OracleIntentRegistry
 interface IOracleIntentRegistry {
@@ -152,6 +147,34 @@ contract OracleTrigger is
         emit IntentRegistryContractUpdated(newRegistry);
     }
 
+    function _getLatestIntent(string memory key) internal view returns (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash)  {
+        address registry = intentRegistryContract;
+        if (registry == address(0)) revert InvalidAddress();
+        
+        IOracleIntentRegistry registryContract = IOracleIntentRegistry(registry);
+        
+        intentHash = registryContract.latestIntentBySymbol(key);
+        if (intentHash == bytes32(0)) revert OracleError(key);
+
+        intent = registryContract.getIntent(intentHash);
+    }
+
+    function _encodeIntentMessage(IOracleIntentRegistry.OracleIntent memory intent) internal pure returns (bytes memory) {
+        return abi.encode(
+            intent.intentType,
+            intent.version,
+            intent.chainId,
+            intent.nonce,
+            intent.expiry,
+            intent.symbol,
+            intent.price,
+            intent.timestamp,
+            intent.source,
+            intent.signature,
+            intent.signer
+        );
+    }
+
     /**
      * @dev See {IOracleTrigger-dispatchToChain}.
      * @notice Now gets the latest intent from the registry and sends it as the message
@@ -167,30 +190,9 @@ contract OracleTrigger is
         validateAddress(mailBox)
         nonReentrant
     {
-        // Get the latest intent from the registry
-        if (intentRegistryContract == address(0)) revert InvalidAddress();
-        
-        // Get the latest intent hash for the symbol
-        bytes32 intentHash = IOracleIntentRegistry(intentRegistryContract).latestIntentBySymbol(key);
-        if (intentHash == bytes32(0)) revert OracleError(key);
-        
-        // Get the intent details
-        IOracleIntentRegistry.OracleIntent memory intent = IOracleIntentRegistry(intentRegistryContract).getIntent(intentHash);
-        
-        // Encode the intent as the message body
-        bytes memory messageBody = abi.encode(
-            intent.intentType,
-            intent.version,
-            intent.chainId,
-            intent.nonce,
-            intent.expiry,
-            intent.symbol,
-            intent.price,
-            intent.timestamp,
-            intent.source,
-            intent.signature,
-            intent.signer
-        );
+        (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(key);
+
+        bytes memory messageBody = _encodeIntentMessage(intent);
 
         address recipient = chains[_destinationDomain];
 
@@ -219,30 +221,9 @@ contract OracleTrigger is
         validateAddress(mailBox)
         validateAddress(recipientAddress)
     {
-        // Get the latest intent from the registry
-        if (intentRegistryContract == address(0)) revert InvalidAddress();
-        
-        // Get the latest intent hash for the symbol
-        bytes32 intentHash = IOracleIntentRegistry(intentRegistryContract).latestIntentBySymbol(key);
-        if (intentHash == bytes32(0)) revert OracleError(key);
-        
-        // Get the intent details
-        IOracleIntentRegistry.OracleIntent memory intent = IOracleIntentRegistry(intentRegistryContract).getIntent(intentHash);
-        
-        // Encode the intent as the message body
-        bytes memory messageBody = abi.encode(
-            intent.intentType,
-            intent.version,
-            intent.chainId,
-            intent.nonce,
-            intent.expiry,
-            intent.symbol,
-            intent.price,
-            intent.timestamp,
-            intent.source,
-            intent.signature,
-            intent.signer
-        );
+        (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(key);
+
+        bytes memory messageBody = _encodeIntentMessage(intent);
 
         bytes32 messageId = IMailbox(mailBox).dispatch{ value: msg.value }(
             _destinationDomain,
@@ -290,24 +271,7 @@ contract OracleTrigger is
         return intentRegistryContract;
     }
 
-    /**
-     * @notice Fetches value from the oracle.
-     * @param key The oracle key to query.
-     */
-    function _getOracleValue(
-        string memory key
-    ) internal view returns (uint128, uint128) {
-        if (metadataContract == address(0)) revert InvalidAddress();
 
-        try IDIAOracleV2(metadataContract).getValue(key) returns (
-            uint128 value,
-            uint128 timestamp
-        ) {
-            return (value, timestamp);
-        } catch {
-            revert OracleError(key);
-        }
-    }
     
     // Event for intent registry updates
     event IntentRegistryContractUpdated(address indexed newRegistry);
