@@ -2,10 +2,11 @@
 pragma solidity 0.8.29;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { IPushOracleReceiverV2 } from "./interfaces/oracle/IPushOracleReceiverV2.sol";
 import { IInterchainSecurityModule } from "./interfaces/IInterchainSecurityModule.sol";
 import { ProtocolFeeHook } from "./ProtocolFeeHook.sol";
-import { TypeCasts } from "./libs/TypeCasts.sol";
+import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
 
 /**
  * @title PushOracleReceiverV2
@@ -36,8 +37,7 @@ import { TypeCasts } from "./libs/TypeCasts.sol";
  * - The oracle trigger address must be whitelisted in the ISM (Interchain Security Module) of PushOracleReceiver.
  * - Intent-based updates must be signed by authorized signers.
  */
-contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
-    using TypeCasts for address;
+contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard {
 
     /// @notice Reference to the interchain security module
     IInterchainSecurityModule public interchainSecurityModule;
@@ -57,13 +57,14 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
     /// @notice Mapping to track processed intents
     mapping(bytes32 => bool) public processedIntents;
     
+    /// @notice When each intent was processed (block timestamp)
+    mapping(bytes32 => uint64) public processedAt;
+    
     /// @notice EIP-712 domain separator
     bytes32 private immutable DOMAIN_SEPARATOR;
-    
-    /// @notice EIP-712 type hash (must match OracleIntentRegistry)
-    bytes32 private constant ORACLE_INTENT_TYPEHASH = keccak256(
-        "OracleIntent(string intentType,string version,uint256 chainId,uint256 nonce,uint256 expiry,string symbol,uint256 price,uint256 timestamp,string source)"
-    );
+
+    /// @notice Validation status for intent checks used to avoid logic duplication
+    enum ValidationStatus { Ok, Expired, UnauthorizedSigner, AlreadyProcessed, InvalidSignature }
 
     /// @notice Error thrown when an ISM is not set (zero address) is used.
     error InvalidISMAddress();
@@ -88,160 +89,90 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
         uint256 _sourceChainId,
         address _verifyingContract
     ) {
-        // Create the EIP-712 domain separator with provided parameters
-        DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)"),
-                keccak256(bytes(_domainName)),
-                keccak256(bytes(_domainVersion)),
-                _sourceChainId,
-                _verifyingContract,
-                bytes32(0)
-            )
+        // Validate constructor parameters
+        if (bytes(_domainName).length == 0) revert InvalidAddress(); // Reusing existing error for simplicity
+        if (bytes(_domainVersion).length == 0) revert InvalidAddress();
+        if (_sourceChainId == 0) revert InvalidAddress();
+        if (_verifyingContract == address(0)) revert InvalidAddress();
+        
+        // Create the EIP-712 domain separator using shared library
+        DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
+            _domainName,
+            _domainVersion,
+            _sourceChainId,
+            _verifyingContract
         );
     }
 
     /**
-     * @dev See {IPushOracleReceiver-handle}.
-     * @notice Handles both legacy format (key, timestamp, value) and new intent format
+     * @dev See {IPushOracleReceiverV2-handle}.
+     * @notice Handles both ISM-validated format (key, timestamp, value) and new intent format
      */
     /* solhint-disable no-unused-vars */
     function handle(
         uint32 /* _origin */,
         bytes32 /* _sender */,
         bytes calldata _data
-    ) external payable override validateAddress(paymentHook) {
+    ) external payable override validateAddress(paymentHook) nonReentrant {
         if (msg.sender != trustedMailBox) revert UnauthorizedMailbox();
         if (address(interchainSecurityModule) == address(0))
             revert InvalidISMAddress();
 
-        // Try to decode as intent format first (new format)
-        try this.handleIntentMessage(_data) {
-            // Intent format handled successfully
-            return;
-        } catch {
-            // Fall back to legacy format
-            _handleLegacyMessage(_data);
+        // Try to detect format using library function - no hardcoded assumptions
+        if (OracleIntentUtils.isIntentFormat(_data)) {
+            _handleIntentMessage(_data);
+        } else {
+            _handleISMValidatedMessage(_data);
         }
     }
     
+
     /**
-     * @notice Handles intent-based messages from the mailbox
+     * @notice Handles intent-based messages from the mailbox (internal)
      * @param _data The encoded intent data
      * @dev This function processes intents sent via the mailbox from OracleTrigger
      */
-    function handleIntentMessage(bytes calldata _data) external {
-        // Only allow calls from this contract (via handle function)
-        // if (msg.sender != address(this)) revert UnauthorizedMailbox(); // Removed to allow direct calls
-        
+    function _handleIntentMessage(bytes calldata _data) internal {
         // Decode the intent data
-        (
-            string memory intentType,
-            string memory version,
-            uint256 chainId,
-            uint256 nonce,
-            uint256 expiry,
-            string memory symbol,
-            uint256 price,
-            uint256 timestamp,
-            string memory source,
-            bytes memory signature,
-            address signer
-        ) = abi.decode(_data, (string, string, uint256, uint256, uint256, string, uint256, uint256, string, bytes, address));
+        OracleIntentUtils.OracleIntent memory intent = _decodeIntentData(_data);
         
-        // Verify the signer is authorized
-        if (!authorizedSigners[signer]) revert UnauthorizedSigner();
+        // Use unified validation logic
+        bytes32 intentHash = _validateIntentCommonFromMemory(intent);
         
-        // Check if the intent has expired
-        if (block.timestamp > expiry) revert IntentExpired();
-        
-        // Create the OracleIntent structure
-        OracleIntent memory intent = OracleIntent({
-            intentType: intentType,
-            version: version,
-            chainId: chainId,
-            nonce: nonce,
-            expiry: expiry,
-            symbol: symbol,
-            price: price,
-            timestamp: timestamp,
-            source: source,
-            signature: signature,
-            signer: signer
-        });
-        
-        // Create the intent hash for EIP-712 verification (same as OracleIntentRegistry)
-        bytes32 structHash = keccak256(
-            abi.encode(
-                ORACLE_INTENT_TYPEHASH,
-                keccak256(bytes(intent.intentType)),
-                keccak256(bytes(intent.version)),
-                intent.chainId,
-                intent.nonce,
-                intent.expiry,
-                keccak256(bytes(intent.symbol)),
-                intent.price,
-                intent.timestamp,
-                keccak256(bytes(intent.source))
-            )
-        );
-        
-        // Create the EIP-712 hash
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                DOMAIN_SEPARATOR,
-                structHash
-            )
-        );
-        
-        // Check if this intent has already been processed
-        if (processedIntents[hash]) revert IntentAlreadyProcessed();
-        
-        // Verify the signature (same as OracleIntentRegistry)
-        if (recoverSigner(hash, intent.signature) != intent.signer) revert InvalidSignature();
-        
-        // Mark the intent as processed
-        processedIntents[hash] = true;
-        
-        // Convert timestamp to uint128 for storage compatibility
-        uint128 timestampU128 = uint128(intent.timestamp);
-        
-        // Ensure the new timestamp is more recent
-        if (updates[intent.symbol].timestamp >= timestampU128) {
-            return; // Ignore outdated data
-        }
-
-        // Update the stored oracle data
-        Data memory newData = Data({ 
-            timestamp: timestampU128, 
-            value: uint128(intent.price) 
-        });
-        updates[intent.symbol] = newData;
-
-        emit IntentBasedUpdateReceived(hash, intent.symbol, intent.price, intent.timestamp, intent.signer);
+        // Mark as processed and update data
+        processedIntents[intentHash] = true;
+        processedAt[intentHash] = uint64(block.timestamp);
+        _updateOracleDataUnified(intent.symbol, intent.price, intent.timestamp, intentHash, intent.signer);
         
         // Calculate and transfer the protocol fee
         _transferProtocolFee();
     }
     
     /**
-     * @notice Handles legacy format messages (backward compatibility)
-     * @param _data The encoded legacy data (key, timestamp, value)
+     * @notice Handles ISM-validated messages (backward compatibility)
+     * @param _data The encoded oracle data (key, timestamp, value)
+     * @dev This function processes messages that have already passed ISM security validation
+     * including cross-chain authenticity, sender authorization, and message integrity checks
      */
-    function _handleLegacyMessage(bytes calldata _data) internal {
-        // Decode the incoming data into its respective components.
+    function _handleISMValidatedMessage(bytes calldata _data) internal {
+        // At this point, ISM has validated:
+        // 1. Message came from trusted source chain
+        // 2. Message passed ISM security checks  
+        // 3. Sender is authorized at the ISM level
+        // 4. Message integrity is verified
+        
+        // Decode the incoming data into its respective components
         (string memory key, uint128 timestamp, uint128 value) = abi.decode(
             _data,
             (string, uint128, uint128)
         );
 
-        // Ensure the new timestamp is more recent
+        // Ensure the new timestamp is more recent (freshness validation)
         if (updates[key].timestamp >= timestamp) {
             return; // Ignore outdated data
         }
 
-        // Update the stored oracle data
+        // Update the stored oracle data - we can trust this data due to ISM validation
         Data memory newData = Data({ timestamp: timestamp, value: value });
         updates[key] = newData;
 
@@ -255,10 +186,16 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
      * @notice Calculates and transfers the protocol fee
      */
     function _transferProtocolFee() internal {
-        // Calculate the transaction fee based on gas used and gas price.
+        // Calculate the transaction fee based on gas used and gas price with overflow protection
         uint256 gasPrice = tx.gasprice;
-        uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
-            gasPrice;
+        uint256 gasUsed = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx();
+        
+        // Prevent overflow in fee calculation
+        if (gasUsed > type(uint256).max / gasPrice) {
+            revert AmountTransferFailed(); // Fee calculation would overflow
+        }
+        
+        uint256 fee = gasUsed * gasPrice;
 
         // Transfer the fee to the payment hook.
         bool success;
@@ -268,7 +205,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
 
         if (!success) revert AmountTransferFailed();
     }
-    /* solhint-disable no-unused-vars */
 
     /**
      * @notice Handles oracle updates from intent-based sources
@@ -276,76 +212,13 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
      * @dev External services can call this function directly with properly signed intents
      */
     function handleIntentUpdate(
-        OracleIntent calldata intent
-    ) external payable override validateAddress(paymentHook) {
-
+        OracleIntentUtils.OracleIntent calldata intent
+    ) external payable override validateAddress(paymentHook) nonReentrant {
+        // Process single intent with revert-on-failure behavior
+        _processIntent(intent, true);
         
-        // Verify the signer is authorized
-        if (!authorizedSigners[intent.signer]) revert UnauthorizedSigner();
-        
-        // Create the intent hash for EIP-712
-        bytes32 structHash = keccak256(
-            abi.encode(
-                ORACLE_INTENT_TYPEHASH,
-                keccak256(bytes(intent.intentType)),
-                keccak256(bytes(intent.version)),
-                intent.chainId,
-                intent.nonce,
-                intent.expiry,
-                keccak256(bytes(intent.symbol)),
-                intent.price,
-                intent.timestamp,
-                keccak256(bytes(intent.source))
-            )
-        );
-        
-        // Create the EIP-712 hash
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                DOMAIN_SEPARATOR,
-                structHash
-            )
-        );
-        
-        // Check if this intent has already been processed
-        if (processedIntents[hash]) revert IntentAlreadyProcessed();
-        
-        // Verify the signature
-        if (recoverSigner(hash, intent.signature) != intent.signer) revert InvalidSignature();
-        
-        // Mark the intent as processed
-        processedIntents[hash] = true;
-        
-        // Convert timestamp to uint128 for storage compatibility
-        uint128 timestampU128 = uint128(intent.timestamp);
-        
-        // Ensure the new timestamp is more recent
-        if (updates[intent.symbol].timestamp >= timestampU128) {
-            return; // Ignore outdated data
-        }
-
-        // Update the stored oracle data
-        Data memory newData = Data({ 
-            timestamp: timestampU128, 
-            value: uint128(intent.price) 
-        });
-        updates[intent.symbol] = newData;
-
-        emit IntentBasedUpdateReceived(hash, intent.symbol, intent.price, intent.timestamp, intent.signer);
-
-        // Calculate the transaction fee based on gas used and gas price
-        uint256 gasPrice = tx.gasprice;
-        uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
-            gasPrice;
-
-        // Transfer the fee to the payment hook
-        bool success;
-        {
-            (success, ) = paymentHook.call{ value: fee }("");
-        }
-
-        if (!success) revert AmountTransferFailed();
+        // Calculate and transfer the protocol fee
+        _transferProtocolFee();
     }
     
     /**
@@ -355,92 +228,21 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
      * @dev This is more gas efficient than calling handleIntentUpdate multiple times
      */
     function handleBatchIntentUpdates(
-        OracleIntent[] calldata intents
-    ) external payable override validateAddress(paymentHook) {
+        OracleIntentUtils.OracleIntent[] calldata intents
+    ) external payable override validateAddress(paymentHook) nonReentrant {
         uint256 updatedCount = 0;
         
         // Process each intent
-        for (uint256 i = 0; i < intents.length; i++) {
-            OracleIntent calldata intent = intents[i];
-            
-            // // Skip expired intents
-            // if (block.timestamp > intent.expiry) {
-            //     continue;
-            // }
-            
-            // Skip intents from unauthorized signers
-            if (!authorizedSigners[intent.signer]) {
-                continue;
+        for (uint256 i = 0; i < intents.length; ) {
+            if (_processIntent(intents[i], false)) {
+                ++updatedCount;
             }
-            
-            // Create the intent hash for EIP-712
-            bytes32 structHash = keccak256(
-                abi.encode(
-                    ORACLE_INTENT_TYPEHASH,
-                    keccak256(bytes(intent.intentType)),
-                    keccak256(bytes(intent.version)),
-                    intent.chainId,
-                    intent.nonce,
-                    intent.expiry,
-                    keccak256(bytes(intent.symbol)),
-                    intent.price,
-                    intent.timestamp,
-                    keccak256(bytes(intent.source))
-                )
-            );
-            
-            // Create the EIP-712 hash
-            bytes32 hash = keccak256(
-                abi.encodePacked(
-                    "\x19\x01",
-                    DOMAIN_SEPARATOR,
-                    structHash
-                )
-            );
-            
-            // Skip already processed intents
-            if (processedIntents[hash]) {
-                continue;
-            }
-            
-            // Verify the signature
-            if (recoverSigner(hash, intent.signature) != intent.signer) {
-                continue;
-            }
-            
-            // Mark the intent as processed
-            processedIntents[hash] = true;
-            
-            // Convert timestamp to uint128 for storage compatibility
-            uint128 timestampU128 = uint128(intent.timestamp);
-            
-            // Only update if timestamp is more recent
-            if (updates[intent.symbol].timestamp < timestampU128) {
-                // Update the stored oracle data
-                updates[intent.symbol] = Data({ 
-                    timestamp: timestampU128, 
-                    value: uint128(intent.price) 
-                });
-                
-                emit IntentBasedUpdateReceived(hash, intent.symbol, intent.price, intent.timestamp, intent.signer);
-                updatedCount++;
-            }
+            unchecked { ++i; }
         }
         
         // Only charge fee if at least one update was processed
         if (updatedCount > 0) {
-            // Calculate the transaction fee based on gas used and gas price
-            uint256 gasPrice = tx.gasprice;
-            uint256 fee = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx() *
-                gasPrice;
-
-            // Transfer the fee to the payment hook
-            bool success;
-            {
-                (success, ) = paymentHook.call{ value: fee }("");
-            }
-
-            if (!success) revert AmountTransferFailed();
+            _transferProtocolFee();
         }
     }
 
@@ -532,17 +334,149 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
         return processedIntents[_intentHash];
     }
     
+    
+    
     /**
-     * @notice Calculates the hash for an OracleIntent
-     * @param intent The OracleIntent structure
-     * @return The EIP-712 hash of the intent
-     * @dev This is useful for external services to verify their intent hashes
+     * @notice Unified validation for memory intents with expiry check
+     * @param intent The OracleIntent to validate
+     * @return intentHash The calculated intent hash
      */
-    function calculateIntentHash(OracleIntent calldata intent) external view override returns (bytes32) {
-        // Create the intent hash for EIP-712 (same as OracleIntentRegistry)
+    function _validateIntentCommonFromMemory(OracleIntentUtils.OracleIntent memory intent) internal view returns (bytes32 intentHash) {
+        // Check if the intent has expired
+        if (block.timestamp > intent.expiry) revert IntentExpired();
+        
+        // Verify signer is authorized
+        if (!authorizedSigners[intent.signer]) revert UnauthorizedSigner();
+        
+        // Calculate intent hash
+        intentHash =  OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+
+        
+        // Check if already processed
+        if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
+        
+        // Verify signature
+        if (OracleIntentUtils.recoverSigner(intentHash, intent.signature) != intent.signer) revert InvalidSignature();
+        
+        return intentHash;
+    }
+
+
+    
+    /**
+     * @notice Unified oracle data update function
+     * @param symbol The oracle symbol to update
+     * @param price The price value 
+     * @param timestamp The timestamp of the update
+     * @param intentHash The hash of the intent for events
+     * @param signer The signer address for events
+     * @return updated Whether the data was actually updated
+     */
+    function _updateOracleDataUnified(
+        string memory symbol,
+        uint256 price,
+        uint256 timestamp,
+        bytes32 intentHash,
+        address signer
+    ) internal returns (bool updated) {
+        uint128 timestampU128 = uint128(timestamp);
+        
+        if (updates[symbol].timestamp >= timestampU128) {
+            return false;
+        }
+
+        updates[symbol] = Data({
+            timestamp: timestampU128,
+            value: uint128(price)
+        });
+
+        emit IntentBasedUpdateReceived(intentHash, symbol, price, timestamp, signer);
+        return true;
+    }
+
+    /**
+     * @notice Updates oracle data with a new intent if timestamp is fresh (legacy wrapper)
+     * @param intent The OracleIntent containing the update data
+     * @param intentHash The hash of the intent for events
+     * @return updated Whether the data was actually updated
+     */
+    
+    
+    /**
+     * @notice Decodes intent data from calldata into OracleIntent structure
+     * @param _data The encoded intent data
+     * @return intent The decoded OracleIntent
+     */
+    function _decodeIntentData(bytes calldata _data) internal pure returns (OracleIntentUtils.OracleIntent memory intent) {
+        (
+            string memory intentType,
+            string memory version,
+            uint256 chainId,
+            uint256 nonce,
+            uint256 expiry,
+            string memory symbol,
+            uint256 price,
+            uint256 timestamp,
+            string memory source,
+            bytes memory signature,
+            address signer
+        ) = abi.decode(_data, (string, string, uint256, uint256, uint256, string, uint256, uint256, string, bytes, address));
+        
+        return OracleIntentUtils.OracleIntent({
+            intentType: intentType,
+            version: version,
+            chainId: chainId,
+            nonce: nonce,
+            expiry: expiry,
+            symbol: symbol,
+            price: price,
+            timestamp: timestamp,
+            source: source,
+            signature: signature,
+            signer: signer
+        });
+    }
+    
+    /**
+     * @notice Processes a single intent for batch operations
+     * @param intent The OracleIntent to process
+     * @return updated Whether the intent was processed and data updated
+     */
+    function _processIntent(OracleIntentUtils.OracleIntent calldata intent, bool revertOnFailure) internal returns (bool updated) {
+        (ValidationStatus status, bytes32 intentHash) = _validateIntentStatus(intent);
+        if (status != ValidationStatus.Ok) {
+            if (revertOnFailure) {
+                if (status == ValidationStatus.Expired) revert IntentExpired();
+                if (status == ValidationStatus.UnauthorizedSigner) revert UnauthorizedSigner();
+                if (status == ValidationStatus.AlreadyProcessed) revert IntentAlreadyProcessed();
+                revert InvalidSignature();
+            }
+            return false;
+        }
+
+        processedIntents[intentHash] = true;
+        processedAt[intentHash] = uint64(block.timestamp);
+        return _updateOracleDataUnified(intent.symbol, intent.price, intent.timestamp, intentHash, intent.signer);
+    }
+    
+    /**
+     * @notice Performs the actual data update for an intent (unified wrapper)
+     * @param intent The OracleIntent containing the data
+     * @param intentHash The hash of the intent for events
+     * @return updated Whether the data was actually updated
+     */
+    
+    
+
+    /**
+     * @notice Calculates the hash for an OracleIntent from calldata
+     * @param intent The OracleIntent structure from calldata
+     * @return The EIP-712 hash of the intent
+     */
+    function _calculateIntentHashFromCalldata(OracleIntentUtils.OracleIntent calldata intent) internal view returns (bytes32) {
         bytes32 structHash = keccak256(
             abi.encode(
-                ORACLE_INTENT_TYPEHASH,
+                OracleIntentUtils.ORACLE_INTENT_TYPEHASH,
                 keccak256(bytes(intent.intentType)),
                 keccak256(bytes(intent.version)),
                 intent.chainId,
@@ -555,7 +489,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
             )
         );
         
-        // Create the EIP-712 hash
         return keccak256(
             abi.encodePacked(
                 "\x19\x01",
@@ -564,34 +497,49 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable {
             )
         );
     }
+
+    /**
+     * @notice Shared intent validation that does not revert; used by both single and batch paths
+     * @param intent The OracleIntent structure from calldata
+     * @return status ValidationStatus code and the calculated intent hash when Ok
+     */
+    function _validateIntentStatus(OracleIntentUtils.OracleIntent calldata intent)
+        internal
+        view
+        returns (ValidationStatus status, bytes32 intentHash)
+    {
+        if (block.timestamp > intent.expiry) {
+            return (ValidationStatus.Expired, bytes32(0));
+        }
+        if (!authorizedSigners[intent.signer]) {
+            return (ValidationStatus.UnauthorizedSigner, bytes32(0));
+        }
+
+        bytes32 hash = _calculateIntentHashFromCalldata(intent);
+        if (processedIntents[hash]) {
+            return (ValidationStatus.AlreadyProcessed, bytes32(0));
+        }
+
+        if (OracleIntentUtils.recoverSigner(hash, intent.signature) != intent.signer) {
+            return (ValidationStatus.InvalidSignature, bytes32(0));
+        }
+
+        return (ValidationStatus.Ok, hash);
+    }
     
     /**
-     * @notice Recovers the signer address from a signature (same as OracleIntentRegistry)
-     * @param hash The hash that was signed
-     * @param signature The signature
-     * @return The address of the signer
+    
+
+    /**
+     * @notice Calculates the hash for an OracleIntent
+     * @param intent The OracleIntent structure
+     * @return The EIP-712 hash of the intent
+     * @dev This is useful for external services to verify their intent hashes
      */
-    function recoverSigner(bytes32 hash, bytes memory signature) internal pure returns (address) {
-        if (signature.length != 65) revert InvalidSignature();
-        
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        
-        assembly {
-            r := mload(add(signature, 32))
-            s := mload(add(signature, 64))
-            v := byte(0, mload(add(signature, 96)))
-        }
-        
-        if (v < 27) {
-            v += 27;
-        }
-        
-        if (v != 27 && v != 28) revert InvalidSignature();
-        
-        return ecrecover(hash, v, r, s);
+    function calculateIntentHash(OracleIntentUtils.OracleIntent calldata intent) external view override returns (bytes32) {
+        return _calculateIntentHashFromCalldata(intent);
     }
+    
     
     receive() external payable {}
 

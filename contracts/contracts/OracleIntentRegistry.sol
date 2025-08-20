@@ -1,32 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.29;
 
+import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
+
 /**
  * @title OracleIntentRegistry
  * @dev A contract for storing and managing oracle intents across chains
  */
 contract OracleIntentRegistry {
-    // Intent structure
-    struct OracleIntent {
-        // Metadata
-        string intentType;
-        string version;
-        uint256 chainId;
-        uint256 nonce;
-        uint256 expiry;
-        
-        // Oracle data
-        string symbol;
-        uint256 price;
-        uint256 timestamp;
-        string source;
-        
-        // Signature data
-        bytes signature;
-        address signer;
-    }
+    // Use shared library struct
+    using OracleIntentUtils for OracleIntentUtils.OracleIntent;
     
-    // Intent data structure for batch processing
+    // Intent data structure for batch processing  
     struct IntentData {
         string intentType;
         string version;
@@ -42,7 +27,7 @@ contract OracleIntentRegistry {
     }
     
     // Mapping from intent hash to intent
-    mapping(bytes32 => OracleIntent) public intents;
+    mapping(bytes32 => OracleIntentUtils.OracleIntent) public intents;
     
     // Mapping from symbol to latest intent hash
     mapping(string => bytes32) public latestIntentBySymbol;
@@ -55,11 +40,6 @@ contract OracleIntentRegistry {
     
     // EIP-712 domain separator
     bytes32 private immutable DOMAIN_SEPARATOR;
-    
-    // EIP-712 type hash
-    bytes32 private constant ORACLE_INTENT_TYPEHASH = keccak256(
-        "OracleIntent(string intentType,string version,uint256 chainId,uint256 nonce,uint256 expiry,string symbol,uint256 price,uint256 timestamp,string source)"
-    );
     
     // Events
     event IntentRegistered(bytes32 indexed intentHash, string indexed symbol, uint256 price, uint256 timestamp, address signer);
@@ -84,16 +64,12 @@ contract OracleIntentRegistry {
         owner = msg.sender;
         authorizedSigners[msg.sender] = true;
         
-        // Create the EIP-712 domain separator
-        DOMAIN_SEPARATOR = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)"),
-                keccak256("DIA Oracle Intent"),
-                keccak256("1"),
-                block.chainid,
-                address(this),
-                bytes32(0)
-            )
+        // Create the EIP-712 domain separator using shared library
+        DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
+            "DIA Oracle Intent",
+            "1",
+            block.chainid,
+            address(this)
         );
     }
     
@@ -130,43 +106,8 @@ contract OracleIntentRegistry {
         // Verify the signer is authorized
         require(authorizedSigners[signer], "OracleIntentRegistry: signer is not authorized");
         
-        // Create the intent hash for EIP-712
-        bytes32 structHash = keccak256(
-            abi.encode(
-                ORACLE_INTENT_TYPEHASH,
-                keccak256(bytes(intentType)),
-                keccak256(bytes(version)),
-                chainId,
-                nonce,
-                expiry,
-                keccak256(bytes(symbol)),
-                price,
-                timestamp,
-                keccak256(bytes(source))
-            )
-        );
-        
-        // Create the EIP-712 hash
-        bytes32 hash = keccak256(
-            abi.encodePacked(
-                "\x19\x01",
-                DOMAIN_SEPARATOR,
-                structHash
-            )
-        );
-        
-        // Check if this intent has already been processed
-        require(!processedIntents[hash], "OracleIntentRegistry: intent already processed");
-        
-        // Verify the signature and get the actual signer
-        address recoveredSigner = recoverSigner(hash, signature);
-        require(recoveredSigner == signer, "OracleIntentRegistry: invalid signature");
-        
-        // Mark the intent as processed
-        processedIntents[hash] = true;
-        
-        // Store the intent with the recovered signer
-        OracleIntent memory intent = OracleIntent({
+        // Create intent struct using shared library
+        OracleIntentUtils.OracleIntent memory intent = OracleIntentUtils.OracleIntent({
             intentType: intentType,
             version: version,
             chainId: chainId,
@@ -177,11 +118,21 @@ contract OracleIntentRegistry {
             timestamp: timestamp,
             source: source,
             signature: signature,
-            signer: recoveredSigner
+            signer: signer
         });
         
-        // Use the EIP-712 hash as the intent hash
-        bytes32 intentHash = hash;
+        // Calculate intent hash using shared library
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+        
+        // Check if this intent has already been processed
+        require(!processedIntents[intentHash], "OracleIntentRegistry: intent already processed");
+        
+        // Verify the signature using shared library
+        address recoveredSigner = OracleIntentUtils.recoverSigner(intentHash, signature);
+        require(recoveredSigner == signer, "OracleIntentRegistry: invalid signature");
+        
+        // Mark the intent as processed
+        processedIntents[intentHash] = true;
         intents[intentHash] = intent;
         
         // Update latest intent for symbol if this timestamp is newer
@@ -216,46 +167,8 @@ contract OracleIntentRegistry {
                 continue;
             }
             
-            // Create the intent hash for EIP-712
-            bytes32 structHash = keccak256(
-                abi.encode(
-                    ORACLE_INTENT_TYPEHASH,
-                    keccak256(bytes(data.intentType)),
-                    keccak256(bytes(data.version)),
-                    data.chainId,
-                    data.nonce,
-                    data.expiry,
-                    keccak256(bytes(data.symbol)),
-                    data.price,
-                    data.timestamp,
-                    keccak256(bytes(data.source))
-                )
-            );
-            
-            // Create the EIP-712 hash
-            bytes32 hash = keccak256(
-                abi.encodePacked(
-                    "\x19\x01",
-                    DOMAIN_SEPARATOR,
-                    structHash
-                )
-            );
-            
-            // Skip already processed intents
-            if (processedIntents[hash]) {
-                continue;
-            }
-            
-            // Verify the signature
-            if (recoverSigner(hash, data.signature) != data.signer) {
-                continue;
-            }
-            
-            // Mark the intent as processed
-            processedIntents[hash] = true;
-            
-            // Store the intent
-            OracleIntent memory intent = OracleIntent({
+            // Create intent struct using shared library
+            OracleIntentUtils.OracleIntent memory intent = OracleIntentUtils.OracleIntent({
                 intentType: data.intentType,
                 version: data.version,
                 chainId: data.chainId,
@@ -269,8 +182,21 @@ contract OracleIntentRegistry {
                 signer: data.signer
             });
             
-            // Use the EIP-712 hash as the intent hash
-            bytes32 intentHash = hash;
+            // Calculate intent hash using shared library
+            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+            
+            // Skip already processed intents
+            if (processedIntents[intentHash]) {
+                continue;
+            }
+            
+            // Verify the signature using shared library
+            if (OracleIntentUtils.recoverSigner(intentHash, data.signature) != data.signer) {
+                continue;
+            }
+            
+            // Mark the intent as processed
+            processedIntents[intentHash] = true;
             intents[intentHash] = intent;
             
             // Update latest intent for symbol if this timestamp is newer
@@ -301,7 +227,7 @@ contract OracleIntentRegistry {
         bytes32 intentHash = latestIntentBySymbol[symbol];
         require(intentHash != bytes32(0), "OracleIntentRegistry: no intent found for symbol");
         
-        OracleIntent memory intent = intents[intentHash];
+        OracleIntentUtils.OracleIntent memory intent = intents[intentHash];
         return (intent.price, intent.timestamp, intent.source);
     }
     
@@ -310,7 +236,7 @@ contract OracleIntentRegistry {
      * @param intentHash The hash of the intent
      * @return The intent details
      */
-    function getIntent(bytes32 intentHash) external view returns (OracleIntent memory) {
+    function getIntent(bytes32 intentHash) external view returns (OracleIntentUtils.OracleIntent memory) {
         require(intents[intentHash].timestamp > 0, "OracleIntentRegistry: intent not found");
         return intents[intentHash];
     }
@@ -334,33 +260,6 @@ contract OracleIntentRegistry {
         owner = newOwner;
     }
     
-    /**
-     * @dev Recovers the signer address from a signature
-     * @param hash The hash that was signed
-     * @param signature The signature
-     * @return The address of the signer
-     */
-    function recoverSigner(bytes32 hash, bytes memory signature) internal pure returns (address) {
-        require(signature.length == 65, "OracleIntentRegistry: invalid signature length");
-        
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        
-        assembly {
-            r := mload(add(signature, 32))
-            s := mload(add(signature, 64))
-            v := byte(0, mload(add(signature, 96)))
-        }
-        
-        if (v < 27) {
-            v += 27;
-        }
-        
-        require(v == 27 || v == 28, "OracleIntentRegistry: invalid signature 'v' value");
-        
-        return ecrecover(hash, v, r, s);
-    }
     
     /**
      * @dev Returns the domain separator for EIP-712 signatures

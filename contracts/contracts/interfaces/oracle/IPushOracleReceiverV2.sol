@@ -3,6 +3,7 @@ pragma solidity 0.8.29;
 
 import { IMessageRecipient } from "../IMessageRecipient.sol";
 import { ISpecifiesInterchainSecurityModule } from "../IInterchainSecurityModule.sol";
+import { OracleIntentUtils } from "../../libs/OracleIntentUtils.sol";
 
 interface IPushOracleReceiverV2 is
     IMessageRecipient,
@@ -91,24 +92,8 @@ interface IPushOracleReceiverV2 is
         uint128 value;
     }
     
-    struct OracleIntent {
-        // Metadata
-        string intentType;
-        string version;
-        uint256 chainId;
-        uint256 nonce;
-        uint256 expiry;
-        
-        // Oracle data
-        string symbol;
-        uint256 price;
-        uint256 timestamp;
-        string source;
-        
-        // Signature data
-        bytes signature;
-        address signer;
-    }
+    // Use shared OracleIntent struct from library - no need for duplicate definition
+    // Functions use OracleIntentUtils.OracleIntent directly
 
     /**
      * @notice Handles incoming interchain messages by decoding the payload and updating state
@@ -128,7 +113,7 @@ interface IPushOracleReceiverV2 is
      * @dev External services can call this function directly with properly signed intents
      */
     function handleIntentUpdate(
-        OracleIntent calldata intent
+        OracleIntentUtils.OracleIntent calldata intent
     ) external payable;
     
     /**
@@ -138,7 +123,7 @@ interface IPushOracleReceiverV2 is
      * @dev This is more gas efficient than calling handleIntentUpdate multiple times
      */
     function handleBatchIntentUpdates(
-        OracleIntent[] calldata intents
+        OracleIntentUtils.OracleIntent[] calldata intents
     ) external payable;
 
     /**
@@ -207,5 +192,5 @@ interface IPushOracleReceiverV2 is
      * @return The EIP-712 hash of the intent
      * @dev This is useful for external services to verify their intent hashes
      */
-    function calculateIntentHash(OracleIntent calldata intent) external view returns (bytes32);
+    function calculateIntentHash(OracleIntentUtils.OracleIntent calldata intent) external view returns (bytes32);
 }
