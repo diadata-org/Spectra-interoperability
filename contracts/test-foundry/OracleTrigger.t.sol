@@ -6,9 +6,9 @@ import "forge-std/console.sol";
 import "../contracts/OracleTrigger.sol";
 import "../contracts/interfaces/oracle/IOracleTrigger.sol";
 
-interface IDIAOracleV2 {
-    function getValue(string memory key) external view returns (uint128, uint128);
-}
+// interface IDIAOracleV2 {
+//     function getValue(string memory key) external view returns (uint128, uint128);
+// }
 
 contract MockMetadata is IDIAOracleV2 {
     mapping(string => uint128) public values;

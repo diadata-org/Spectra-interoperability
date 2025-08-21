@@ -11,20 +11,18 @@ contract OracleIntentRegistry {
     // Use shared library struct
     using OracleIntentUtils for OracleIntentUtils.OracleIntent;
     
-    // Intent data structure for batch processing  
-    struct IntentData {
-        string intentType;
-        string version;
-        uint256 chainId;
-        uint256 nonce;
-        uint256 expiry;
-        string symbol;
-        uint256 price;
-        uint256 timestamp;
-        string source;
-        bytes signature;
-        address signer;
-    }
+    // Custom errors for gas-efficient reverts
+    error NotOwner();
+    error NotAuthorized();
+    error IntentExpired();
+    error SignerNotAuthorized();
+    error IntentAlreadyProcessed();
+    error InvalidSignature();
+    error NoIntentForSymbol();
+    error IntentNotFound();
+    error ZeroAddress();
+    
+    // Note: Batch uses OracleIntentUtils.OracleIntent directly to avoid duplication
     
     // Mapping from intent hash to intent
     mapping(bytes32 => OracleIntentUtils.OracleIntent) public intents;
@@ -51,12 +49,12 @@ contract OracleIntentRegistry {
     
     // Modifiers
     modifier onlyOwner() {
-        require(msg.sender == owner, "OracleIntentRegistry: caller is not the owner");
+        if (msg.sender != owner) revert NotOwner();
         _;
     }
     
     modifier onlyAuthorized() {
-        require(authorizedSigners[msg.sender] || msg.sender == owner, "OracleIntentRegistry: caller is not authorized");
+        if (!(authorizedSigners[msg.sender] || msg.sender == owner)) revert NotAuthorized();
         _;
     }
     
@@ -101,10 +99,10 @@ contract OracleIntentRegistry {
         address signer
     ) external {
         // Check if the intent has expired
-        require(block.timestamp <= expiry, "OracleIntentRegistry: intent has expired");
+        if (block.timestamp > expiry) revert IntentExpired();
         
         // Verify the signer is authorized
-        require(authorizedSigners[signer], "OracleIntentRegistry: signer is not authorized");
+        if (!authorizedSigners[signer]) revert SignerNotAuthorized();
         
         // Create intent struct using shared library
         OracleIntentUtils.OracleIntent memory intent = OracleIntentUtils.OracleIntent({
@@ -125,11 +123,11 @@ contract OracleIntentRegistry {
         bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
         
         // Check if this intent has already been processed
-        require(!processedIntents[intentHash], "OracleIntentRegistry: intent already processed");
+        if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
         
         // Verify the signature using shared library
         address recoveredSigner = OracleIntentUtils.recoverSigner(intentHash, signature);
-        require(recoveredSigner == signer, "OracleIntentRegistry: invalid signature");
+        if (recoveredSigner != signer) revert InvalidSignature();
         
         // Mark the intent as processed
         processedIntents[intentHash] = true;
@@ -149,13 +147,13 @@ contract OracleIntentRegistry {
      * @dev Registers multiple oracle intents with EIP-712 signatures in a single transaction
      * @param intentsData Array of intent data to register
      */
-    function registerMultipleIntents(IntentData[] memory intentsData) external {
-        require(intentsData.length > 0, "OracleIntentRegistry: no intents provided");
+    function registerMultipleIntents(OracleIntentUtils.OracleIntent[] calldata intentsData) external {
+        if (intentsData.length == 0) revert IntentNotFound();
         
         uint256 successCount = 0;
         
         for (uint256 i = 0; i < intentsData.length; i++) {
-            IntentData memory data = intentsData[i];
+            OracleIntentUtils.OracleIntent calldata data = intentsData[i];
             
             // Skip expired intents
             if (block.timestamp > data.expiry) {
@@ -167,23 +165,8 @@ contract OracleIntentRegistry {
                 continue;
             }
             
-            // Create intent struct using shared library
-            OracleIntentUtils.OracleIntent memory intent = OracleIntentUtils.OracleIntent({
-                intentType: data.intentType,
-                version: data.version,
-                chainId: data.chainId,
-                nonce: data.nonce,
-                expiry: data.expiry,
-                symbol: data.symbol,
-                price: data.price,
-                timestamp: data.timestamp,
-                source: data.source,
-                signature: data.signature,
-                signer: data.signer
-            });
-            
             // Calculate intent hash using shared library
-            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, DOMAIN_SEPARATOR);
             
             // Skip already processed intents
             if (processedIntents[intentHash]) {
@@ -197,7 +180,19 @@ contract OracleIntentRegistry {
             
             // Mark the intent as processed
             processedIntents[intentHash] = true;
-            intents[intentHash] = intent;
+            intents[intentHash] = OracleIntentUtils.OracleIntent({
+                intentType: data.intentType,
+                version: data.version,
+                chainId: data.chainId,
+                nonce: data.nonce,
+                expiry: data.expiry,
+                symbol: data.symbol,
+                price: data.price,
+                timestamp: data.timestamp,
+                source: data.source,
+                signature: data.signature,
+                signer: data.signer
+            });
             
             // Update latest intent for symbol if this timestamp is newer
             bytes32 currentLatestIntentHash = latestIntentBySymbol[data.symbol];
@@ -225,7 +220,7 @@ contract OracleIntentRegistry {
      */
     function getLatestPrice(string memory symbol) external view returns (uint256 price, uint256 timestamp, string memory source) {
         bytes32 intentHash = latestIntentBySymbol[symbol];
-        require(intentHash != bytes32(0), "OracleIntentRegistry: no intent found for symbol");
+        if (intentHash == bytes32(0)) revert NoIntentForSymbol();
         
         OracleIntentUtils.OracleIntent memory intent = intents[intentHash];
         return (intent.price, intent.timestamp, intent.source);
@@ -237,7 +232,7 @@ contract OracleIntentRegistry {
      * @return The intent details
      */
     function getIntent(bytes32 intentHash) external view returns (OracleIntentUtils.OracleIntent memory) {
-        require(intents[intentHash].timestamp > 0, "OracleIntentRegistry: intent not found");
+        if (intents[intentHash].timestamp == 0) revert IntentNotFound();
         return intents[intentHash];
     }
     
@@ -256,7 +251,7 @@ contract OracleIntentRegistry {
      * @param newOwner The address of the new owner
      */
     function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "OracleIntentRegistry: new owner is the zero address");
+        if (newOwner == address(0)) revert ZeroAddress();
         owner = newOwner;
     }
     
