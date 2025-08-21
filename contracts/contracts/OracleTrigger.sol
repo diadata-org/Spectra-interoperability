@@ -7,31 +7,10 @@ import { IMailbox } from "./interfaces/IMailbox.sol";
 import { IOracleTrigger } from "./interfaces/oracle/IOracleTrigger.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
 
-
-// Interface for OracleIntentRegistry
-interface IOracleIntentRegistry {
-    struct OracleIntent {
-        // Metadata
-        string intentType;
-        string version;
-        uint256 chainId;
-        uint256 nonce;
-        uint256 expiry;
-        
-        // Oracle data
-        string symbol;
-        uint256 price;
-        uint256 timestamp;
-        string source;
-        
-        // Signature data
-        bytes signature;
-        address signer;
-    }
-    
-    function getLatestPrice(string memory symbol) external view returns (uint256 price, uint256 timestamp, string memory source);
-    function getIntent(bytes32 intentHash) external view returns (OracleIntent memory);
-    function latestIntentBySymbol(string memory) external view returns (bytes32);
+interface IDIAOracleV2 {
+    function getValue(
+        string memory key
+    ) external view returns (uint128, uint128);
 }
 
 /// @title OracleTrigger
@@ -58,9 +37,6 @@ contract OracleTrigger is
 
     /// @notice Address of the DIA oracle metadata contract.
     address public metadataContract;
-    
-    /// @notice Address of the OracleIntentRegistry contract.
-    address public intentRegistryContract;
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -137,47 +113,9 @@ contract OracleTrigger is
         metadataContract = newMetadata;
         emit MetadataContractUpdated(newMetadata);
     }
-    
-    /// @notice Updates the intent registry contract address
-    /// @param newRegistry The new intent registry contract address
-    function updateIntentRegistryContract(
-        address newRegistry
-    ) external onlyRole(OWNER_ROLE) validateAddress(newRegistry) {
-        intentRegistryContract = newRegistry;
-        emit IntentRegistryContractUpdated(newRegistry);
-    }
-
-    function _getLatestIntent(string memory key) internal view returns (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash)  {
-        address registry = intentRegistryContract;
-        if (registry == address(0)) revert InvalidAddress();
-        
-        IOracleIntentRegistry registryContract = IOracleIntentRegistry(registry);
-        
-        intentHash = registryContract.latestIntentBySymbol(key);
-        if (intentHash == bytes32(0)) revert OracleError(key);
-
-        intent = registryContract.getIntent(intentHash);
-    }
-
-    function _encodeIntentMessage(IOracleIntentRegistry.OracleIntent memory intent) internal pure returns (bytes memory) {
-        return abi.encode(
-            intent.intentType,
-            intent.version,
-            intent.chainId,
-            intent.nonce,
-            intent.expiry,
-            intent.symbol,
-            intent.price,
-            intent.timestamp,
-            intent.source,
-            intent.signature,
-            intent.signer
-        );
-    }
 
     /**
      * @dev See {IOracleTrigger-dispatchToChain}.
-     * @notice Now gets the latest intent from the registry and sends it as the message
      */
     function dispatchToChain(
         uint32 _destinationDomain,
@@ -190,9 +128,9 @@ contract OracleTrigger is
         validateAddress(mailBox)
         nonReentrant
     {
-        (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(key);
+        (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
 
-        bytes memory messageBody = _encodeIntentMessage(intent);
+        bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
 
         address recipient = chains[_destinationDomain];
 
@@ -202,12 +140,11 @@ contract OracleTrigger is
             messageBody
         );
 
-        emit MessageDispatched(_destinationDomain, recipient, messageId, intentHash, key);
+        emit MessageDispatched(_destinationDomain, recipient, messageId);
     }
 
     /**
      * @dev See {IOracleTrigger-dispatch}.
-     * @notice Now gets the latest intent from the registry and sends it as the message
      */
     function dispatch(
         uint32 _destinationDomain,
@@ -221,9 +158,9 @@ contract OracleTrigger is
         validateAddress(mailBox)
         validateAddress(recipientAddress)
     {
-        (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(key);
+        (uint128 currValue, uint128 currTimestamp) = _getOracleValue(key);
 
-        bytes memory messageBody = _encodeIntentMessage(intent);
+        bytes memory messageBody = abi.encode(key, currTimestamp, currValue);
 
         bytes32 messageId = IMailbox(mailBox).dispatch{ value: msg.value }(
             _destinationDomain,
@@ -231,7 +168,7 @@ contract OracleTrigger is
             messageBody
         );
 
-        emit MessageDispatched(_destinationDomain, recipientAddress, messageId, intentHash, key);
+        emit MessageDispatched(_destinationDomain, recipientAddress, messageId);
     }
 
     /// @notice Sets the mailbox contract address
@@ -263,16 +200,23 @@ contract OracleTrigger is
     function getMailBox() external view returns (address) {
         return mailBox;
     }
-    
+
     /**
-     * @notice Returns the address of the intent registry contract.
+     * @notice Fetches value from the oracle.
+     * @param key The oracle key to query.
      */
-    function getIntentRegistry() external view returns (address) {
-        return intentRegistryContract;
+    function _getOracleValue(
+        string memory key
+    ) internal view returns (uint128, uint128) {
+        if (metadataContract == address(0)) revert InvalidAddress();
+
+        try IDIAOracleV2(metadataContract).getValue(key) returns (
+            uint128 value,
+            uint128 timestamp
+        ) {
+            return (value, timestamp);
+        } catch {
+            revert OracleError(key);
+        }
     }
-
-
-    
-    // Event for intent registry updates
-    event IntentRegistryContractUpdated(address indexed newRegistry);
 }

@@ -42,14 +42,10 @@ interface IOracleTrigger {
     /// @param chainId The destination chain ID
     /// @param recipientAddress The recipient contract address on the destination chain
     /// @param messageId The message ID
-    /// @param intentHash The hash of the oracle intent being sent
-    /// @param symbol The symbol of the oracle data
     event MessageDispatched(
         uint32 chainId,
         address recipientAddress,
-        bytes32 indexed messageId,
-        bytes32 intentHash,
-        string symbol
+        bytes32 indexed messageId
     );
 
     /// @notice Emitted when the mailbox contract address is updated
@@ -59,28 +55,24 @@ interface IOracleTrigger {
     /// @notice Emitted when the metadata contract address is updated
     /// @param newMetadata The new metadata contract address
     event MetadataContractUpdated(address indexed newMetadata);
-    
-    // /// @notice Emitted when the intent registry contract address is updated
-    // /// @param newRegistry The new intent registry contract address
-    // event IntentRegistryContractUpdated(address indexed newRegistry);
 
     /// @notice Emitted when tokens are recovered
     /// @param receiver The address of the receiver
     /// @param amount The amount of tokens recovered
     event TokensRecovered(address receiver, uint256 amount);
 
-    /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
+    /// @notice Dispatches a message to a destination chain
     /// @param _destinationDomain The destination chain ID
-    /// @param key The symbol to fetch the latest intent for
+    /// @param key The key used to fetch the oracle value
     function dispatchToChain(
         uint32 _destinationDomain,
         string memory key
     ) external payable;
 
-    /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
+    /// @notice Dispatches a message to a destination chain
     /// @param _destinationDomain The destination chain ID
     /// @param _recipientAddress The address of the recipient contract on the destination chain
-    /// @param _key The symbol to fetch the latest intent for
+    /// @param _key The key used to fetch the oracle value
     function dispatch(
         uint32 _destinationDomain,
         address _recipientAddress,
@@ -90,6 +82,4 @@ interface IOracleTrigger {
     /// @notice Retrieves the mailbox contract address
     /// @return The address of the mailbox contract
     function getMailBox() external view returns (address);
-    
- 
 }
