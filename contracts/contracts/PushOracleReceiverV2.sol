@@ -10,6 +10,7 @@ import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
 
 /**
  * @title PushOracleReceiverV2
+ * @author Diadata.org
  * @notice Handles incoming oracle data updates and ensures security via Hyperlane.
  * @dev Implements IMessageRecipient and ISpecifiesInterchainSecurityModule.
  *
@@ -64,7 +65,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     mapping(bytes32 => uint64) public processedAt;
     
     /// @notice EIP-712 domain separator
-    bytes32 public DOMAIN_SEPARATOR;
+    bytes32 public domainSeparator;
 
     /// @notice Validation status for intent checks used to avoid logic duplication
     enum ValidationStatus { Ok, Expired, UnauthorizedSigner, AlreadyProcessed, InvalidSignature }
@@ -99,7 +100,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         if (_verifyingContract == address(0)) revert InvalidAddress();
         
         // Create the EIP-712 domain separator using shared library
-        DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
+        domainSeparator = OracleIntentUtils.createDomainSeparator(
             _domainName,
             _domainVersion,
             _sourceChainId,
@@ -108,7 +109,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         
         // Emit event for domain separator verification
         emit DomainSeparatorUpdated(
-            DOMAIN_SEPARATOR,
+            domainSeparator,
             _domainName,
             _domainVersion,
             _sourceChainId,
@@ -119,8 +120,8 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     /**
      * @dev See {IPushOracleReceiverV2-handle}.
      * @notice Handles both ISM-validated format (key, timestamp, value) and new intent format
+     * @param _data The encoded payload containing the oracle data or intent
      */
-    /* solhint-disable no-unused-vars */
     function handle(
         uint32 /* _origin */,
         bytes32 /* _sender */,
@@ -268,7 +269,9 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     }
 
     /**
-     * @dev See {IPushOracleReceiver-setInterchainSecurityModule}.
+     * @notice Sets the interchain security module.
+     * @dev restricted to onlyOwner
+     * @param _ism The address of the new interchain security module.
      */
     function setInterchainSecurityModule(
         address _ism
@@ -281,7 +284,8 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     }
 
     /**
-     * @dev See {IPushOracleReceiver-setPaymentHook}.
+     * @notice Sets the payment hook address
+     * @param _paymentHook The address of the new payment hook.
      */
     function setPaymentHook(
         address payable _paymentHook
@@ -291,7 +295,9 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     }
 
     /**
-     * @dev See {IPushOracleReceiver-setTrustedMailBox}.
+     * @notice Sets the trusted mailbox address.
+     * @dev restricted to onlyOwner
+     * @param _mailbox The address of the new trusted mailbox.
      */
     function setTrustedMailBox(
         address _mailbox
@@ -324,8 +330,8 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @dev for signature validation to work correctly across the system
      */
     function setDomainSeparator(
-        string memory domainName,
-        string memory domainVersion,
+        string calldata domainName,
+        string calldata domainVersion,
         uint256 sourceChainId,
         address verifyingContract
     ) external override onlyOwner {
@@ -340,9 +346,9 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
             revert DomainSeparatorZero();
         }
         
-        DOMAIN_SEPARATOR = newDomainSeparator;
+        domainSeparator = newDomainSeparator;
         emit DomainSeparatorUpdated(
-            DOMAIN_SEPARATOR,
+            domainSeparator,
             domainName,
             domainVersion,
             sourceChainId,
@@ -351,7 +357,9 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     }
 
     /**
-     * @dev See {IPushOracleReceiver-retrieveLostTokens}.
+     * @notice Withdraws stuck funds to the specified address
+     * @dev restricted to onlyOwner
+     * @param receiver The address to receive the funds.
      */
     function retrieveLostTokens(
         address receiver
@@ -370,7 +378,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @return The domain separator used for EIP-712 signatures
      */
     function getDomainSeparator() external view override returns (bytes32) {
-        return DOMAIN_SEPARATOR;
+        return domainSeparator;
     }
     
     /**
@@ -406,7 +414,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         if (!authorizedSigners[intent.signer]) revert UnauthorizedSigner();
         
         // Calculate intent hash
-        intentHash =  OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+        intentHash =  OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
 
         
         // Check if already processed
@@ -480,6 +488,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @notice Processes a single intent for batch operations
      * @param intent The OracleIntent to process
      * @return updated Whether the intent was processed and data updated
+     * @param revertOnFailure Whether to revert on failure or just return false
      */
     function _processIntent(OracleIntentUtils.OracleIntent calldata intent, bool revertOnFailure) internal returns (bool updated) {
         (ValidationStatus status, bytes32 intentHash) = _validateIntentStatus(intent);
@@ -509,11 +518,12 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
 
    
 
-    /**
-     * @notice Shared intent validation that does not revert; used by both single and batch paths
-     * @param intent The OracleIntent structure from calldata
-     * @return status ValidationStatus code and the calculated intent hash when Ok
-     */
+   /**
+    * @notice Validates the status of an OracleIntent
+    * @param intent The OracleIntent structure to validate
+    * @return status The validation status
+    * @return intentHash The calculated intent hash if status is Ok, else zero
+    */
     function _validateIntentStatus(OracleIntentUtils.OracleIntent calldata intent)
         internal
         view
@@ -526,7 +536,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
             return (ValidationStatus.UnauthorizedSigner, bytes32(0));
         }
 
-        bytes32 hash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+        bytes32 hash = OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
         if (processedIntents[hash]) {
             return (ValidationStatus.AlreadyProcessed, bytes32(0));
         }
@@ -545,7 +555,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @dev This is useful for external services to verify their intent hashes
      */
     function calculateIntentHash(OracleIntentUtils.OracleIntent calldata intent) external view override returns (bytes32) {
-        return OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+        return OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
     }
     
     

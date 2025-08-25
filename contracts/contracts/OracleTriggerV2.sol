@@ -5,18 +5,13 @@ import { AccessControlEnumerable } from "@openzeppelin/contracts/access/AccessCo
 import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import { IMailbox } from "./interfaces/IMailbox.sol";
 import { IOracleTriggerV2 } from "./interfaces/oracle/IOracleTriggerV2.sol";
+import { IOracleIntentRegistry } from "./interfaces/oracle/IOracleIntentRegistry.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
 import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
 
 
-// Interface for OracleIntentRegistry using shared struct
-interface IOracleIntentRegistry {
-    function getLatestPrice(string memory symbol) external view returns (uint256 price, uint256 timestamp, string memory source);
-    function getIntent(bytes32 intentHash) external view returns (OracleIntentUtils.OracleIntent memory);
-    function latestIntentBySymbol(string memory) external view returns (bytes32);
-}
-
 /// @title OracleTriggerV2
+/// @author Diadata.org
 /// @notice Intent-based version that reads the latest oracle intent from registry and dispatches it to the desired chain.
 /// @dev Provides access control for managing chains and secure dispatching mechanisms.
 /// @dev Only addresses with the DISPATCHER_ROLE can call dispatch functions.
@@ -43,7 +38,7 @@ contract OracleTriggerV2 is
     address public intentRegistryContract;
     
     /// @notice EIP-712 domain separator for signature validation
-    bytes32 public DOMAIN_SEPARATOR;
+    bytes32 public domainSeparator;
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -131,8 +126,8 @@ contract OracleTriggerV2 is
     /// @dev CRITICAL: This domain separator must match exactly with PushOracleReceiverV2's immutable domain separator
     /// @dev for signature validation to work correctly across the system
     function setDomainSeparator(
-        string memory domainName,
-        string memory domainVersion,
+        string calldata domainName,
+        string calldata domainVersion,
         uint256 sourceChainId
     ) external onlyRole(OWNER_ROLE) {
         bytes32 newDomainSeparator = OracleIntentUtils.createDomainSeparator(
@@ -145,16 +140,24 @@ contract OracleTriggerV2 is
         if (newDomainSeparator == bytes32(0)) {
             revert DomainSeparatorZero();
         }
-        
-        DOMAIN_SEPARATOR = newDomainSeparator;
+
+        domainSeparator = newDomainSeparator;
         emit DomainSeparatorUpdated(
-            DOMAIN_SEPARATOR,
+            domainSeparator,
             domainName,
             domainVersion,
             sourceChainId,
             address(this)
         );
     }
+
+    /** @dev Fetches the latest intent from the registry for the given symbol
+     * @param _key The symbol to fetch the latest intent for
+     * @return intent The latest OracleIntent struct
+     * @return intentHash The hash of the latest intent
+     * @notice Reverts if the registry is not set or no intent is found for the symbol
+     * @notice Also performs basic validation on the returned intent data
+     */
 
     function _getLatestIntent(string memory _key) internal view returns (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash)  {
         address registry = intentRegistryContract;
@@ -174,13 +177,13 @@ contract OracleTriggerV2 is
         if (intent.signer == address(0)) revert IntentDataInvalid(_key, "Invalid signer");
         if (intent.signature.length == 0) revert IntentDataInvalid(_key, "Empty signature");
         
-        // Validate signature if domain separator is set
-        if (DOMAIN_SEPARATOR != bytes32(0)) {
-            bool isValid = OracleIntentUtils.validateSignature(intent, DOMAIN_SEPARATOR);
-            if (!isValid) revert InvalidSignature(_key);
-        }
+        
     }
-
+    /** @dev Encodes the intent message for dispatching
+     * @notice Uses ABI encoding to serialize the intent struct into bytes
+     * @param intent The OracleIntent to encode
+     * @return The encoded message bytes
+     */
     function _encodeIntentMessage(OracleIntentUtils.OracleIntent memory intent) internal pure returns (bytes memory) {
         return abi.encode(
             intent.intentType,
@@ -200,10 +203,12 @@ contract OracleTriggerV2 is
     /**
      * @dev See {IOracleTrigger-dispatchToChain}.
      * @notice Now gets the latest intent from the registry and sends it as the message
+     * @param _destinationDomain The destination chain ID
+     * @param _key The symbol to fetch the latest intent for
      */
     function dispatchToChain(
         uint32 _destinationDomain,
-        string memory _key
+        string calldata _key
     )
         external
         payable
@@ -230,11 +235,14 @@ contract OracleTriggerV2 is
     /**
      * @dev See {IOracleTrigger-dispatch}.
      * @notice Now gets the latest intent from the registry and sends it as the message
+     * @param _destinationDomain The destination chain ID
+     * @param _recipientAddress The address of the recipient contract on the destination chain
+     * @param _key The symbol to fetch the latest intent for
      */
     function dispatch(
         uint32 _destinationDomain,
         address _recipientAddress,
-        string memory _key
+        string calldata _key
     )
         external
         payable
@@ -279,9 +287,10 @@ contract OracleTriggerV2 is
         emit TokensRecovered(receiver, balance);
     }
 
-    /**
-     * @dev See {IOracleTrigger-getMailBox}.
+   /**
+     * @notice Returns the address of the Hyperlane MailBox contract.
      */
+    /// @return The address of the Hyperlane MailBox contract
     function getMailBox() external view returns (address) {
         return mailBox;
     }
@@ -289,6 +298,7 @@ contract OracleTriggerV2 is
     /**
      * @notice Returns the address of the intent registry contract.
      */
+     /// @return The address of the Registry contract
     function getIntentRegistry() external view returns (address) {
         return intentRegistryContract;
     }

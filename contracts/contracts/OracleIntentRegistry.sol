@@ -6,6 +6,8 @@ import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
 /**
  * @title OracleIntentRegistry
  * @dev A contract for storing and managing oracle intents across chains
+ * @author Diadata.org
+ * @notice This contract allows authorized signers to register oracle intents with EIP-712 signatures
  */
 contract OracleIntentRegistry {
     // Use shared library struct
@@ -24,40 +26,54 @@ contract OracleIntentRegistry {
     
     // Note: Batch uses OracleIntentUtils.OracleIntent directly to avoid duplication
     
-    // Mapping from intent hash to intent
+    /// @notice Mapping from intent hash to OracleIntent details
     mapping(bytes32 => OracleIntentUtils.OracleIntent) public intents;
     
-    // Mapping from symbol to latest intent hash
+    /// @notice Mapping from symbol to latest intent hash
     mapping(string => bytes32) public latestIntentBySymbol;
     
-    // Mapping of authorized signers
+    /// @notice Mapping of authorized signers
     mapping(address => bool) public authorizedSigners;
     
-    // Mapping to track processed intents
+    /// @notice Mapping to track processed intents to prevent replay
     mapping(bytes32 => bool) public processedIntents;
     
-    // EIP-712 domain separator
+    ///@notice EIP-712 domain separator
     bytes32 private immutable DOMAIN_SEPARATOR;
     
-    // Events
-    event IntentRegistered(bytes32 indexed intentHash, string indexed symbol, uint256 price, uint256 timestamp, address signer);
-    event SignerAuthorized(address indexed signer, bool status);
-    event BatchIntentsRegistered(uint256 count);
+    /** 
+        * @notice Event when a new intent is registered
+        * @param intentHash The hash of the registered intent
+        * @param symbol The symbol of the oracle data
+        * @param price The price value
+        * @param timestamp The timestamp of the oracle data
+        * @param signer The address of the signer
+    */
+    event IntentRegistered(bytes32 indexed intentHash, string indexed symbol, uint256 indexed price, uint256  timestamp, address  signer);
     
-    // Owner of the contract
+    /**
+     * @notice Event when a signer is authorized or deauthorized
+     * @param signer The address of the signer
+     * @param status The authorization status (true = authorized, false = deauthorized)
+     */
+    event SignerAuthorized(address indexed signer, bool indexed status);
+
+    /**
+     * @notice Event when multiple intents are registered in a batch
+     * @param count The number of intents registered
+     */
+    event BatchIntentsRegistered(uint256 indexed count);
+
+    /// @notice Contract owner
     address public owner;
     
-    // Modifiers
+    /// @notice Modifier to restrict functions to only the owner
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
-    
-    modifier onlyAuthorized() {
-        if (!(authorizedSigners[msg.sender] || msg.sender == owner)) revert NotAuthorized();
-        _;
-    }
-    
+ 
+    /// @notice Contract  constructor
     constructor() {
         owner = msg.sender;
         authorizedSigners[msg.sender] = true;
@@ -73,6 +89,7 @@ contract OracleIntentRegistry {
     
     /**
      * @dev Registers a new oracle intent with EIP-712 signature
+     * @notice Anyone can call this function with a valid signed intent
      * @param intentType The type of intent (e.g., "OracleUpdate")
      * @param version The version of the intent format
      * @param chainId The chain ID where the intent originates
@@ -86,16 +103,16 @@ contract OracleIntentRegistry {
      * @param signer The address of the signer
      */
     function registerIntent(
-        string memory intentType,
-        string memory version,
+        string calldata intentType,
+        string calldata version,
         uint256 chainId,
         uint256 nonce,
         uint256 expiry,
-        string memory symbol,
+        string calldata symbol,
         uint256 price,
         uint256 timestamp,
-        string memory source,
-        bytes memory signature,
+        string calldata source,
+        bytes calldata signature,
         address signer
     ) external {
         // Check if the intent has expired
@@ -119,7 +136,6 @@ contract OracleIntentRegistry {
             signer: signer
         });
         
-        // Calculate intent hash using shared library
         bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
         
         // Check if this intent has already been processed
@@ -132,19 +148,16 @@ contract OracleIntentRegistry {
         // Mark the intent as processed
         processedIntents[intentHash] = true;
         intents[intentHash] = intent;
-        
-        // Update latest intent for symbol if this timestamp is newer
         bytes32 currentLatestIntentHash = latestIntentBySymbol[symbol];
         if (currentLatestIntentHash == bytes32(0) || intents[currentLatestIntentHash].timestamp < timestamp) {
             latestIntentBySymbol[symbol] = intentHash;
         }
-        
-        // Emit event
         emit IntentRegistered(intentHash, symbol, price, timestamp, signer);
     }
 
     /**
      * @dev Registers multiple oracle intents with EIP-712 signatures in a single transaction
+     * @notice Anyone can call this function with valid signed intents
      * @param intentsData Array of intent data to register
      */
     function registerMultipleIntents(OracleIntentUtils.OracleIntent[] calldata intentsData) external {
@@ -154,31 +167,21 @@ contract OracleIntentRegistry {
         
         for (uint256 i = 0; i < intentsData.length; i++) {
             OracleIntentUtils.OracleIntent calldata data = intentsData[i];
+            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, DOMAIN_SEPARATOR);
             
-            // Skip expired intents
             if (block.timestamp > data.expiry) {
                 continue;
             }
-            
-            // Skip intents from unauthorized signers
             if (!authorizedSigners[data.signer]) {
                 continue;
             }
-            
-            // Calculate intent hash using shared library
-            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, DOMAIN_SEPARATOR);
-            
-            // Skip already processed intents
             if (processedIntents[intentHash]) {
                 continue;
             }
-            
-            // Verify the signature using shared library
             if (OracleIntentUtils.recoverSigner(intentHash, data.signature) != data.signer) {
                 continue;
             }
             
-            // Mark the intent as processed
             processedIntents[intentHash] = true;
             intents[intentHash] = OracleIntentUtils.OracleIntent({
                 intentType: data.intentType,
@@ -194,17 +197,13 @@ contract OracleIntentRegistry {
                 signer: data.signer
             });
             
-            // Update latest intent for symbol if this timestamp is newer
             bytes32 currentLatestIntentHash = latestIntentBySymbol[data.symbol];
             if (currentLatestIntentHash == bytes32(0) || intents[currentLatestIntentHash].timestamp < data.timestamp) {
                 latestIntentBySymbol[data.symbol] = intentHash;
             }
             
-            // Emit event for each successfully registered intent
             emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
-            
-            // Increment success count
-            successCount++;
+            ++successCount;
         }
         
         // Emit batch event
@@ -213,12 +212,13 @@ contract OracleIntentRegistry {
     
     /**
      * @dev Gets the latest price for a symbol
+     * @notice Returns the latest registered intent for the given symbol
      * @param symbol The symbol to get the price for
      * @return price The latest price
      * @return timestamp The timestamp of the price
      * @return source The source of the price
      */
-    function getLatestPrice(string memory symbol) external view returns (uint256 price, uint256 timestamp, string memory source) {
+    function getLatestPrice(string calldata symbol) external view returns (uint256 price, uint256 timestamp, string memory source) {
         bytes32 intentHash = latestIntentBySymbol[symbol];
         if (intentHash == bytes32(0)) revert NoIntentForSymbol();
         
@@ -228,6 +228,7 @@ contract OracleIntentRegistry {
     
     /**
      * @dev Gets the intent details by hash
+     * @notice Returns the details of a registered intent by its hash
      * @param intentHash The hash of the intent
      * @return The intent details
      */
@@ -240,6 +241,7 @@ contract OracleIntentRegistry {
      * @dev Authorizes or deauthorizes a signer
      * @param signer The address of the signer
      * @param status The authorization status
+     * @notice Only the contract owner can authorize or deauthorize signers
      */
     function setSignerAuthorization(address signer, bool status) external onlyOwner {
         authorizedSigners[signer] = status;
@@ -249,6 +251,7 @@ contract OracleIntentRegistry {
     /**
      * @dev Transfers ownership of the contract
      * @param newOwner The address of the new owner
+     * @notice Only the current owner can transfer ownership
      */
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
@@ -257,7 +260,9 @@ contract OracleIntentRegistry {
     
     
     /**
+     * @notice Gets the EIP-712 domain separator for signature validation
      * @dev Returns the domain separator for EIP-712 signatures
+     * @return The domain separator used for EIP-712 signatures
      */
     function getDomainSeparator() external view returns (bytes32) {
         return DOMAIN_SEPARATOR;
