@@ -459,32 +459,21 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      */
     function _decodeIntentData(bytes calldata _data) internal pure returns (OracleIntentUtils.OracleIntent memory intent) {
         (
-            string memory intentType,
-            string memory version,
-            uint256 chainId,
-            uint256 nonce,
-            uint256 expiry,
-            string memory symbol,
-            uint256 price,
-            uint256 timestamp,
-            string memory source,
-            bytes memory signature,
-            address signer
-        ) = abi.decode(_data, (string, string, uint256, uint256, uint256, string, uint256, uint256, string, bytes, address));
-        
-        return OracleIntentUtils.OracleIntent({
-            intentType: intentType,
-            version: version,
-            chainId: chainId,
-            nonce: nonce,
-            expiry: expiry,
-            symbol: symbol,
-            price: price,
-            timestamp: timestamp,
-            source: source,
-            signature: signature,
-            signer: signer
-        });
+        intent.intentType,
+        intent.version,
+        intent.chainId,
+        intent.nonce,
+        intent.expiry,
+        intent.symbol,
+        intent.price,
+        intent.timestamp,
+        intent.source,
+        intent.signature,
+        intent.signer
+    ) = abi.decode(
+        _data,
+        (string, string, uint256, uint256, uint256, string, uint256, uint256, string, bytes, address)
+    );
     }
     
     /**
@@ -518,29 +507,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     
     
 
-    /**
-     * @notice Calculates the hash for an OracleIntent from calldata using library function
-     * @param intent The OracleIntent structure from calldata
-     * @return The EIP-712 hash of the intent
-     */
-    function _calculateIntentHashFromCalldata(OracleIntentUtils.OracleIntent calldata intent) internal view returns (bytes32) {
-        // Create temporary memory copy to use library function
-        OracleIntentUtils.OracleIntent memory intentMem = OracleIntentUtils.OracleIntent({
-            intentType: intent.intentType,
-            version: intent.version,
-            chainId: intent.chainId,
-            nonce: intent.nonce,
-            expiry: intent.expiry,
-            symbol: intent.symbol,
-            price: intent.price,
-            timestamp: intent.timestamp,
-            source: intent.source,
-            signature: intent.signature,
-            signer: intent.signer
-        });
-        
-        return OracleIntentUtils.calculateIntentHash(intentMem, DOMAIN_SEPARATOR);
-    }
+   
 
     /**
      * @notice Shared intent validation that does not revert; used by both single and batch paths
@@ -559,7 +526,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
             return (ValidationStatus.UnauthorizedSigner, bytes32(0));
         }
 
-        bytes32 hash = _calculateIntentHashFromCalldata(intent);
+        bytes32 hash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
         if (processedIntents[hash]) {
             return (ValidationStatus.AlreadyProcessed, bytes32(0));
         }
@@ -578,7 +545,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @dev This is useful for external services to verify their intent hashes
      */
     function calculateIntentHash(OracleIntentUtils.OracleIntent calldata intent) external view override returns (bytes32) {
-        return _calculateIntentHashFromCalldata(intent);
+        return OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
     }
     
     
