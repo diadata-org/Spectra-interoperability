@@ -32,6 +32,22 @@ interface IPushOracleReceiverV2 is
 
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
+    
+    
+    // @notice Thrown when batch size exceeds maximum allowed
+    error BatchTooLarge();
+    
+    // @notice Thrown when domain name is empty
+    error InvalidDomainName();
+    
+    // @notice Thrown when domain version is empty
+    error InvalidDomainVersion();
+    
+    // @notice Thrown when chain ID is zero
+    error InvalidChainId();
+    
+    // @notice Thrown when attempting to set a zero domain separator
+    error DomainSeparatorZero();
 
     // @notice Emitted when stuck funds are recovered
     // @param recipient The address that received the funds
@@ -85,6 +101,20 @@ interface IPushOracleReceiverV2 is
     event PaymentHookUpdated(
         address indexed previousPaymentHook,
         address indexed newPaymentHook
+    );
+    
+    // @notice Emitted when domain separator is updated/created
+    // @param domainSeparator The created domain separator
+    // @param domainName The domain name used
+    // @param domainVersion The domain version used
+    // @param sourceChainId The source chain ID used
+    // @param verifyingContract The verifying contract address used
+    event DomainSeparatorUpdated(
+        bytes32 indexed domainSeparator,
+        string domainName,
+        string domainVersion,
+        uint256 sourceChainId,
+        address indexed verifyingContract
     );
 
     struct Data {
@@ -156,6 +186,22 @@ interface IPushOracleReceiverV2 is
     function setSignerAuthorization(
         address _signer,
         bool _isAuthorized
+    ) external;
+    
+    /**
+     * @notice Sets the EIP-712 domain separator for signature validation
+     * @param domainName The domain name for EIP-712
+     * @param domainVersion The domain version for EIP-712  
+     * @param sourceChainId The source chain ID for the domain
+     * @param verifyingContract The verifying contract address
+     * @dev Only the contract owner can update domain separator
+     * @dev CRITICAL: This domain separator must match exactly with OracleTriggerV2's domain separator
+     */
+    function setDomainSeparator(
+        string memory domainName,
+        string memory domainVersion,
+        uint256 sourceChainId,
+        address verifyingContract
     ) external;
 
     /**

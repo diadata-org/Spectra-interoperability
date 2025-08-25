@@ -6,31 +6,13 @@ import { ReentrancyGuard } from "@openzeppelin/contracts/security/ReentrancyGuar
 import { IMailbox } from "./interfaces/IMailbox.sol";
 import { IOracleTriggerV2 } from "./interfaces/oracle/IOracleTriggerV2.sol";
 import { TypeCasts } from "./libs/TypeCasts.sol";
+import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
 
 
-// Interface for OracleIntentRegistry
+// Interface for OracleIntentRegistry using shared struct
 interface IOracleIntentRegistry {
-    struct OracleIntent {
-        // Metadata
-        string intentType;
-        string version;
-        uint256 chainId;
-        uint256 nonce;
-        uint256 expiry;
-        
-        // Oracle data
-        string symbol;
-        uint256 price;
-        uint256 timestamp;
-        string source;
-        
-        // Signature data
-        bytes signature;
-        address signer;
-    }
-    
     function getLatestPrice(string memory symbol) external view returns (uint256 price, uint256 timestamp, string memory source);
-    function getIntent(bytes32 intentHash) external view returns (OracleIntent memory);
+    function getIntent(bytes32 intentHash) external view returns (OracleIntentUtils.OracleIntent memory);
     function latestIntentBySymbol(string memory) external view returns (bytes32);
 }
 
@@ -56,11 +38,12 @@ contract OracleTriggerV2 is
     /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestReceipent.
     bytes32 public constant DISPATCHER_ROLE = keccak256("DISPATCHER_ROLE");
 
-    /// @notice Address of the DIA oracle metadata contract.
-    address public metadataContract;
     
     /// @notice Address of the OracleIntentRegistry contract.
     address public intentRegistryContract;
+    
+    /// @notice EIP-712 domain separator for signature validation
+    bytes32 public DOMAIN_SEPARATOR;
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -117,7 +100,9 @@ contract OracleTriggerV2 is
     function deleteChain(
         uint32 _chainId
     ) public onlyRole(OWNER_ROLE) validateChain(_chainId) {
+        address recipient = chains[_chainId];
         delete chains[_chainId];
+        emit ChainDeleted(_chainId, recipient);
     }
 
     /// @notice Retrieves the recipient address for a specific chain
@@ -129,14 +114,6 @@ contract OracleTriggerV2 is
         return chains[_chainId];
     }
 
-    /// @notice Updates the metadata contract address
-    /// @param newMetadata The new metadata contract address
-    function updateMetadataContract(
-        address newMetadata
-    ) external onlyRole(OWNER_ROLE) validateAddress(newMetadata) {
-        metadataContract = newMetadata;
-        emit MetadataContractUpdated(newMetadata);
-    }
     
     /// @notice Updates the intent registry contract address
     /// @param newRegistry The new intent registry contract address
@@ -146,20 +123,65 @@ contract OracleTriggerV2 is
         intentRegistryContract = newRegistry;
         emit IntentRegistryContractUpdated(newRegistry);
     }
+    
+    /// @notice Sets the EIP-712 domain separator for signature validation
+    /// @param domainName The domain name for EIP-712
+    /// @param domainVersion The domain version for EIP-712  
+    /// @param sourceChainId The source chain ID for the domain
+    /// @dev CRITICAL: This domain separator must match exactly with PushOracleReceiverV2's immutable domain separator
+    /// @dev for signature validation to work correctly across the system
+    function setDomainSeparator(
+        string memory domainName,
+        string memory domainVersion,
+        uint256 sourceChainId
+    ) external onlyRole(OWNER_ROLE) {
+        bytes32 newDomainSeparator = OracleIntentUtils.createDomainSeparator(
+            domainName,
+            domainVersion,
+            sourceChainId,
+            address(this)
+        );
+        
+        if (newDomainSeparator == bytes32(0)) {
+            revert DomainSeparatorZero();
+        }
+        
+        DOMAIN_SEPARATOR = newDomainSeparator;
+        emit DomainSeparatorUpdated(
+            DOMAIN_SEPARATOR,
+            domainName,
+            domainVersion,
+            sourceChainId,
+            address(this)
+        );
+    }
 
-    function _getLatestIntent(string memory key) internal view returns (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash)  {
+    function _getLatestIntent(string memory _key) internal view returns (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash)  {
         address registry = intentRegistryContract;
-        if (registry == address(0)) revert InvalidAddress();
+        if (registry == address(0)) revert RegistryUnavailable(_key);
         
         IOracleIntentRegistry registryContract = IOracleIntentRegistry(registry);
         
-        intentHash = registryContract.latestIntentBySymbol(key);
-        if (intentHash == bytes32(0)) revert OracleError(key);
+        intentHash = registryContract.latestIntentBySymbol(_key);
+        if (intentHash == bytes32(0)) revert RegistryUnavailable(_key);
 
         intent = registryContract.getIntent(intentHash);
+        
+        // Validate basic intent data
+        if (bytes(intent.symbol).length == 0) revert IntentDataInvalid(_key, "Empty symbol");
+        if (intent.price == 0) revert IntentDataInvalid(_key, "Zero price");
+        if (intent.timestamp == 0) revert IntentDataInvalid(_key, "Zero timestamp");
+        if (intent.signer == address(0)) revert IntentDataInvalid(_key, "Invalid signer");
+        if (intent.signature.length == 0) revert IntentDataInvalid(_key, "Empty signature");
+        
+        // Validate signature if domain separator is set
+        if (DOMAIN_SEPARATOR != bytes32(0)) {
+            bool isValid = OracleIntentUtils.validateSignature(intent, DOMAIN_SEPARATOR);
+            if (!isValid) revert InvalidSignature(_key);
+        }
     }
 
-    function _encodeIntentMessage(IOracleIntentRegistry.OracleIntent memory intent) internal pure returns (bytes memory) {
+    function _encodeIntentMessage(OracleIntentUtils.OracleIntent memory intent) internal pure returns (bytes memory) {
         return abi.encode(
             intent.intentType,
             intent.version,
@@ -181,7 +203,7 @@ contract OracleTriggerV2 is
      */
     function dispatchToChain(
         uint32 _destinationDomain,
-        string memory key
+        string memory _key
     )
         external
         payable
@@ -190,7 +212,7 @@ contract OracleTriggerV2 is
         validateAddress(mailBox)
         nonReentrant
     {
-        (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(key);
+        (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(_key);
 
         bytes memory messageBody = _encodeIntentMessage(intent);
 
@@ -202,7 +224,7 @@ contract OracleTriggerV2 is
             messageBody
         );
 
-        emit MessageDispatched(_destinationDomain, recipient, messageId, intentHash, key);
+        emit MessageDispatched(_destinationDomain, recipient, messageId, intentHash, _key);
     }
 
     /**
@@ -211,27 +233,27 @@ contract OracleTriggerV2 is
      */
     function dispatch(
         uint32 _destinationDomain,
-        address recipientAddress,
-        string memory key
+        address _recipientAddress,
+        string memory _key
     )
         external
         payable
         onlyRole(DISPATCHER_ROLE)
         nonReentrant
         validateAddress(mailBox)
-        validateAddress(recipientAddress)
+        validateAddress(_recipientAddress)
     {
-        (IOracleIntentRegistry.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(key);
+        (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(_key);
 
         bytes memory messageBody = _encodeIntentMessage(intent);
 
         bytes32 messageId = IMailbox(mailBox).dispatch{ value: msg.value }(
             _destinationDomain,
-            recipientAddress.addressToBytes32(),
+            _recipientAddress.addressToBytes32(),
             messageBody
         );
 
-        emit MessageDispatched(_destinationDomain, recipientAddress, messageId, intentHash, key);
+        emit MessageDispatched(_destinationDomain, _recipientAddress, messageId, intentHash, _key);
     }
 
     /// @notice Sets the mailbox contract address

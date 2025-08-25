@@ -22,6 +22,23 @@ interface IOracleTriggerV2 {
 
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
+    
+    
+    /// @notice Error thrown when attempting to set a zero domain separator
+    error DomainSeparatorZero();
+    
+    /// @notice Error thrown when intent signature validation fails
+    /// @param key The oracle key that had invalid signature
+    error InvalidSignature(string key);
+    
+    /// @notice Error thrown when intent data is invalid
+    /// @param key The oracle key that had invalid data
+    /// @param reason The specific reason for data invalidity
+    error IntentDataInvalid(string key, string reason);
+    
+    /// @notice Error thrown when the registry is unavailable or returns no data
+    /// @param key The oracle key that could not be retrieved
+    error RegistryUnavailable(string key);
 
     /// @notice Emitted when a new chain is added
     /// @param chainId The chain ID of the newly added chain
@@ -55,10 +72,6 @@ interface IOracleTriggerV2 {
     /// @notice Emitted when the mailbox contract address is updated
     /// @param newMailbox The new mailbox contract address
     event MailboxUpdated(address indexed newMailbox);
-
-    /// @notice Emitted when the metadata contract address is updated
-    /// @param newMetadata The new metadata contract address
-    event MetadataContractUpdated(address indexed newMetadata);
     
     /// @notice Emitted when the intent registry contract address is updated
     /// @param newRegistry The new intent registry contract address
@@ -68,13 +81,33 @@ interface IOracleTriggerV2 {
     /// @param receiver The address of the receiver
     /// @param amount The amount of tokens recovered
     event TokensRecovered(address receiver, uint256 amount);
+    
+    /// @notice Emitted when the domain separator is updated
+    /// @param domainSeparator The new domain separator
+    /// @param domainName The domain name used
+    /// @param domainVersion The domain version used
+    /// @param sourceChainId The source chain ID used
+    /// @param verifyingContract The verifying contract address used
+    event DomainSeparatorUpdated(
+        bytes32 indexed domainSeparator,
+        string domainName,
+        string domainVersion,
+        uint256 sourceChainId,
+        address indexed verifyingContract
+    );
+    
+    
+    /// @notice Emitted when a chain is deleted from configuration
+    /// @param chainId The chain ID that was deleted
+    /// @param recipient The recipient address that was removed
+    event ChainDeleted(uint32 indexed chainId, address recipient);
 
     /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
     /// @param _destinationDomain The destination chain ID
-    /// @param key The symbol to fetch the latest intent for
+    /// @param _key The symbol to fetch the latest intent for
     function dispatchToChain(
         uint32 _destinationDomain,
-        string memory key
+        string memory _key
     ) external payable;
 
     /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
