@@ -38,6 +38,7 @@ import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
  * - The oracle trigger address must be whitelisted in the ISM (Interchain Security Module) of PushOracleReceiver.
  * - Intent-based updates must be signed by authorized signers.
  */
+
 contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard {
 
     /// @notice Maximum number of intents that can be processed in a single batch
@@ -546,6 +547,18 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         }
 
         return (ValidationStatus.Ok, hash);
+    }
+
+    /**
+     * @notice Fetches the latest oracle value for a given key
+     * @param key The oracle key to query
+     * @return value The latest oracle value
+     * @return timestamp The timestamp of the latest update
+     */
+    function getValue(string calldata key) external view returns (uint128, uint128) {
+        uint128 value = updates[key].value;
+        uint128 timestamp = updates[key].timestamp;
+        return (value, timestamp);
     }
 
     /**
