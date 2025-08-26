@@ -5,7 +5,6 @@
 // import "../contracts/PushOracleReceiverV2.sol";
 // import "../contracts/interfaces/oracle/IPushOracleReceiverV2.sol";
 // import "../contracts/interfaces/IInterchainSecurityModule.sol";
-// import "../contracts/ProtocolFeeHook.sol";
 // import "../contracts/libs/OracleIntentUtils.sol";
 
 // contract MockInterchainSecurityModule is IInterchainSecurityModule {
