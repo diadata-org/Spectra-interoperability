@@ -366,7 +366,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         address receiver
     ) external override onlyOwner validateAddress(receiver) nonReentrant {
         uint256 balance = address(this).balance;
-        if (balance == 0) revert NoBalanceToWithdraw();
+        if (balance <= 0) revert NoBalanceToWithdraw();
 
         emit TokensRecovered(receiver, balance);
         

@@ -279,7 +279,7 @@ contract OracleTriggerV2 is
         address receiver
     ) external onlyRole(OWNER_ROLE) validateAddress(receiver) {
         uint256 balance = address(this).balance;
-        if (balance == 0) revert NoBalanceToWithdraw();
+        if (balance <= 0) revert NoBalanceToWithdraw();
 
         (bool success, ) = payable(receiver).call{ value: balance }("");
         if (!success) revert AmountTransferFailed();

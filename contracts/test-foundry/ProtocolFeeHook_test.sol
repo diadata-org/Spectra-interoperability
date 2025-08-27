@@ -90,6 +90,11 @@ contract ProtocolFeeHookTest is Test {
 
         address recipient = address(0xC0FFEE);
         uint256 initialBalance = recipient.balance;
+        uint256 contractBalance = address(feeHook).balance;
+
+        // Expect the FeesWithdrawn event to be emitted before the external call
+        vm.expectEmit(true, false, false, true);
+        emit IProtocolFeeHook.FeesWithdrawn(recipient, contractBalance);
 
         feeHook.withdrawFees(recipient);
 
