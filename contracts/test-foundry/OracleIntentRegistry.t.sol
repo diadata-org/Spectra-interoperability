@@ -112,6 +112,10 @@ contract OracleIntentRegistryTest is Test {
     function testTransferOwnership() public {
         assertEq(registry.owner(), owner);
         
+        // Expect the OwnershipTransferred event
+        vm.expectEmit(true, true, false, false);
+        emit OracleIntentRegistry.OwnershipTransferred(owner, user1);
+        
         registry.transferOwnership(user1);
         assertEq(registry.owner(), user1);
     }

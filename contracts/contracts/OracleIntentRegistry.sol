@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.29;
+pragma solidity 0.8.29;
 
 import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
 
@@ -39,7 +39,7 @@ contract OracleIntentRegistry {
     mapping(bytes32 => bool) public processedIntents;
     
     ///@notice EIP-712 domain separator
-    bytes32 private immutable DOMAIN_SEPARATOR;
+    bytes32 private immutable domainSeparator;
     
     /** 
         * @notice Event when a new intent is registered
@@ -64,6 +64,13 @@ contract OracleIntentRegistry {
      */
     event BatchIntentsRegistered(uint256 indexed count);
 
+    /**
+     * @notice Event when ownership is transferred
+     * @param previousOwner The address of the previous owner
+     * @param newOwner The address of the new owner
+     */
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     /// @notice Contract owner
     address public owner;
     
@@ -79,7 +86,7 @@ contract OracleIntentRegistry {
         authorizedSigners[msg.sender] = true;
         
         // Create the EIP-712 domain separator using shared library
-        DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
+        domainSeparator = OracleIntentUtils.createDomainSeparator(
             "DIA Oracle Intent",
             "1",
             block.chainid,
@@ -136,7 +143,7 @@ contract OracleIntentRegistry {
             signer: signer
         });
         
-        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, DOMAIN_SEPARATOR);
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
         
         // Check if this intent has already been processed
         if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
@@ -167,7 +174,7 @@ contract OracleIntentRegistry {
         
         for (uint256 i = 0; i < intentsData.length; i++) {
             OracleIntentUtils.OracleIntent calldata data = intentsData[i];
-            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, DOMAIN_SEPARATOR);
+            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, domainSeparator);
             
             if (block.timestamp > data.expiry) {
                 continue;
@@ -255,7 +262,9 @@ contract OracleIntentRegistry {
      */
     function transferOwnership(address newOwner) external onlyOwner {
         if (newOwner == address(0)) revert ZeroAddress();
+        address previousOwner = owner;
         owner = newOwner;
+        emit OwnershipTransferred(previousOwner, newOwner);
     }
     
     
@@ -265,6 +274,6 @@ contract OracleIntentRegistry {
      * @return The domain separator used for EIP-712 signatures
      */
     function getDomainSeparator() external view returns (bytes32) {
-        return DOMAIN_SEPARATOR;
+        return domainSeparator;
     }
 } 
