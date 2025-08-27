@@ -364,13 +364,14 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      */
     function retrieveLostTokens(
         address receiver
-    ) external override onlyOwner validateAddress(receiver) {
+    ) external override onlyOwner validateAddress(receiver) nonReentrant {
         uint256 balance = address(this).balance;
         if (balance == 0) revert NoBalanceToWithdraw();
 
+        emit TokensRecovered(receiver, balance);
+        
         (bool success, ) = payable(receiver).call{ value: balance }("");
         if (!success) revert AmountTransferFailed();
-        emit TokensRecovered(receiver, balance);
     }
     
     /**
