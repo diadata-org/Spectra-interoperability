@@ -60,7 +60,7 @@ interface IPushOracleReceiverV2 is
     // @param value The value of the update
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
     
-    // @notice Emitted when an intent-based update is received
+    // @notice Emitted when an intent-based update is received and applied
     // @param intentHash The hash of the intent
     // @param symbol The symbol of the update
     // @param price The price value
@@ -71,6 +71,22 @@ interface IPushOracleReceiverV2 is
         string indexed symbol,
         uint256 price,
         uint256 timestamp,
+        address indexed signer
+    );
+    
+    // @notice Emitted when an intent-based update is received but rejected due to stale timestamp
+    // @param intentHash The hash of the intent
+    // @param symbol The symbol of the update
+    // @param price The price value
+    // @param timestamp The timestamp of the update (stale)
+    // @param existingTimestamp The existing newer timestamp
+    // @param signer The address of the signer
+    event IntentBasedStaleUpdateReceived(
+        bytes32 indexed intentHash,
+        string indexed symbol,
+        uint256 price,
+        uint256 timestamp,
+        uint256 existingTimestamp,
         address indexed signer
     );
     

@@ -450,6 +450,15 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         uint128 priceU128 = uint128(price);
         
         if (updates[symbol].timestamp >= timestampU128) {
+            // Emit event for stale data to provide transparency
+            emit IntentBasedStaleUpdateReceived(
+                intentHash, 
+                symbol, 
+                price, 
+                timestamp, 
+                uint256(updates[symbol].timestamp), 
+                signer
+            );
             return false;
         }
 

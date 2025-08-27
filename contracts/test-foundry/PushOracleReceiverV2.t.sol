@@ -782,13 +782,24 @@ contract PushOracleReceiverV2Test is Test {
         
         oracle.handleIntentUpdate(newerIntent);
         
-        // Try to process older intent
+        // Try to process older intent - should emit stale event
         OracleIntentUtils.OracleIntent memory olderIntent = createValidIntent("BTC", 2);
         olderIntent.timestamp = TEST_TIMESTAMP; // Older
         bytes32 olderHash = oracle.calculateIntentHash(olderIntent);
         (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(signerPk, olderHash);
         olderIntent.signature = abi.encodePacked(r2, s2, v2);
         olderIntent.signer = authorizedSigner;
+        
+        // Expect stale event to be emitted
+        vm.expectEmit(true, true, true, true);
+        emit IPushOracleReceiverV2.IntentBasedStaleUpdateReceived(
+            olderHash,
+            "BTC",
+            olderIntent.price,
+            olderIntent.timestamp,
+            TEST_TIMESTAMP + 1000, // existing newer timestamp
+            authorizedSigner
+        );
         
         oracle.handleIntentUpdate(olderIntent);
         
