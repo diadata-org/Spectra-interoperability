@@ -638,6 +638,17 @@ contract OracleIntentRegistryTest is Test {
         assertNotEq(retrievedPriceIntent.nonce, retrievedVolumeIntent.nonce);
     }
     
+    function testGetLatestIntentByTypeNoIntentForSymbol() public {
+        // Try to get intent for non-existent symbol+type combination
+        vm.expectRevert(OracleIntentRegistry.NoIntentForSymbol.selector);
+        registry.getLatestIntentByType("PriceUpdate", "NONEXISTENT");
+    }
+    
+    function testGetLatestIntentByTypeIntentNotFound() public {
+        vm.expectRevert(OracleIntentRegistry.NoIntentForSymbol.selector);
+        registry.getLatestIntentByType("NonExistentType", "NonExistentSymbol");
+    }
+    
     function testGetLatestIntentHashByType() public {
         registry.setSignerAuthorization(signer1, true);
         
@@ -727,5 +738,118 @@ contract OracleIntentRegistryTest is Test {
         );
         
         return intentHash;
+    }
+    
+    
+    function testRegisterMultipleIntentsWithUnauthorizedSignersOnly() public {
+        // Test batch with ALL unauthorized signers (different path than mixed batch)
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](2);
+        intents[0] = createSignedIntent(createTestIntent("TOKEN0", 1), signer1Pk, signer1);
+        intents[1] = createSignedIntent(createTestIntent("TOKEN1", 2), signer2Pk, signer2);
+        
+        // Neither signer is authorized
+        vm.expectEmit(true, false, false, false);
+        emit BatchIntentsRegistered(0);
+        
+        registry.registerMultipleIntents(intents);
+    }
+    
+    function testRegisterMultipleIntentsWithDuplicateIntents() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Create same intent twice in same batch
+        OracleIntentUtils.OracleIntent memory intent1 = createTestIntent("TOKEN0", 1);
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](2);
+        intents[0] = createSignedIntent(intent1, signer1Pk, signer1);
+        intents[1] = createSignedIntent(intent1, signer1Pk, signer1); // Same intent
+        
+        vm.expectEmit(true, false, false, false);
+        emit BatchIntentsRegistered(1); // Only first one should be processed
+        
+        registry.registerMultipleIntents(intents);
+        
+        // Verify only one was processed
+        bytes32 latestHash = registry.getLatestIntentHashByType("OracleUpdate", "TOKEN0");
+        assertTrue(latestHash != bytes32(0));
+    }
+    
+    function testBatchRegistrationTimestampOrdering() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Create intents with out-of-order timestamps but process in batch
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](3);
+        
+        // Intent with newest timestamp (should become latest)
+        OracleIntentUtils.OracleIntent memory intent1 = createTestIntent("TOKEN0", 1);
+        intent1.timestamp = block.timestamp + 300;
+        intent1.price = 300e18;
+        intents[0] = createSignedIntent(intent1, signer1Pk, signer1);
+        
+        // Intent with oldest timestamp
+        OracleIntentUtils.OracleIntent memory intent2 = createTestIntent("TOKEN0", 2);
+        intent2.timestamp = block.timestamp + 100;
+        intent2.price = 100e18;
+        intents[1] = createSignedIntent(intent2, signer1Pk, signer1);
+        
+        // Intent with middle timestamp
+        OracleIntentUtils.OracleIntent memory intent3 = createTestIntent("TOKEN0", 3);
+        intent3.timestamp = block.timestamp + 200;
+        intent3.price = 200e18;
+        intents[2] = createSignedIntent(intent3, signer1Pk, signer1);
+        
+        registry.registerMultipleIntents(intents);
+        
+        // Latest should be the one with highest timestamp (300)
+        OracleIntentUtils.OracleIntent memory latestIntent = registry.getLatestIntentByType("OracleUpdate", "TOKEN0");
+        assertEq(latestIntent.price, 300e18);
+        assertEq(latestIntent.timestamp, block.timestamp + 300);
+    }
+    
+    function testRegisterMultipleIntentsWithMalformedSignatures() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Create intent with invalid signature format that ecrecover will reject
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](1);
+        
+        OracleIntentUtils.OracleIntent memory badSigIntent = createTestIntent("TOKEN1", 2);
+        // Create a 65-byte signature that's properly formatted but invalid (all zeros except last byte)
+        badSigIntent.signature = new bytes(65);
+        badSigIntent.signature[64] = 0x1c; // Valid v value
+        badSigIntent.signer = signer1;
+        intents[0] = badSigIntent;
+        
+        // The signature won't recover to signer1, so it should be skipped
+        registry.registerMultipleIntents(intents);
+        
+        // Verify no intents were processed (no event check needed as it's not deterministic)
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate", "TOKEN1") == bytes32(0));
+    }
+    
+    function testRegisterIntentLatestIntentCases() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // First, register an intent when no latest intent exists
+        OracleIntentUtils.OracleIntent memory firstIntent = createTestIntent("NEWTOKEN", 1);
+        firstIntent.timestamp = block.timestamp;
+        bytes32 firstHash = registerValidIntent(firstIntent, signer1Pk, signer1);
+        
+        // Verify it became the latest
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), firstHash);
+        
+        // Register newer intent (covers first condition of OR)
+        OracleIntentUtils.OracleIntent memory newerIntent = createTestIntent("NEWTOKEN", 2);
+        newerIntent.timestamp = block.timestamp + 1000;
+        bytes32 newerHash = registerValidIntent(newerIntent, signer1Pk, signer1);
+        
+        // Verify newer intent became latest
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), newerHash);
+        
+        // Register older intent 
+        OracleIntentUtils.OracleIntent memory olderIntent = createTestIntent("NEWTOKEN", 3);
+        olderIntent.timestamp = block.timestamp + 500; // Older than current latest
+        registerValidIntent(olderIntent, signer1Pk, signer1);
+        
+        // Verify latest didn't change
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), newerHash);
     }
 }
