@@ -327,7 +327,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @param domainVersion The domain version for EIP-712  
      * @param sourceChainId The source chain ID for the domain
      * @param verifyingContract The verifying contract address
-     * @dev CRITICAL: This domain separator must match exactly with OracleTriggerV2's domain separator
+     * @dev CRITICAL: This domain separator must match exactly with OracleIntentRegistry's domain separator
      * @dev for signature validation to work correctly across the system
      */
     function setDomainSeparator(
