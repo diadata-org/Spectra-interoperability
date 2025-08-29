@@ -253,7 +253,7 @@ contract OracleTriggerV2Test is Test {
         
         // Dispatch should work with registered intent
         vm.prank(owner);
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId,"OracleUpdate", TEST_SYMBOL);
         
         // Test passes if no revert occurs
     }
@@ -278,7 +278,7 @@ contract OracleTriggerV2Test is Test {
         
         // Dispatch should work with registered intent
         vm.prank(owner);
-        oracleTriggerV2.dispatch{value: 0.1 ether}(chainId, recipient, TEST_SYMBOL);
+        oracleTriggerV2.dispatch{value: 0.1 ether}(chainId, recipient, "OracleUpdate", TEST_SYMBOL);
         
         // Test passes if no revert occurs
     }
@@ -298,9 +298,9 @@ contract OracleTriggerV2Test is Test {
         freshContract.grantRole(freshContract.DISPATCHER_ROLE(), owner);
         
         vm.deal(owner, 1 ether);
-        
-        vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.RegistryUnavailable.selector, TEST_SYMBOL));
-        freshContract.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+
+        vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.RegistryUnavailable.selector, "OracleUpdate", TEST_SYMBOL));
+        freshContract.dispatchToChain{value: 0.1 ether}(chainId,"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -318,8 +318,8 @@ contract OracleTriggerV2Test is Test {
         vm.deal(owner, 1 ether);
         
         // Should fail because no intent is registered for TEST_SYMBOL
-        vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.RegistryUnavailable.selector, TEST_SYMBOL));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.RegistryUnavailable.selector, "OracleUpdate", TEST_SYMBOL));
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, "OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -333,7 +333,7 @@ contract OracleTriggerV2Test is Test {
         setupBasicDispatchTest();
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.IntentDataInvalid.selector, TEST_SYMBOL, "Empty symbol"));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId,"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -347,7 +347,7 @@ contract OracleTriggerV2Test is Test {
         setupBasicDispatchTest();
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.IntentDataInvalid.selector, TEST_SYMBOL, "Zero price"));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId,"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -361,7 +361,7 @@ contract OracleTriggerV2Test is Test {
         setupBasicDispatchTest();
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.IntentDataInvalid.selector, TEST_SYMBOL, "Zero timestamp"));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId,"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -375,7 +375,7 @@ contract OracleTriggerV2Test is Test {
         setupBasicDispatchTest();
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.IntentDataInvalid.selector, TEST_SYMBOL, "Invalid signer"));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId,"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -389,7 +389,7 @@ contract OracleTriggerV2Test is Test {
         setupBasicDispatchTest();
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.IntentDataInvalid.selector, TEST_SYMBOL, "Empty signature"));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(chainId, "OracleUpdate",TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -444,7 +444,7 @@ contract OracleTriggerV2Test is Test {
         vm.deal(owner, 1 ether);
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.InvalidAddress.selector));
-        oracleTriggerV2.dispatch{value: 0.1 ether}(chainId, address(0), TEST_SYMBOL);
+        oracleTriggerV2.dispatch{value: 0.1 ether}(chainId, address(0),"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -474,7 +474,7 @@ contract OracleTriggerV2Test is Test {
         vm.deal(owner, 1 ether);
         
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.ChainNotConfigured.selector, 55555));
-        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(55555, TEST_SYMBOL);
+        oracleTriggerV2.dispatchToChain{value: 0.1 ether}(55555, "OracleUpdate",TEST_SYMBOL);
         vm.stopPrank();
     }
     
@@ -529,7 +529,7 @@ contract OracleTriggerV2Test is Test {
         );
         
         // Latest intent should still be the first one (newer timestamp)
-        bytes32 latestHash = intentRegistry.latestIntentBySymbol("BTC");
+        bytes32 latestHash = intentRegistry.getLatestIntentHashByType("OracleUpdate","BTC");
         assertEq(latestHash, firstIntentHash);
     }
     
@@ -547,7 +547,7 @@ contract OracleTriggerV2Test is Test {
         
         // Dispatch to specific recipient (not using configured chain)
         address specificRecipient = address(0x777);
-        oracleTriggerV2.dispatch{value: 0.1 ether}(chainId, specificRecipient, TEST_SYMBOL);
+        oracleTriggerV2.dispatch{value: 0.1 ether}(chainId, specificRecipient,"OracleUpdate", TEST_SYMBOL);
         vm.stopPrank();
         
         // Test passes if no revert occurs
@@ -621,6 +621,10 @@ contract MockInvalidIntentRegistry {
     }
     
     function latestIntentBySymbol(string memory) external pure returns (bytes32) {
+        return bytes32(uint256(1)); // Non-zero hash
+    }
+    
+    function getLatestIntentHashByType(string calldata, string calldata) external pure returns (bytes32) {
         return bytes32(uint256(1)); // Non-zero hash
     }
     

@@ -152,6 +152,7 @@ contract OracleTriggerV2 is
     }
 
     /** @dev Fetches the latest intent from the registry for the given symbol
+     * @param _intentType The type of intent to fetch (e.g., "OracleUpdate")
      * @param _key The symbol to fetch the latest intent for
      * @return intent The latest OracleIntent struct
      * @return intentHash The hash of the latest intent
@@ -159,14 +160,14 @@ contract OracleTriggerV2 is
      * @notice Also performs basic validation on the returned intent data
      */
 
-    function _getLatestIntent(string memory _key) internal view returns (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash)  {
+    function _getLatestIntent(string memory _intentType,string memory _key) internal view returns (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash)  {
         address registry = intentRegistryContract;
-        if (registry == address(0)) revert RegistryUnavailable(_key);
+        if (registry == address(0)) revert RegistryUnavailable(_intentType, _key);
         
         IOracleIntentRegistry registryContract = IOracleIntentRegistry(registry);
-        
-        intentHash = registryContract.latestIntentBySymbol(_key);
-        if (intentHash == bytes32(0)) revert RegistryUnavailable(_key);
+
+        intentHash = registryContract.getLatestIntentHashByType(_intentType, _key);
+        if (intentHash == bytes32(0)) revert RegistryUnavailable(_intentType, _key);
 
         intent = registryContract.getIntent(intentHash);
         
@@ -204,10 +205,12 @@ contract OracleTriggerV2 is
      * @dev See {IOracleTrigger-dispatchToChain}.
      * @notice Now gets the latest intent from the registry and sends it as the message
      * @param _destinationDomain The destination chain ID
+     * @param _intentType The type of intent to fetch (e.g., "OracleUpdate")
      * @param _key The symbol to fetch the latest intent for
      */
     function dispatchToChain(
         uint32 _destinationDomain,
+        string calldata _intentType,
         string calldata _key
     )
         external
@@ -217,7 +220,7 @@ contract OracleTriggerV2 is
         validateAddress(mailBox)
         nonReentrant
     {
-        (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(_key);
+        (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(_intentType,_key);
 
         bytes memory messageBody = _encodeIntentMessage(intent);
 
@@ -237,11 +240,13 @@ contract OracleTriggerV2 is
      * @notice Now gets the latest intent from the registry and sends it as the message
      * @param _destinationDomain The destination chain ID
      * @param _recipientAddress The address of the recipient contract on the destination chain
+     * @param _intentType The type of intent to fetch (e.g., "OracleUpdate")
      * @param _key The symbol to fetch the latest intent for
      */
     function dispatch(
         uint32 _destinationDomain,
         address _recipientAddress,
+        string calldata _intentType,
         string calldata _key
     )
         external
@@ -251,7 +256,7 @@ contract OracleTriggerV2 is
         validateAddress(mailBox)
         validateAddress(_recipientAddress)
     {
-        (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(_key);
+        (OracleIntentUtils.OracleIntent memory intent, bytes32 intentHash) = _getLatestIntent(_intentType,_key);
 
         bytes memory messageBody = _encodeIntentMessage(intent);
 

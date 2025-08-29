@@ -157,7 +157,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         // Step 2: Verify all intents were registered
         for (uint i = 0; i < batchSize; i++) {
             string memory symbol = string(abi.encodePacked("TOKEN", vm.toString(i)));
-            bytes32 latestHash = registry.latestIntentBySymbol(symbol);
+            bytes32 latestHash = registry.getLatestIntentHashByType("OracleUpdate",symbol);
             assertEq(latestHash, registryIntentHashes[i]);
         }
         

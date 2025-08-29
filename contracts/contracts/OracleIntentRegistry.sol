@@ -16,7 +16,6 @@ contract OracleIntentRegistry {
     // Custom errors for gas-efficient reverts
     error NotOwner();
     error NotAuthorized();
-    error IntentExpired();
     error SignerNotAuthorized();
     error IntentAlreadyProcessed();
     error InvalidSignature();
@@ -29,8 +28,9 @@ contract OracleIntentRegistry {
     /// @notice Mapping from intent hash to OracleIntent details
     mapping(bytes32 => OracleIntentUtils.OracleIntent) public intents;
     
-    /// @notice Mapping from symbol to latest intent hash
-    mapping(string => bytes32) public latestIntentBySymbol;
+    /// @notice Mapping from composite key (intentType + symbol) to latest intent hash
+    /// @dev Key format: keccak256(abi.encodePacked(intentType, "|", symbol))
+    mapping(bytes32 => bytes32) public latestIntentByTypeAndSymbol;
     
     /// @notice Mapping of authorized signers
     mapping(address => bool) public authorizedSigners;
@@ -122,8 +122,6 @@ contract OracleIntentRegistry {
         bytes calldata signature,
         address signer
     ) external {
-        // Check if the intent has expired
-        if (block.timestamp > expiry) revert IntentExpired();
         
         // Verify the signer is authorized
         if (!authorizedSigners[signer]) revert SignerNotAuthorized();
@@ -155,17 +153,23 @@ contract OracleIntentRegistry {
         // Mark the intent as processed
         processedIntents[intentHash] = true;
         intents[intentHash] = intent;
-        bytes32 currentLatestIntentHash = latestIntentBySymbol[symbol];
-        if (currentLatestIntentHash == bytes32(0) || intents[currentLatestIntentHash].timestamp < timestamp) {
-            latestIntentBySymbol[symbol] = intentHash;
+        
+      
+        
+        // Update latest intent by type and symbol (new functionality)
+        bytes32 compositeKey = getCompositeKey(intentType, symbol);
+        bytes32 currentLatestByTypeHash = latestIntentByTypeAndSymbol[compositeKey];
+        if (currentLatestByTypeHash == bytes32(0) || intents[currentLatestByTypeHash].timestamp < timestamp) {
+            latestIntentByTypeAndSymbol[compositeKey] = intentHash;
         }
+        
         emit IntentRegistered(intentHash, symbol, price, timestamp, signer);
     }
 
     /**
      * @dev Registers multiple oracle intents with EIP-712 signatures in a single transaction
      * @notice Anyone can call this function with valid signed intents
-     * @param intentsData Array of intent data to register
+     * @param intentsData Array of intent data to register, timestamp order is required for updates else old timestamp will be ignored
      */
     function registerMultipleIntents(OracleIntentUtils.OracleIntent[] calldata intentsData) external {
         if (intentsData.length == 0) revert IntentNotFound();
@@ -204,9 +208,12 @@ contract OracleIntentRegistry {
                 signer: data.signer
             });
             
-            bytes32 currentLatestIntentHash = latestIntentBySymbol[data.symbol];
-            if (currentLatestIntentHash == bytes32(0) || intents[currentLatestIntentHash].timestamp < data.timestamp) {
-                latestIntentBySymbol[data.symbol] = intentHash;
+            
+            // Update latest intent by type and symbol 
+            bytes32 compositeKey = getCompositeKey(data.intentType, data.symbol);
+            bytes32 currentLatestByTypeHash = latestIntentByTypeAndSymbol[compositeKey];
+            if (currentLatestByTypeHash == bytes32(0) || intents[currentLatestByTypeHash].timestamp < data.timestamp) {
+                latestIntentByTypeAndSymbol[compositeKey] = intentHash;
             }
             
             emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
@@ -217,21 +224,7 @@ contract OracleIntentRegistry {
         emit BatchIntentsRegistered(successCount);
     }
     
-    /**
-     * @dev Gets the latest price for a symbol
-     * @notice Returns the latest registered intent for the given symbol
-     * @param symbol The symbol to get the price for
-     * @return price The latest price
-     * @return timestamp The timestamp of the price
-     * @return source The source of the price
-     */
-    function getLatestPrice(string calldata symbol) external view returns (uint256 price, uint256 timestamp, string memory source) {
-        bytes32 intentHash = latestIntentBySymbol[symbol];
-        if (intentHash == bytes32(0)) revert NoIntentForSymbol();
-        
-        OracleIntentUtils.OracleIntent memory intent = intents[intentHash];
-        return (intent.price, intent.timestamp, intent.source);
-    }
+
     
     /**
      * @dev Gets the intent details by hash
@@ -276,4 +269,45 @@ contract OracleIntentRegistry {
     function getDomainSeparator() external view returns (bytes32) {
         return domainSeparator;
     }
+    
+    /**
+     * @notice Creates a composite key for intentType and symbol lookups
+     * @param intentType The type of intent (e.g., "PriceUpdate", "RWAUpdate")
+     * @param symbol The symbol (e.g., "BTC", "ETH")
+     * @return The composite key for mapping lookups
+     */
+    function getCompositeKey(string memory intentType, string memory symbol) 
+        public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(intentType, "|", symbol));
+    }
+    
+    /**
+     * @notice Gets the latest intent hash for a specific intent type and symbol
+     * @param intentType The type of intent to query
+     * @param symbol The symbol to query
+     * @return intentHash The hash of the latest intent, or bytes32(0) if none exists
+     */
+    function getLatestIntentHashByType(string calldata intentType, string calldata symbol) 
+        external view returns (bytes32 intentHash) {
+        bytes32 compositeKey = getCompositeKey(intentType, symbol);
+        return latestIntentByTypeAndSymbol[compositeKey];
+    }
+    
+    /**
+     * @notice Gets the latest intent for a specific intent type and symbol
+     * @param intentType The type of intent to query
+     * @param symbol The symbol to query
+     * @return intent The latest intent details
+     */
+    function getLatestIntentByType(string calldata intentType, string calldata symbol) 
+        external view returns (OracleIntentUtils.OracleIntent memory intent) {
+        bytes32 compositeKey = getCompositeKey(intentType, symbol);
+        bytes32 intentHash = latestIntentByTypeAndSymbol[compositeKey];
+        
+        if (intentHash == bytes32(0)) revert NoIntentForSymbol();
+        if (intents[intentHash].timestamp == 0) revert IntentNotFound();
+        
+        return intents[intentHash];
+    }
+    
 } 

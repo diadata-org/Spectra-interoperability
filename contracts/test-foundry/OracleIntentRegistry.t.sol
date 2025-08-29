@@ -169,7 +169,7 @@ contract OracleIntentRegistryTest is Test {
         
         // Verify intent was stored
         assertTrue(registry.processedIntents(intentHash));
-        assertEq(registry.latestIntentBySymbol(TEST_SYMBOL), intentHash);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), intentHash);
         
         // Verify intent data
         OracleIntentUtils.OracleIntent memory storedIntent = registry.getIntent(intentHash);
@@ -179,32 +179,7 @@ contract OracleIntentRegistryTest is Test {
         assertEq(storedIntent.signer, signer1);
     }
     
-    function testRegisterIntentWithExpiredIntent() public {
-        registry.setSignerAuthorization(signer1, true);
-        
-        // Create intent with expiry in the past
-        OracleIntentUtils.OracleIntent memory intent = createTestIntent(TEST_SYMBOL, TEST_NONCE);
-        intent.expiry = block.timestamp - 1;
-        
-        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator());
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signer1Pk, intentHash);
-        bytes memory signature = abi.encodePacked(r, s, v);
-        
-        vm.expectRevert(OracleIntentRegistry.IntentExpired.selector);
-        registry.registerIntent(
-            intent.intentType,
-            intent.version,
-            intent.chainId,
-            intent.nonce,
-            intent.expiry,
-            intent.symbol,
-            intent.price,
-            intent.timestamp,
-            intent.source,
-            signature,
-            signer1
-        );
-    }
+
     
     function testRegisterIntentWithUnauthorizedSigner() public {
         // Don't authorize signer1
@@ -309,15 +284,15 @@ contract OracleIntentRegistryTest is Test {
         bytes32 intentHash2 = registerValidIntent(intent2, signer1Pk, signer1);
         
         // Latest intent should be the newer one
-        assertEq(registry.latestIntentBySymbol(TEST_SYMBOL), intentHash2);
-        
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), intentHash2);
+
         // Register third intent with even older timestamp
         OracleIntentUtils.OracleIntent memory intent3 = createTestIntent(TEST_SYMBOL, 3);
         intent3.timestamp = TEST_TIMESTAMP - 2000;
         registerValidIntent(intent3, signer1Pk, signer1);
         
         // Latest should still be the newest timestamp (intent2)
-        assertEq(registry.latestIntentBySymbol(TEST_SYMBOL), intentHash2);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), intentHash2);
     }
     
     // ===== BATCH INTENT REGISTRATION TESTS =====
@@ -348,7 +323,7 @@ contract OracleIntentRegistryTest is Test {
         // Verify all intents were processed
         for (uint256 i = 0; i < batchSize; i++) {
             string memory symbol = string(abi.encodePacked("TOKEN", vm.toString(i)));
-            bytes32 latestHash = registry.latestIntentBySymbol(symbol);
+            bytes32 latestHash = registry.getLatestIntentHashByType("OracleUpdate",symbol);
             assertTrue(latestHash != bytes32(0));
             assertTrue(registry.processedIntents(latestHash));
         }
@@ -383,9 +358,9 @@ contract OracleIntentRegistryTest is Test {
         registry.registerMultipleIntents(intents);
         
         // Check which intents were processed
-        assertTrue(registry.latestIntentBySymbol("TOKEN0") != bytes32(0));
-        assertTrue(registry.latestIntentBySymbol("TOKEN1") == bytes32(0)); // Should be empty
-        assertTrue(registry.latestIntentBySymbol("TOKEN2") != bytes32(0));
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN0") != bytes32(0));
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN1") == bytes32(0)); // Should be empty
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN2") != bytes32(0));
     }
     
     function testRegisterMultipleIntentsAllInvalid() public {
@@ -420,7 +395,7 @@ contract OracleIntentRegistryTest is Test {
         // Verify the already processed intent is still there
         assertTrue(registry.processedIntents(intentHash1));
         // Verify the new intent was processed  
-        assertTrue(registry.latestIntentBySymbol("TOKEN1") != bytes32(0));
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN1") != bytes32(0));
     }
     
     function testRegisterMultipleIntentsWithInvalidSignatures() public {
@@ -449,31 +424,15 @@ contract OracleIntentRegistryTest is Test {
         registry.registerMultipleIntents(intents);
         
         // Verify only valid intents were processed
-        assertTrue(registry.latestIntentBySymbol("TOKEN0") != bytes32(0));
-        assertTrue(registry.latestIntentBySymbol("TOKEN1") == bytes32(0)); // Invalid signature skipped
-        assertTrue(registry.latestIntentBySymbol("TOKEN2") != bytes32(0));
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN0") != bytes32(0));
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN1") == bytes32(0)); // Invalid signature skipped
+        assertTrue(registry.getLatestIntentHashByType("OracleUpdate","TOKEN2") != bytes32(0));
     }
     
     // ===== INTENT RETRIEVAL TESTS =====
     
-    function testGetLatestPrice() public {
-        registry.setSignerAuthorization(signer1, true);
-        
-        // Register intent
-        OracleIntentUtils.OracleIntent memory intent = createTestIntent(TEST_SYMBOL, TEST_NONCE);
-        registerValidIntent(intent, signer1Pk, signer1);
-        
-        // Get latest price
-        (uint256 price, uint256 timestamp, string memory source) = registry.getLatestPrice(TEST_SYMBOL);
-        assertEq(price, TEST_PRICE);
-        assertEq(timestamp, TEST_TIMESTAMP);
-        assertEq(source, TEST_SOURCE);
-    }
     
-    function testGetLatestPriceNoIntent() public {
-        vm.expectRevert(OracleIntentRegistry.NoIntentForSymbol.selector);
-        registry.getLatestPrice("NONEXISTENT");
-    }
+   
     
     function testGetIntent() public {
         registry.setSignerAuthorization(signer1, true);
@@ -512,14 +471,14 @@ contract OracleIntentRegistryTest is Test {
         bytes32 ethHash = registerValidIntent(ethIntent, signer2Pk, signer2);
         
         // Verify both intents are stored correctly
-        assertEq(registry.latestIntentBySymbol("BTC"), btcHash);
-        assertEq(registry.latestIntentBySymbol("ETH"), ethHash);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate","BTC"), btcHash);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate","ETH"), ethHash);
         
-        (uint256 btcPrice,,) = registry.getLatestPrice("BTC");
-        (uint256 ethPrice,,) = registry.getLatestPrice("ETH");
+        (OracleIntentUtils.OracleIntent memory btcPrice) = registry.getLatestIntentByType("OracleUpdate","BTC");
+        (OracleIntentUtils.OracleIntent memory ethPrice) = registry.getLatestIntentByType("OracleUpdate","ETH");
         
-        assertEq(btcPrice, TEST_PRICE);
-        assertEq(ethPrice, TEST_PRICE_2);
+        assertEq(btcPrice.price, TEST_PRICE);
+        assertEq(ethPrice.price, TEST_PRICE_2);
     }
     
     function testTimestampBasedLatestIntentUpdate() public {
@@ -546,9 +505,9 @@ contract OracleIntentRegistryTest is Test {
         registerValidIntent(intent2, signer1Pk, signer1);
         
         // Latest should still be the one with highest timestamp (intent3)
-        assertEq(registry.latestIntentBySymbol(TEST_SYMBOL), hash3);
-        (uint256 latestPrice,,) = registry.getLatestPrice(TEST_SYMBOL);
-        assertEq(latestPrice, 300);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), hash3);
+        (OracleIntentUtils.OracleIntent memory latestIntent) = registry.getLatestIntentByType("OracleUpdate", TEST_SYMBOL);
+        assertEq(latestIntent.price, 300);
     }
     
     function testRegisterIntentOlderThanExisting() public {
@@ -561,7 +520,7 @@ contract OracleIntentRegistryTest is Test {
         bytes32 newerHash = registerValidIntent(newerIntent, signer1Pk, signer1);
         
         // Verify it's the latest
-        assertEq(registry.latestIntentBySymbol(TEST_SYMBOL), newerHash);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), newerHash);
         
         // Register older intent (should not become latest)
         OracleIntentUtils.OracleIntent memory olderIntent = createTestIntent(TEST_SYMBOL, 2);
@@ -570,15 +529,148 @@ contract OracleIntentRegistryTest is Test {
         bytes32 olderHash = registerValidIntent(olderIntent, signer1Pk, signer1);
         
         // Latest should still be the newer one (tests the else branch)
-        assertEq(registry.latestIntentBySymbol(TEST_SYMBOL), newerHash);
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), newerHash);
         
         // But both intents should be stored
         assertTrue(registry.processedIntents(newerHash));
         assertTrue(registry.processedIntents(olderHash));
         
         // Latest price should be from newer intent
-        (uint256 latestPrice,,) = registry.getLatestPrice(TEST_SYMBOL);
-        assertEq(latestPrice, 60000e18);
+        (OracleIntentUtils.OracleIntent memory latestPrice) = registry.getLatestIntentByType("OracleUpdate",TEST_SYMBOL);
+        assertEq(latestPrice.price, 60000e18);
+    }
+    
+    // ===== INTENT TYPE COLLISION TESTS =====
+    
+    function testDifferentIntentTypesWithSameSymbol() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Register "OracleUpdate" intent for BTC
+        OracleIntentUtils.OracleIntent memory oracleUpdateIntent = createTestIntent("BTC", 1);
+        oracleUpdateIntent.intentType = "OracleUpdate";
+        oracleUpdateIntent.timestamp = block.timestamp;
+        bytes32 oracleUpdateHash = OracleIntentUtils.calculateIntentHash(oracleUpdateIntent, registry.getDomainSeparator());
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(signer1Pk, oracleUpdateHash);
+        bytes memory signature1 = abi.encodePacked(r1, s1, v1);
+        registerValidIntent(oracleUpdateIntent, signer1Pk, signer1);
+        
+        // Register "PriceUpdate" intent for same symbol BTC with newer timestamp
+        OracleIntentUtils.OracleIntent memory priceUpdateIntent = createTestIntent("BTC", 2);
+        priceUpdateIntent.intentType = "PriceUpdate";  // Different intent type!
+        priceUpdateIntent.timestamp = block.timestamp + 1000; // Newer timestamp
+        priceUpdateIntent.price = 60000e18; // Different price
+        bytes32 priceUpdateHash = registerValidIntent(priceUpdateIntent, signer1Pk, signer1);
+        
+        // CRITICAL: latestIntentBySymbol should now point to PriceUpdate intent
+        // because it has a newer timestamp, even though it's a different intent type
+        bytes32 latestHash = registry.getLatestIntentHashByType("PriceUpdate","BTC");
+        assertEq(latestHash, priceUpdateHash, "Latest should be PriceUpdate due to newer timestamp");
+        
+        // // Verify getLatestPrice returns data from PriceUpdate intent
+        // (uint256 price, uint256 timestamp, string memory source) = registry.getLatestPrice("BTC");
+        // assertEq(price, 60000e18, "Price should be from PriceUpdate intent");
+        // assertEq(timestamp, block.timestamp + 1000, "Timestamp should be from PriceUpdate intent");
+        
+        // Verify both intents are stored separately
+        OracleIntentUtils.OracleIntent memory retrievedOracleUpdate = registry.getIntent(oracleUpdateHash);
+        OracleIntentUtils.OracleIntent memory retrievedPriceUpdate = registry.getIntent(priceUpdateHash);
+        
+        assertEq(retrievedOracleUpdate.intentType, "OracleUpdate");
+        assertEq(retrievedPriceUpdate.intentType, "PriceUpdate");
+        assertNotEq(oracleUpdateHash, priceUpdateHash, "Different intent types should have different hashes");
+    }
+    
+    function testDifferentIntentTypesOlderOverridesNewer() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Register "PriceUpdate" intent for BTC with newer timestamp
+        OracleIntentUtils.OracleIntent memory priceUpdateIntent = createTestIntent("BTC", 1);
+        priceUpdateIntent.intentType = "PriceUpdate";
+        priceUpdateIntent.timestamp = block.timestamp + 1000; // Newer
+        priceUpdateIntent.price = 60000e18;
+        bytes32 priceUpdateHash = registerValidIntent(priceUpdateIntent, signer1Pk, signer1);
+        
+        // Register "OracleUpdate" intent for same symbol with EVEN NEWER timestamp
+        OracleIntentUtils.OracleIntent memory oracleUpdateIntent = createTestIntent("BTC", 2);
+        oracleUpdateIntent.intentType = "OracleUpdate";
+        oracleUpdateIntent.timestamp = block.timestamp + 2000; // Even newer
+        oracleUpdateIntent.price = 70000e18; // Different price
+        bytes32 oracleUpdateHash = registerValidIntent(oracleUpdateIntent, signer1Pk, signer1);
+        
+        // Latest should now be OracleUpdate because it has newer timestamp
+        bytes32 latestHash = registry.getLatestIntentHashByType("OracleUpdate","BTC");
+        assertEq(latestHash, oracleUpdateHash, "Latest should be OracleUpdate due to newest timestamp");
+        
+        // getLatestPrice now returns data from OracleUpdate intent
+        // (uint256 price, uint256 timestamp, string memory source) = registry.getLatestPrice("BTC");
+        // assertEq(price, 70000e18, "Price should be from OracleUpdate intent");
+        // assertEq(timestamp, block.timestamp + 2000, "Timestamp should be from OracleUpdate intent");
+    }
+    
+    // ===== INTENT TYPE QUERY TESTS =====
+    
+    function testGetLatestIntentByType() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Register different intent types for same symbol
+        OracleIntentUtils.OracleIntent memory priceIntent = createTestIntent("BTC", 1);
+        priceIntent.intentType = "PriceUpdate";
+        priceIntent.price = 50000e18;
+        priceIntent.timestamp = block.timestamp;
+        registerValidIntent(priceIntent, signer1Pk, signer1);
+        
+        OracleIntentUtils.OracleIntent memory volumeIntent = createTestIntent("BTC", 2);
+        volumeIntent.intentType = "VolumeUpdate";
+        volumeIntent.price = 1000000e18; // This represents volume, not price
+        volumeIntent.timestamp = block.timestamp + 100;
+        registerValidIntent(volumeIntent, signer1Pk, signer1);
+        
+        // Test getLatestIntentByType for each type
+        OracleIntentUtils.OracleIntent memory retrievedPriceIntent = registry.getLatestIntentByType("PriceUpdate", "BTC");
+        assertEq(retrievedPriceIntent.intentType, "PriceUpdate");
+        assertEq(retrievedPriceIntent.price, 50000e18);
+        
+        OracleIntentUtils.OracleIntent memory retrievedVolumeIntent = registry.getLatestIntentByType("VolumeUpdate", "BTC");
+        assertEq(retrievedVolumeIntent.intentType, "VolumeUpdate");
+        assertEq(retrievedVolumeIntent.price, 1000000e18);
+        
+        // Verify they are different intents
+        assertNotEq(retrievedPriceIntent.nonce, retrievedVolumeIntent.nonce);
+    }
+    
+    function testGetLatestIntentHashByType() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Register intent
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent("ETH", 1);
+        intent.intentType = "MetadataUpdate";
+        bytes32 expectedHash = registerValidIntent(intent, signer1Pk, signer1);
+        
+        // Query by type
+        bytes32 retrievedHash = registry.getLatestIntentHashByType("MetadataUpdate", "ETH");
+        assertEq(retrievedHash, expectedHash);
+        
+        // Query non-existent type should return zero
+        bytes32 nonExistentHash = registry.getLatestIntentHashByType("NonExistent", "ETH");
+        assertEq(nonExistentHash, bytes32(0));
+    }
+    
+    
+    
+    function testCompositeKey() public view {
+        // Test composite key generation
+        bytes32 key1 = registry.getCompositeKey("PriceUpdate", "BTC");
+        bytes32 key2 = registry.getCompositeKey("VolumeUpdate", "BTC");
+        bytes32 key3 = registry.getCompositeKey("PriceUpdate", "ETH");
+        
+        // All keys should be different
+        assertNotEq(key1, key2, "Different intent types should produce different keys");
+        assertNotEq(key1, key3, "Different symbols should produce different keys");
+        assertNotEq(key2, key3, "Different type+symbol combinations should produce different keys");
+        
+        // Same type+symbol should produce same key
+        bytes32 key4 = registry.getCompositeKey("PriceUpdate", "BTC");
+        assertEq(key1, key4, "Same intent type and symbol should produce same key");
     }
     
     // ===== HELPER FUNCTIONS =====

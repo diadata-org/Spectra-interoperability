@@ -3,6 +3,7 @@ pragma solidity 0.8.29;
 
 /**
  * @title OracleIntentUtils
+ * @author DiaData
  * @notice Shared utility library for Oracle Intent operations
  * @dev Provides common functionality for EIP-712 signatures, hash calculations, and intent validation
  */
@@ -87,7 +88,7 @@ library OracleIntentUtils {
         bytes32 s;
         uint8 v;
         
-        assembly {
+        assembly ("memory-safe") {
             r := mload(add(signature, 32))
             s := mload(add(signature, 64))
             v := byte(0, mload(add(signature, 96)))

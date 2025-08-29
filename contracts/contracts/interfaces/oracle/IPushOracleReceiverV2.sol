@@ -5,6 +5,12 @@ import { IMessageRecipient } from "../IMessageRecipient.sol";
 import { ISpecifiesInterchainSecurityModule } from "../IInterchainSecurityModule.sol";
 import { OracleIntentUtils } from "../../libs/OracleIntentUtils.sol";
 
+/** @title IPushOracleReceiverV2
+* @author DiaData
+ * @notice Interface for a contract that receives oracle updates via interchain messages,
+ *         including support for intent-based updates with signature verification.
+ * @dev Extends IMessageRecipient and ISpecifiesInterchainSecurityModule for interchain messaging and security module specification.
+ */
 interface IPushOracleReceiverV2 is
     IMessageRecipient,
     ISpecifiesInterchainSecurityModule
@@ -49,23 +55,29 @@ interface IPushOracleReceiverV2 is
     // @notice Thrown when attempting to set a zero domain separator
     error DomainSeparatorZero();
 
-    // @notice Emitted when stuck funds are recovered
-    // @param recipient The address that received the funds
-    // @param amount The amount of funds recovered
+    /**
+     * @notice Emitted when stuck funds are recovered
+     * @param recipient The address that received the funds
+     * @param amount The amount of funds recovered
+     */
     event TokensRecovered(address indexed recipient, uint256 amount);
 
-    // @notice Emitted when a message is received for the new update value
-    // @param key The key of the update
-    // @param timestamp The timestamp of the update
-    // @param value The value of the update
+    /**
+     * @notice Emitted when a message is received for the new update value
+     * @param key The key of the update
+     * @param timestamp The timestamp of the update
+     * @param value The value of the update
+     */
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
-    
-    // @notice Emitted when an intent-based update is received and applied
-    // @param intentHash The hash of the intent
-    // @param symbol The symbol of the update
-    // @param price The price value
-    // @param timestamp The timestamp of the update
-    // @param signer The address of the signer
+
+    /**
+     * @notice Emitted when an intent-based update is received and applied
+     * @param intentHash The hash of the intent
+     * @param symbol The symbol of the update
+     * @param price The price value
+     * @param timestamp The timestamp of the update
+     * @param signer The address of the signer
+     */
     event IntentBasedUpdateReceived(
         bytes32 indexed intentHash,
         string indexed symbol,
@@ -73,14 +85,16 @@ interface IPushOracleReceiverV2 is
         uint256 timestamp,
         address indexed signer
     );
-    
-    // @notice Emitted when an intent-based update is received but rejected due to stale timestamp
-    // @param intentHash The hash of the intent
-    // @param symbol The symbol of the update
-    // @param price The price value
-    // @param timestamp The timestamp of the update (stale)
-    // @param existingTimestamp The existing newer timestamp
-    // @param signer The address of the signer
+
+    /**
+     * @notice Emitted when an intent-based update is received but rejected due to stale timestamp
+     * @param intentHash The hash of the intent
+     * @param symbol The symbol of the update
+     * @param price The price value
+     * @param timestamp The timestamp of the update (stale)
+     * @param existingTimestamp The existing newer timestamp
+     * @param signer The address of the signer
+     */
     event IntentBasedStaleUpdateReceived(
         bytes32 indexed intentHash,
         string indexed symbol,
@@ -90,41 +104,46 @@ interface IPushOracleReceiverV2 is
         address indexed signer
     );
     
-    // @notice Emitted when signer authorization is changed
-    // @param signer The address of the signer
-    // @param isAuthorized Whether the signer is authorized
+    /** @notice Emitted when a signer authorization is changed
+     * @param signer The address of the signer
+     * @param isAuthorized Whether the signer is authorized
+     */
     event SignerAuthorizationChanged(address indexed signer, bool isAuthorized);
 
-    // @notice Emitted when the trusted mailbox is updated
-    // @param previousMailBox The previous mailbox address
-    // @param newMailBox The new mailbox address
+    /** @notice Emitted when the trusted mailbox is updated
+     * @param previousMailBox The previous mailbox address
+     * @param newMailBox The new mailbox address
+     */
     event TrustedMailBoxUpdated(
         address indexed previousMailBox,
         address indexed newMailBox
     );
 
-    // @notice Emitted when the interchain security module is updated
-    // @param previousISM The previous interchain security module address
-    // @param newISM The new interchain security module address
+    /** @notice Emitted when the interchain security module is updated
+     * @param previousISM The previous interchain security module address
+     * @param newISM The new interchain security module address
+     */
     event InterchainSecurityModuleUpdated(
         address indexed previousISM,
         address indexed newISM
     );
 
-    // @notice Emitted when the payment hook is updated
-    // @param previousPaymentHook The previous payment hook address
-    // @param newPaymentHook The new payment hook address
+    /** @notice Emitted when the payment hook is updated
+     * @param previousPaymentHook The previous payment hook address
+     * @param newPaymentHook The new payment hook address
+     */
     event PaymentHookUpdated(
         address indexed previousPaymentHook,
         address indexed newPaymentHook
     );
     
-    // @notice Emitted when domain separator is updated/created
-    // @param domainSeparator The created domain separator
-    // @param domainName The domain name used
-    // @param domainVersion The domain version used
-    // @param sourceChainId The source chain ID used
-    // @param verifyingContract The verifying contract address used
+    /** @notice Emitted when the EIP-712 domain separator is updated
+     * @param domainSeparator The new domain separator
+     * @param domainName The domain name used
+     * @param domainVersion The domain version used
+     * @param sourceChainId The source chain ID used
+     * @param verifyingContract The verifying contract address used
+     */
     event DomainSeparatorUpdated(
         bytes32 indexed domainSeparator,
         string domainName,

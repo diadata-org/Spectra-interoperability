@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity 0.8.29;
+pragma solidity 0.8.19;
 
+
+
+/***
+ * @title IOracleTriggerV2
+ * @author DiaData
+ * @notice Interface for OracleTriggerV2 contract to dispatch oracle intents across chains
+ * @dev Extends basic dispatch functionality to include fetching and sending oracle intents
+ */
 interface IOracleTriggerV2 {
     /// @notice Error thrown when a provided address is the zero address
     error InvalidAddress();
@@ -38,7 +46,7 @@ interface IOracleTriggerV2 {
     
     /// @notice Error thrown when the registry is unavailable or returns no data
     /// @param key The oracle key that could not be retrieved
-    error RegistryUnavailable(string key);
+    error RegistryUnavailable(string intentType,string key);
 
     /// @notice Emitted when a new chain is added
     /// @param chainId The chain ID of the newly added chain
@@ -105,8 +113,10 @@ interface IOracleTriggerV2 {
     /// @notice Dispatches a message to a destination chain with the latest intent for the given symbol
     /// @param _destinationDomain The destination chain ID
     /// @param _key The symbol to fetch the latest intent for
+    /// @param _intentType The type of intent to fetch (e.g., "OracleUpdate")
     function dispatchToChain(
         uint32 _destinationDomain,
+        string memory _intentType,
         string memory _key
     ) external payable;
 
@@ -114,9 +124,11 @@ interface IOracleTriggerV2 {
     /// @param _destinationDomain The destination chain ID
     /// @param _recipientAddress The address of the recipient contract on the destination chain
     /// @param _key The symbol to fetch the latest intent for
+    /// @param _intentType The type of intent to fetch (e.g., "OracleUpdate")
     function dispatch(
         uint32 _destinationDomain,
         address _recipientAddress,
+        string memory _intentType,
         string memory _key
     ) external payable;
 
@@ -125,5 +137,6 @@ interface IOracleTriggerV2 {
     function getMailBox() external view returns (address);
     
     /// @notice Returns the address of the intent registry contract
+    /// @return The address of the intent registry contract
     function getIntentRegistry() external view returns (address);
 }
