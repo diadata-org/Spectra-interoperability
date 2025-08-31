@@ -5,16 +5,23 @@ FROM golang:1.23-alpine AS builder
 RUN apk add --no-cache git make
 
 # Set working directory
+WORKDIR /
+
+# Copy shared dependencies first
+COPY pkg ./pkg
+COPY go.mod go.sum ./
+
+# Now set working directory to attestor
 WORKDIR /app
 
-# Copy go mod files
-COPY go.mod go.sum ./
+# Copy attestor go mod files
+COPY attestor/go.mod attestor/go.sum ./
 
 # Download dependencies
 RUN go mod download
 
 # Copy source code
-COPY . .
+COPY attestor .
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o attestor .

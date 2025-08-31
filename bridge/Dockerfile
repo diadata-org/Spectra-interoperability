@@ -5,19 +5,32 @@ FROM golang:1.23-alpine AS builder
 RUN apk add --no-cache git
 
 # Set working directory
-WORKDIR /app
+WORKDIR /
 
-# Copy go mod files
+# Copy proto and pkg directories first
+COPY proto ./proto
+COPY pkg ./pkg
 COPY go.mod go.sum ./
 
-# Copy proto directory for local replace
-COPY proto ./proto
+# Now set working directory to bridge
+WORKDIR /bridge
+
+# Copy bridge go mod files
+COPY bridge/go.mod bridge/go.sum ./
+
+# Install protoc and Go plugins
+RUN apk add --no-cache protobuf protobuf-dev && \
+    go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Regenerate proto files
+RUN cd /proto && protoc --go_out=. --go-grpc_out=. bridge.proto
 
 # Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY . .
+# Copy bridge source code
+COPY bridge ./
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bridge ./cmd/bridge
@@ -31,7 +44,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 
 # Copy the binary from builder
-COPY --from=builder /app/bridge .
+COPY --from=builder /bridge/bridge .
 
 # Expose API port and gRPC port
 EXPOSE 8080 8082
