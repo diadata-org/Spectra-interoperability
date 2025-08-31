@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // RecoveryManager handles automatic recovery from failures

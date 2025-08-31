@@ -12,7 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 type ChainClient struct {

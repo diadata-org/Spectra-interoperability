@@ -11,7 +11,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/internal/failover"
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/internal/metrics"
-	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/types"
 )
 

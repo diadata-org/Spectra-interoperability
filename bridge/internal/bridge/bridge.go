@@ -20,7 +20,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/contracts"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/grpc"
-	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/processor"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/bridge/internal/types"

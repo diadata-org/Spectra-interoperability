@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // CircuitBreaker implements the circuit breaker pattern

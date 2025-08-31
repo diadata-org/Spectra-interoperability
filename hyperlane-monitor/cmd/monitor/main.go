@@ -14,7 +14,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/config"
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/internal/monitor"
-	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 func main() {

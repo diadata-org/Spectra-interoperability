@@ -10,7 +10,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/interfaces"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // AttestorService is the main service for attestation

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/hyperlane-monitor/pkg/types"
 )
 

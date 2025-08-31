@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"

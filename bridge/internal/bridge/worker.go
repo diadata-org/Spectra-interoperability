@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/diadata.org/Spectra-interoperability/bridge/internal/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 )
 

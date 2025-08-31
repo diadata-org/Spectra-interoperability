@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 var (

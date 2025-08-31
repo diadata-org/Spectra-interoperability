@@ -12,7 +12,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/client"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/interfaces"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/metrics"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/oracle"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/registry"

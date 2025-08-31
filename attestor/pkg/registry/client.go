@@ -8,7 +8,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/intent"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/interfaces"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"

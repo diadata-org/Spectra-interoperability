@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/config"
-	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/types"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
