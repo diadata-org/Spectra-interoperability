@@ -432,17 +432,7 @@ contract PushOracleReceiverV2Test is Test {
         assertTrue(oracle.isProcessedIntent(intentHash));
     }
     
-    function testHandleIntentUpdateExpired() public {
-        OracleIntentUtils.OracleIntent memory intent = createValidIntent("BTC", 1);
-        intent.expiry = block.timestamp - 1; // Expired
-        bytes32 intentHash = oracle.calculateIntentHash(intent);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPk, intentHash);
-        intent.signature = abi.encodePacked(r, s, v);
-        intent.signer = authorizedSigner;
-        
-        vm.expectRevert(IPushOracleReceiverV2.IntentExpired.selector);
-        oracle.handleIntentUpdate(intent);
-    }
+
     
     function testHandleIntentUpdateUnauthorizedSigner() public {
         OracleIntentUtils.OracleIntent memory intent = createValidIntent("BTC", 1);
@@ -549,7 +539,6 @@ contract PushOracleReceiverV2Test is Test {
         (uint128 value2,) = oracle.getValue("TOKEN2");
         
         assertEq(value0, uint128(TEST_PRICE)); // Should be processed
-        assertEq(value1, 0); // Should be skipped (expired)
         assertEq(value2, uint128(TEST_PRICE)); // Should be processed
     }
     
@@ -557,20 +546,22 @@ contract PushOracleReceiverV2Test is Test {
         // Create intents that will all fail validation
         OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](2);
         
-        // Both expired
+        // Use unauthorized private key
+        uint256 unauthorizedPk = 2;
+        address unauthorizedAddr = vm.addr(unauthorizedPk);
+        
+        // Both with unauthorized signers - will fail validation
         intents[0] = createValidIntent("TOKEN0", 1);
-        intents[0].expiry = block.timestamp - 1;
+        intents[0].signer = unauthorizedAddr;
         bytes32 intentHash0 = oracle.calculateIntentHash(intents[0]);
-        (uint8 v0, bytes32 r0, bytes32 s0) = vm.sign(signerPk, intentHash0);
+        (uint8 v0, bytes32 r0, bytes32 s0) = vm.sign(unauthorizedPk, intentHash0);
         intents[0].signature = abi.encodePacked(r0, s0, v0);
-        intents[0].signer = authorizedSigner;
         
         intents[1] = createValidIntent("TOKEN1", 2);
-        intents[1].expiry = block.timestamp - 1;
+        intents[1].signer = unauthorizedAddr;
         bytes32 intentHash1 = oracle.calculateIntentHash(intents[1]);
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(signerPk, intentHash1);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(unauthorizedPk, intentHash1);
         intents[1].signature = abi.encodePacked(r1, s1, v1);
-        intents[1].signer = authorizedSigner;
         
         oracle.handleBatchIntentUpdates(intents);
         
@@ -1173,21 +1164,21 @@ contract PushOracleReceiverV2Test is Test {
         // Valid intent
         intents[0] = createSignedIntent("TOKEN0", 1);
         
-        // Expired intent  
-        intents[1] = createValidIntent("TOKEN1", 2);
-        intents[1].expiry = block.timestamp - 1;
-        bytes32 hash1 = oracle.calculateIntentHash(intents[1]);
-        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(signerPk, hash1);
-        intents[1].signature = abi.encodePacked(r1, s1, v1);
-        intents[1].signer = authorizedSigner;
-        
         // Unauthorized signer intent
+        intents[1] = createValidIntent("TOKEN1", 2);
+        uint256 unauthorizedPk1 = 3;
+        intents[1].signer = vm.addr(unauthorizedPk1);
+        bytes32 hash1 = oracle.calculateIntentHash(intents[1]);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(unauthorizedPk1, hash1);
+        intents[1].signature = abi.encodePacked(r1, s1, v1);
+        
+        // Another unauthorized signer intent
         intents[2] = createValidIntent("TOKEN2", 3);
         bytes32 hash2 = oracle.calculateIntentHash(intents[2]);
-        uint256 unauthorizedPk = 5;
-        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(unauthorizedPk, hash2);
+        uint256 unauthorizedPk2 = 5;
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(unauthorizedPk2, hash2);
         intents[2].signature = abi.encodePacked(r2, s2, v2);
-        intents[2].signer = vm.addr(unauthorizedPk); // Not authorized
+        intents[2].signer = vm.addr(unauthorizedPk2); // Not authorized
         
         // Intent with invalid signature
         intents[3] = createValidIntent("TOKEN3", 4);
@@ -1200,8 +1191,9 @@ contract PushOracleReceiverV2Test is Test {
         
         // Only the first intent should be processed
         assertTrue(oracle.isProcessedIntent(oracle.calculateIntentHash(intents[0])));
-        
-        // Others should be skipped due to validation failures
+        (uint128 value0,) = oracle.getValue("TOKEN0");
+        assertEq(value0, uint128(TEST_PRICE)); // Should be processed
+
         (uint128 value1,) = oracle.getValue("TOKEN1");
         (uint128 value2,) = oracle.getValue("TOKEN2");
         (uint128 value3,) = oracle.getValue("TOKEN3");
@@ -1362,7 +1354,6 @@ contract PushOracleReceiverV2Test is Test {
         (uint128 value3,) = oracle.getValue("TOKEN3");
         (uint128 value4,) = oracle.getValue("TOKEN4");
         
-        assertEq(value0, 0); // Expired
         assertEq(value1, 0); // Unauthorized
         assertEq(value3, 0); // Invalid sig
         assertEq(value4, uint128(TEST_PRICE)); // Valid

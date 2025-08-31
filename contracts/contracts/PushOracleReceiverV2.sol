@@ -257,7 +257,8 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         
         // Process each intent
         for (uint256 i = 0; i < intents.length; ) {
-            if (_processIntent(intents[i], false)) {
+            OracleIntentUtils.OracleIntent calldata intent = intents[i];
+            if (_processIntent(intent, false)) {
                 ++updatedCount;
             }
             unchecked { ++i; }
@@ -404,13 +405,12 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     
     
     /**
-     * @notice Unified validation for memory intents with expiry check
+     * @notice Unified validation for memory intents
      * @param intent The OracleIntent to validate
      * @return intentHash The calculated intent hash
      */
     function _validateIntentCommonFromMemory(OracleIntentUtils.OracleIntent memory intent) internal view returns (bytes32 intentHash) {
-        // Check if the intent has expired
-        if (block.timestamp > intent.expiry) revert IntentExpired();
+         
         
         // Verify signer is authorized
         if (!authorizedSigners[intent.signer]) revert UnauthorizedSigner();
@@ -540,9 +540,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         view
         returns (ValidationStatus status, bytes32 intentHash)
     {
-        if (block.timestamp > intent.expiry) {
-            return (ValidationStatus.Expired, bytes32(0));
-        }
+        
         if (!authorizedSigners[intent.signer]) {
             return (ValidationStatus.UnauthorizedSigner, bytes32(0));
         }
