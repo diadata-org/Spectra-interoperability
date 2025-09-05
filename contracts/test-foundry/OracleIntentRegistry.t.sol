@@ -46,7 +46,7 @@ contract OracleIntentRegistryTest is Test {
         signer2 = vm.addr(signer2Pk);
         
         // Deploy registry
-        registry = new OracleIntentRegistry();
+        registry = new OracleIntentRegistry("DIA Oracle Intent","1");
     }
     
      

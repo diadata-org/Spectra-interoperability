@@ -39,8 +39,20 @@ contract OracleIntentRegistry {
     /// @notice Mapping to track processed intents to prevent replay
     mapping(bytes32 => bool) public processedIntents;
     
-    ///@notice EIP-712 domain separator
-    bytes32 private immutable domainSeparator;
+    /// @notice EIP-712 domain separator
+    bytes32 private immutable CACHED_DOMAIN_SEPARATOR;
+
+    /// @notice Cached chain ID in case of fork
+    uint256 private immutable CACHED_CHAIN_ID;
+
+    ///@notice Cached contract address in case of fork
+    address private immutable CACHED_THIS;
+ 
+    /// @notice EIP-712 domain name
+    string private  _name;
+
+    /// @notice EIP-712 domain version
+    string private  _version;
     
     /** 
         * @notice Event when a new intent is registered
@@ -82,18 +94,51 @@ contract OracleIntentRegistry {
     }
  
     /// @notice Contract  constructor
-    constructor() {
+    /// @param domainName The EIP-712 domain name
+    /// @param domainVersion The EIP-712 domain version
+      constructor(string memory domainName, string memory domainVersion) {
         owner = msg.sender;
         authorizedSigners[msg.sender] = true;
-        
+        _name = domainName;
+        _version = domainVersion;
+        CACHED_CHAIN_ID = block.chainid;
+        CACHED_THIS = address(this);
+
         // Create the EIP-712 domain separator using shared library
-        domainSeparator = OracleIntentUtils.createDomainSeparator(
-            "DIA Oracle Intent",
-            "1",
+        CACHED_DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
+            domainName,
+            domainVersion,
             block.chainid,
             address(this)
         );
     }
+
+    /**
+     @notice Gets the EIP-712 domain separator, optimized for gas
+     @return domain separator for the current chain.
+     */
+    function domainSeparator() internal view returns (bytes32) {
+        if (address(this) == CACHED_THIS && block.chainid == CACHED_CHAIN_ID) {
+            return CACHED_DOMAIN_SEPARATOR;
+        } else {
+            return _buildDomainSeparator();
+        }
+    }
+
+    /**
+    @notice Builds the domain separator if chain ID has changed
+    @return calculate domain separator
+     */
+    function _buildDomainSeparator() private view returns (bytes32) {
+       return  OracleIntentUtils.createDomainSeparator(
+            _name,
+            _version,
+            block.chainid,
+            address(this)
+        );
+    }
+
+
     
     /**
      * @dev Registers a new oracle intent with EIP-712 signature
@@ -147,7 +192,7 @@ contract OracleIntentRegistry {
             signer: signer
         });
         
-        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, domainSeparator());
         
         // Check if this intent has already been processed
         if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
@@ -181,53 +226,61 @@ contract OracleIntentRegistry {
         if (intentsData.length == 0) revert IntentNotFound();
         
         uint256 successCount = 0;
+        bytes32 domainSep = domainSeparator();
         
         for (uint256 i = 0; i < intentsData.length; i++) {
-            OracleIntentUtils.OracleIntent calldata data = intentsData[i];
-            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, domainSeparator);
-            
-            if (block.timestamp > data.expiry) {
-                continue;
+            if (_processIntent(intentsData[i], domainSep)) {
+                ++successCount;
             }
-            if (!authorizedSigners[data.signer]) {
-                continue;
-            }
-            if (processedIntents[intentHash]) {
-                continue;
-            }
-            if (OracleIntentUtils.recoverSigner(intentHash, data.signature) != data.signer) {
-                continue;
-            }
-            
-            processedIntents[intentHash] = true;
-            intents[intentHash] = OracleIntentUtils.OracleIntent({
-                intentType: data.intentType,
-                version: data.version,
-                chainId: data.chainId,
-                nonce: data.nonce,
-                expiry: data.expiry,
-                symbol: data.symbol,
-                price: data.price,
-                timestamp: data.timestamp,
-                source: data.source,
-                signature: data.signature,
-                signer: data.signer
-            });
-            
-            
-            // Update latest intent by type and symbol 
-            bytes32 compositeKey = getCompositeKey(data.intentType, data.symbol);
-            bytes32 currentLatestByTypeHash = latestIntentByTypeAndSymbol[compositeKey];
-            if (currentLatestByTypeHash == bytes32(0) || intents[currentLatestByTypeHash].timestamp < data.timestamp) {
-                latestIntentByTypeAndSymbol[compositeKey] = intentHash;
-            }
-            
-            emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
-            ++successCount;
         }
         
-        // Emit batch event
         emit BatchIntentsRegistered(successCount);
+    }
+
+    /**
+     * @notice Internal function to process a single intent
+     * @dev Processes a single intent, returns true if successful
+     * @param data The intent data to process
+     * @param domainSep The cached domain separator
+     * @return success Whether the intent was successfully processed
+     */
+    function _processIntent(
+        OracleIntentUtils.OracleIntent calldata data,
+        bytes32 domainSep
+    ) private returns (bool success) {
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, domainSep);
+
+        if (block.timestamp > data.expiry || 
+            !authorizedSigners[data.signer] || 
+            processedIntents[intentHash] ||
+            OracleIntentUtils.recoverSigner(intentHash, data.signature) != data.signer) {
+            return false;
+        }
+         
+        _storeAndUpdateIntentCalldata(intentHash, data);
+        return true;
+    }
+
+    /**
+     * @notice Internal function to store intent and update latest mapping
+     * @dev Stores the intent and updates the latest intent by type and symbol mapping
+     * @param intentHash The hash of the intent
+     * @param data The intent data to store
+     */
+    function _storeAndUpdateIntentCalldata(
+        bytes32 intentHash,
+        OracleIntentUtils.OracleIntent calldata data
+    ) private {
+        processedIntents[intentHash] = true;
+        intents[intentHash] = data;
+        
+        bytes32 compositeKey = getCompositeKey(data.intentType, data.symbol);
+        bytes32 currentLatestByTypeHash = latestIntentByTypeAndSymbol[compositeKey];
+        if (currentLatestByTypeHash == bytes32(0) || intents[currentLatestByTypeHash].timestamp < data.timestamp) {
+            latestIntentByTypeAndSymbol[compositeKey] = intentHash;
+        }
+        
+        emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
     }
     
 
@@ -273,7 +326,7 @@ contract OracleIntentRegistry {
      * @return The domain separator used for EIP-712 signatures
      */
     function getDomainSeparator() external view returns (bytes32) {
-        return domainSeparator;
+        return domainSeparator();
     }
     
     /**

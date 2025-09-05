@@ -46,7 +46,7 @@ contract OracleTriggerV2Test is Test {
         oracleTriggerV2 = new OracleTriggerV2();
         
         // Deploy intent registry
-        intentRegistry = new OracleIntentRegistry();
+        intentRegistry = new OracleIntentRegistry("OIA Oracle Intent", "1");
         
         // Setup V2-specific configuration
         vm.prank(owner);
@@ -170,7 +170,7 @@ contract OracleTriggerV2Test is Test {
     }
     
     function testUpdateIntentRegistryContract() public {
-        OracleIntentRegistry newRegistry = new OracleIntentRegistry();
+        OracleIntentRegistry newRegistry = new OracleIntentRegistry("OIA Oracle Intent", "1");
         
         vm.prank(owner);
         oracleTriggerV2.updateIntentRegistryContract(address(newRegistry));
@@ -179,7 +179,7 @@ contract OracleTriggerV2Test is Test {
     }
     
     function testCannotUpdateIntentRegistryWithoutOwner() public {
-        OracleIntentRegistry newRegistry = new OracleIntentRegistry();
+        OracleIntentRegistry newRegistry = new OracleIntentRegistry("OIA Oracle Intent", "1");
         
         vm.prank(newOwner);
         vm.expectRevert();

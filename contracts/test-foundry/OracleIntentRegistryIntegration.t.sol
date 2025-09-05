@@ -75,8 +75,8 @@ contract OracleIntentRegistryIntegrationTest is Test {
         feeHook = new MockProtocolFeeHook(1000);
         
         // Deploy registry
-        registry = new OracleIntentRegistry();
-        
+        registry = new OracleIntentRegistry("DIA Oracle Intent", "1");
+
         // Deploy receiver using the SAME domain configuration as registry for consistency
         receiver = new PushOracleReceiverV2(
             REGISTRY_DOMAIN_NAME,      // Same domain name as registry
