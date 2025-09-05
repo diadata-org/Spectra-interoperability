@@ -303,6 +303,7 @@ contract OracleIntentRegistry {
      * @notice Only the contract owner can authorize or deauthorize signers
      */
     function setSignerAuthorization(address signer, bool status) external onlyOwner {
+        if (signer == address(0)) revert ZeroAddress();
         authorizedSigners[signer] = status;
         emit SignerAuthorized(signer, status);
     }

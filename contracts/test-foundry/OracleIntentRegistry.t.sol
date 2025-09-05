@@ -107,6 +107,14 @@ contract OracleIntentRegistryTest is Test {
         assertFalse(registry.authorizedSigners(signer1));
     }
     
+    function testSetSignerAuthorizationZeroAddress() public {
+         vm.expectRevert(OracleIntentRegistry.ZeroAddress.selector);
+        registry.setSignerAuthorization(address(0), true);
+        
+        vm.expectRevert(OracleIntentRegistry.ZeroAddress.selector);
+        registry.setSignerAuthorization(address(0), false);
+    }
+    
     // ===== OWNERSHIP TRANSFER TESTS =====
     
     function testTransferOwnership() public {
