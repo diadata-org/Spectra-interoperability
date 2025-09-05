@@ -514,17 +514,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         return _updateOracleDataUnified(intent.symbol, intent.price, intent.timestamp, intentHash, intent.signer);
     }
     
-    /**
-     * @notice Performs the actual data update for an intent (unified wrapper)
-     * @param intent The OracleIntent containing the data
-     * @param intentHash The hash of the intent for events
-     * @return updated Whether the data was actually updated
-     */
-    
-    
-
-   
-
    /**
     * @notice Validates the status of an OracleIntent
     * @param intent The OracleIntent structure to validate
