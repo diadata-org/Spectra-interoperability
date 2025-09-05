@@ -38,6 +38,10 @@ interface IPushOracleReceiverV2 is
 
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
+
+
+    // @notice InsufficientGasForPayment is thrown when there is not enough gas to pay for the message
+    error InsufficientGasForPayment();
     
     
     // @notice Thrown when batch size exceeds maximum allowed

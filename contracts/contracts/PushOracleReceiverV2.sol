@@ -207,10 +207,9 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         
         uint256 fee = gasUsed * gasPrice;
         
-        // Check contract balance and adjust fee if necessary
         uint256 contractBalance = address(this).balance;
         if (fee > contractBalance) {
-            fee = contractBalance; // Pay what we can afford
+            revert InsufficientGasForPayment(); 
         }
         
         // Only transfer if we have something to transfer
