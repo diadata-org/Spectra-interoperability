@@ -21,6 +21,7 @@ contract OracleIntentRegistry {
     error InvalidSignature();
     error NoIntentForSymbol();
     error IntentNotFound();
+    error IntentExpired();
     error ZeroAddress();
     
     // Note: Batch uses OracleIntentUtils.OracleIntent directly to avoid duplication
@@ -122,7 +123,12 @@ contract OracleIntentRegistry {
         bytes calldata signature,
         address signer
     ) external {
-        
+
+        // Check if the intent has expired
+        if (block.timestamp > expiry) {
+            revert IntentExpired();
+        }
+
         // Verify the signer is authorized
         if (!authorizedSigners[signer]) revert SignerNotAuthorized();
         

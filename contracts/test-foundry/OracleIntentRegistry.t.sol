@@ -203,6 +203,32 @@ contract OracleIntentRegistryTest is Test {
             signer1
         );
     }
+
+    function TestRegisterExpiredIntent() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        // Create intent with past expiry
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent(TEST_SYMBOL, TEST_NONCE);
+        intent.expiry = block.timestamp - 1; // Already expired
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator());
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signer1Pk, intentHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(OracleIntentRegistry.IntentExpired.selector);
+        registry.registerIntent(
+            intent.intentType,
+            intent.version,
+            intent.chainId,
+            intent.nonce,
+            intent.expiry,
+            intent.symbol,
+            intent.price,
+            intent.timestamp,
+            intent.source,
+            signature,
+            signer1
+        );
+    }
     
     function testRegisterIntentWithInvalidSignature() public {
         registry.setSignerAuthorization(signer1, true);
