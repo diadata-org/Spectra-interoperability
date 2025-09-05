@@ -37,8 +37,6 @@ contract OracleTriggerV2 is
     /// @notice Address of the OracleIntentRegistry contract.
     address public intentRegistryContract;
     
-    /// @notice EIP-712 domain separator for signature validation
-    bytes32 public domainSeparator;
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -119,37 +117,7 @@ contract OracleTriggerV2 is
         emit IntentRegistryContractUpdated(newRegistry);
     }
     
-    /// @notice Sets the EIP-712 domain separator for signature validation
-    /// @param domainName The domain name for EIP-712
-    /// @param domainVersion The domain version for EIP-712  
-    /// @param sourceChainId The source chain ID for the domain
-    /// @dev CRITICAL: This domain separator must match exactly with PushOracleReceiverV2's immutable domain separator
-    /// @dev for signature validation to work correctly across the system
-    function setDomainSeparator(
-        string calldata domainName,
-        string calldata domainVersion,
-        uint256 sourceChainId
-    ) external onlyRole(OWNER_ROLE) {
-        bytes32 newDomainSeparator = OracleIntentUtils.createDomainSeparator(
-            domainName,
-            domainVersion,
-            sourceChainId,
-            address(this)
-        );
-        
-        if (newDomainSeparator == bytes32(0)) {
-            revert DomainSeparatorZero();
-        }
 
-        domainSeparator = newDomainSeparator;
-        emit DomainSeparatorUpdated(
-            domainSeparator,
-            domainName,
-            domainVersion,
-            sourceChainId,
-            address(this)
-        );
-    }
 
     /** @dev Fetches the latest intent from the registry for the given symbol
      * @param _intentType The type of intent to fetch (e.g., "OracleUpdate")

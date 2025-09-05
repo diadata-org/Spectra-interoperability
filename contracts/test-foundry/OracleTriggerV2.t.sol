@@ -52,8 +52,7 @@ contract OracleTriggerV2Test is Test {
         vm.prank(owner);
         oracleTriggerV2.updateIntentRegistryContract(address(intentRegistry));
         
-        vm.prank(owner);
-        oracleTriggerV2.setDomainSeparator(DOMAIN_NAME, DOMAIN_VERSION, SOURCE_CHAIN_ID);
+        
         
         // Authorize oracle signer
         intentRegistry.setSignerAuthorization(oracleSigner, true);
@@ -191,41 +190,6 @@ contract OracleTriggerV2Test is Test {
         vm.prank(owner);
         vm.expectRevert(IOracleTriggerV2.InvalidAddress.selector);
         oracleTriggerV2.updateIntentRegistryContract(address(0));
-    }
-    
-    function testDomainSeparatorConfiguration() public view {
-        bytes32 expectedDomain = OracleIntentUtils.createDomainSeparator(
-            DOMAIN_NAME,
-            DOMAIN_VERSION,
-            SOURCE_CHAIN_ID,
-            address(oracleTriggerV2)
-        );
-        
-        assertEq(oracleTriggerV2.domainSeparator(), expectedDomain);
-    }
-    
-    function testSetDomainSeparator() public {
-        string memory newDomainName = "New Domain";
-        string memory newDomainVersion = "2.0";
-        uint256 newChainId = 42;
-        
-        vm.expectEmit(true, false, false, true, address(oracleTriggerV2));
-        emit IOracleTriggerV2.DomainSeparatorUpdated(
-            OracleIntentUtils.createDomainSeparator(newDomainName, newDomainVersion, newChainId, address(oracleTriggerV2)),
-            newDomainName,
-            newDomainVersion,
-            newChainId,
-            address(oracleTriggerV2)
-        );
-        
-        vm.prank(owner);
-        oracleTriggerV2.setDomainSeparator(newDomainName, newDomainVersion, newChainId);
-    }
-    
-    function testCannotSetDomainSeparatorWithoutOwner() public {
-        vm.prank(newOwner);
-        vm.expectRevert();
-        oracleTriggerV2.setDomainSeparator("Test", "1.0", 1);
     }
     
 
@@ -729,30 +693,3 @@ contract RejectingReceiver {
     }
 }
 
-// Test contract that extends OracleTriggerV2 to allow forcing zero domain separator
-contract TestOracleTriggerV2WithMockDomain is OracleTriggerV2 {
-    
-    function initializeAsOwner(address _owner) external {
-        _grantRole(DEFAULT_ADMIN_ROLE, _owner);
-        _grantRole(OWNER_ROLE, _owner);
-    }
-    
-    // Function that forces the domain separator check to trigger with bytes32(0)
-    function setDomainSeparatorForceZero() external onlyRole(OWNER_ROLE) {
-        bytes32 newDomainSeparator = bytes32(0); // Force zero value
-        
-        // This is the exact same check as in the original contract
-        if (newDomainSeparator == bytes32(0)) {
-            revert DomainSeparatorZero();
-        }
-
-        domainSeparator = newDomainSeparator;
-        emit DomainSeparatorUpdated(
-            domainSeparator,
-            "forced",
-            "zero",
-            0,
-            address(this)
-        );
-    }
-}
