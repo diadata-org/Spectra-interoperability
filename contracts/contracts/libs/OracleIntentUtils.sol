@@ -80,6 +80,7 @@ library OracleIntentUtils {
      * @param hash The hash that was signed
      * @param signature The signature bytes
      * @return The address of the signer
+     * @dev Includes protection against signature malleability by validating s component
      */
     function recoverSigner(bytes32 hash, bytes memory signature) internal pure returns (address) {
         if (signature.length != 65) revert InvalidSignature();
@@ -99,6 +100,13 @@ library OracleIntentUtils {
         }
         
         if (v != 27 && v != 28) revert InvalidSignature();
+        
+        // Prevent signature malleability by ensuring s is in the lower half of secp256k1 curve order
+        // secp256k1 curve order n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+        // Upper half threshold = n/2 + 1 = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A1
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+            revert InvalidSignature();
+        }
         
         return ecrecover(hash, v, r, s);
     }
@@ -139,6 +147,7 @@ library OracleIntentUtils {
         internal pure returns (bool isValid) {
         bytes32 intentHash = calculateIntentHash(intent, domainSeparator);
         address recoveredSigner = recoverSigner(intentHash, intent.signature);
+        if (recoveredSigner == address(0)) revert InvalidSignature();
         return recoveredSigner == intent.signer;
     }
     
