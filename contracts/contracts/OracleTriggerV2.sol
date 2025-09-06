@@ -30,7 +30,7 @@ contract OracleTriggerV2 is
     /// @notice Role identifier for contract owners.
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
-    /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestReceipent.
+    /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestRecipient.
     bytes32 public constant DISPATCHER_ROLE = keccak256("DISPATCHER_ROLE");
 
     
