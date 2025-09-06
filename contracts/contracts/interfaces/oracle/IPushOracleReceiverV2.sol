@@ -36,6 +36,9 @@ interface IPushOracleReceiverV2 is
     // @notice Thrown when there is no balance in the contract to withdraw from
     error NoBalanceToWithdraw();
 
+    // @notice Thrown when requested amount exceeds available balance
+    error InsufficientBalance();
+
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
 
@@ -244,11 +247,12 @@ interface IPushOracleReceiverV2 is
     ) external;
 
     /**
-     * @notice Withdraws stuck funds to the specified address
+     * @notice Withdraws specific amount of stuck funds to the specified address
      * @dev restricted to onlyOwner
      * @param receiver The address to receive the funds.
+     * @param amount The amount to withdraw (must be <= balance)
      */
-    function retrieveLostTokens(address receiver) external;
+    function retrieveLostTokens(address receiver, uint256 amount) external;
     
     /**
      * @notice Returns the domain separator for EIP-712 signatures

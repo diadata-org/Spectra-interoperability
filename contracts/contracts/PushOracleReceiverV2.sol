@@ -354,19 +354,22 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     }
 
     /**
-     * @notice Withdraws stuck funds to the specified address
+     * @notice Withdraws specific amount of stuck funds to the specified address
      * @dev restricted to onlyOwner
      * @param receiver The address to receive the funds.
+     * @param amount The amount to withdraw (must be <= balance)
      */
     function retrieveLostTokens(
-        address receiver
+        address receiver,
+        uint256 amount
     ) external override onlyOwner validateAddress(receiver) nonReentrant {
         uint256 balance = address(this).balance;
-        if (balance <= 0) revert NoBalanceToWithdraw();
+        if (balance == 0) revert NoBalanceToWithdraw();
+        if (amount > balance) revert InsufficientBalance();  
 
-        emit TokensRecovered(receiver, balance);
-        
-        (bool success, ) = payable(receiver).call{ value: balance }("");
+        emit TokensRecovered(receiver, amount);
+
+        (bool success, ) = payable(receiver).call{ value: amount }("");
         if (!success) revert AmountTransferFailed();
     }
     

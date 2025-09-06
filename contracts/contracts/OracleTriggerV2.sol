@@ -248,16 +248,19 @@ contract OracleTriggerV2 is
 
     /// @notice Retrieves lost tokens
     /// @param receiver The address of the receiver
+    /// @param amount The amount to withdraw (must be <= balance)
     function retrieveLostTokens(
-        address receiver
+        address receiver,
+        uint256 amount
     ) external onlyRole(OWNER_ROLE) validateAddress(receiver) {
         uint256 balance = address(this).balance;
-        if (balance <= 0) revert NoBalanceToWithdraw();
+        if (balance == 0) revert NoBalanceToWithdraw();
+        if (amount > balance) revert InsufficientBalance();
 
-        (bool success, ) = payable(receiver).call{ value: balance }("");
+        (bool success, ) = payable(receiver).call{ value: amount }("");
         if (!success) revert AmountTransferFailed();
 
-        emit TokensRecovered(receiver, balance);
+        emit TokensRecovered(receiver, amount);
     }
 
    /**

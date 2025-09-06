@@ -124,16 +124,17 @@ contract OracleTriggerV2Test is Test {
         uint256 contractBalanceBefore = address(oracleTriggerV2).balance;
 
         vm.prank(owner);
-        oracleTriggerV2.retrieveLostTokens(recipient);
+        oracleTriggerV2.retrieveLostTokens(recipient, contractBalanceBefore);
 
         assertEq(recipient.balance, recipientBalanceBefore + contractBalanceBefore);
         assertEq(address(oracleTriggerV2).balance, 0);
     }
 
     function testRetrieveLostTokensUnauthorized() public {
+        vm.deal(address(oracleTriggerV2), 0.5 ether);
         vm.prank(newOwner);
         vm.expectRevert();
-        oracleTriggerV2.retrieveLostTokens(recipient);
+        oracleTriggerV2.retrieveLostTokens(recipient, 0.5 ether);
     }
 
     function testCannotAddDuplicateChain() public {
@@ -365,7 +366,7 @@ contract OracleTriggerV2Test is Test {
         
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.AmountTransferFailed.selector));
-        oracleTriggerV2.retrieveLostTokens(address(rejector));
+        oracleTriggerV2.retrieveLostTokens(address(rejector), 1 ether);
     }
     
     function testRetrieveLostTokensNoBalance() public {
@@ -375,7 +376,16 @@ contract OracleTriggerV2Test is Test {
         
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.NoBalanceToWithdraw.selector));
-        oracleTriggerV2.retrieveLostTokens(recipient);
+        oracleTriggerV2.retrieveLostTokens(recipient, 1 ether);
+    }
+    
+    function testRetrieveLostTokensInsufficientBalance() public {
+        // Test when requested amount exceeds contract balance
+        vm.deal(address(oracleTriggerV2), 0.5 ether);
+        
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.InsufficientBalance.selector));
+        oracleTriggerV2.retrieveLostTokens(recipient, 1 ether); // Request more than available
     }
     
     function testValidateAddressZeroAddressChecks() public {

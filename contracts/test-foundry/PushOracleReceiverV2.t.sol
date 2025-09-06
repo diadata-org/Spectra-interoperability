@@ -215,7 +215,7 @@ contract PushOracleReceiverV2Test is Test {
         oracle.setDomainSeparator("test", "1.0", 1, address(0x1));
         
         vm.expectRevert("Ownable: caller is not the owner");
-        oracle.retrieveLostTokens(address(0x1));
+        oracle.retrieveLostTokens(address(0x1), 1 ether);
         
         vm.stopPrank();
     }
@@ -239,7 +239,7 @@ contract PushOracleReceiverV2Test is Test {
         
         // Test retrieveLostTokens with zero address
         vm.expectRevert(IPushOracleReceiverV2.InvalidAddress.selector);
-        oracle.retrieveLostTokens(address(0));
+        oracle.retrieveLostTokens(address(0), 1 ether);
     }
 
     // ===== CONFIGURATION TESTS =====
@@ -616,7 +616,7 @@ contract PushOracleReceiverV2Test is Test {
     
     function testTransferProtocolFeeInsufficientBalance() public {
         // Drain oracle balance
-        oracle.retrieveLostTokens(address(this));
+        oracle.retrieveLostTokens(address(this), address(oracle).balance);
         
         // Record initial balances
         uint256 initialOracleBalance = address(oracle).balance;
@@ -644,7 +644,7 @@ contract PushOracleReceiverV2Test is Test {
         oracle.setPaymentHook(payable(address(highCostHook)));
         
         // Fund oracle with just a small amount
-        oracle.retrieveLostTokens(address(this)); // Drain first
+        oracle.retrieveLostTokens(address(this), address(oracle).balance); // Drain first
         vm.deal(address(oracle), 0.001 ether); // Small amount
         
         // Record initial balances
@@ -696,7 +696,7 @@ contract PushOracleReceiverV2Test is Test {
         vm.expectEmit(true, false, false, true);
         emit IPushOracleReceiverV2.TokensRecovered(recipient, balance);
         
-        oracle.retrieveLostTokens(recipient);
+        oracle.retrieveLostTokens(recipient, balance);
         
         assertEq(address(oracle).balance, 0);
         assertEq(recipient.balance, balance);
@@ -704,10 +704,18 @@ contract PushOracleReceiverV2Test is Test {
     
     function testRetrieveLostTokensNoBalance() public {
         // Drain balance first
-        oracle.retrieveLostTokens(address(this));
+        oracle.retrieveLostTokens(address(this), address(oracle).balance);
         
         vm.expectRevert(IPushOracleReceiverV2.NoBalanceToWithdraw.selector);
-        oracle.retrieveLostTokens(address(0x456));
+        oracle.retrieveLostTokens(address(0x456), 1 ether);
+    }
+    
+    function testRetrieveLostTokensInsufficientBalance() public {
+        uint256 balance = address(oracle).balance;
+        
+        // Try to withdraw more than available
+        vm.expectRevert(IPushOracleReceiverV2.InsufficientBalance.selector);
+        oracle.retrieveLostTokens(address(0x456), balance + 1 ether);
     }
 
     // ===== VIEW FUNCTION TESTS =====
@@ -1213,7 +1221,7 @@ contract PushOracleReceiverV2Test is Test {
         oracle.setPaymentHook(payable(address(edgeCaseHook)));
         
         // Fund oracle with less than the calculated fee (1,000,000 * 1 = 1,000,000 wei)
-        oracle.retrieveLostTokens(address(this));
+        oracle.retrieveLostTokens(address(this), address(oracle).balance);
         vm.deal(address(oracle), 500000); // Less than gas cost
         
         OracleIntentUtils.OracleIntent memory intent = createSignedIntent("BTC", 1);
