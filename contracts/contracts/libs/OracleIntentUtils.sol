@@ -159,6 +159,6 @@ library OracleIntentUtils {
      */
     function isIntentFormat(bytes calldata _data) internal pure returns (bool isIntent) {
         // real Intent payloads will be well above this threshold;
-        return _data.length >= 200;
+        return _data.length >= 512;
     }
 }
