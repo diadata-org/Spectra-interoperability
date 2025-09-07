@@ -371,8 +371,12 @@ contract PushOracleReceiverV2Test is Test {
         vm.prank(trustedMailbox);
         oracle.handle(1, bytes32(0), newerData);
         
-        // Try to update with older timestamp (should be ignored)
+        // Try to update with older timestamp (should be ignored and emit ReceivedStaleMessage event)
         bytes memory olderData = abi.encode("BTC", uint128(TEST_TIMESTAMP), uint128(TEST_PRICE + 1000));
+        
+        vm.expectEmit(false, false, false, true);
+        emit IPushOracleReceiverV2.ReceivedStaleMessage("BTC", uint128(TEST_TIMESTAMP), uint128(TEST_PRICE + 1000), uint128(TEST_TIMESTAMP + 1000));
+        
         vm.prank(trustedMailbox);
         oracle.handle(1, bytes32(0), olderData);
         
@@ -380,6 +384,145 @@ contract PushOracleReceiverV2Test is Test {
         (uint128 value, uint128 timestamp) = oracle.getValue("BTC");
         assertEq(value, uint128(TEST_PRICE));
         assertEq(timestamp, uint128(TEST_TIMESTAMP + 1000));
+    }
+    
+    function testReceivedStaleMessageEvent() public {
+        // Set up initial data
+        bytes memory initialData = abi.encode("ETH", uint128(TEST_TIMESTAMP + 500), uint128(3000));
+        vm.prank(trustedMailbox);
+        oracle.handle(1, bytes32(0), initialData);
+        
+        // stale data 
+        uint128 staleTimestamp = uint128(TEST_TIMESTAMP + 100);
+        uint128 staleValue = uint128(2500);
+        bytes memory staleData = abi.encode("ETH", staleTimestamp, staleValue);
+        
+        // Expect the ReceivedStaleMessage event to be emitted
+        vm.expectEmit(false, false, false, true);
+        emit IPushOracleReceiverV2.ReceivedStaleMessage("ETH", staleTimestamp, staleValue, uint128(TEST_TIMESTAMP + 500));
+        
+        // Send stale data
+        vm.prank(trustedMailbox);
+        oracle.handle(1, bytes32(0), staleData);
+        
+        // Verify data unchanged (still the newer data)
+        (uint128 storedValue, uint128 storedTimestamp) = oracle.getValue("ETH");
+        assertEq(storedValue, uint128(3000));
+        assertEq(storedTimestamp, uint128(TEST_TIMESTAMP + 500));
+    }
+    
+    function testBatchIntentUpdatesWithRejections() public {
+         OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](4);
+        
+        // 1. Valid intent
+        intents[0] = createValidIntent("BTC", 1);
+        intents[0].signer = authorizedSigner;
+        bytes32 validHash = oracle.calculateIntentHash(intents[0]);
+        (uint8 v1, bytes32 r1, bytes32 s1) = vm.sign(signerPk, validHash);
+        intents[0].signature = abi.encodePacked(r1, s1, v1);
+        
+        // 2. Unauthorized signer
+        intents[1] = createValidIntent("ETH", 2);
+        intents[1].signer = address(0x999); // Unauthorized signer
+        bytes32 unauthorizedHash = oracle.calculateIntentHash(intents[1]);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(0x999, unauthorizedHash);
+        intents[1].signature = abi.encodePacked(r2, s2, v2);
+        
+        // 3. Invalid signature 
+        intents[2] = createValidIntent("ADA", 3);
+        intents[2].signer = authorizedSigner;  
+        bytes32 invalidSigHash = oracle.calculateIntentHash(intents[2]);
+        (uint8 v3, bytes32 r3, bytes32 s3) = vm.sign(0x888, invalidSigHash); 
+        intents[2].signature = abi.encodePacked(r3, s3, v3);
+        
+        // 4. Another valid intent
+        intents[3] = createValidIntent("DOT", 4);
+        intents[3].signer = authorizedSigner;
+        bytes32 validHash2 = oracle.calculateIntentHash(intents[3]);
+        (uint8 v4, bytes32 r4, bytes32 s4) = vm.sign(signerPk, validHash2);
+        intents[3].signature = abi.encodePacked(r4, s4, v4);
+        
+        // Expect rejection events for invalid intents
+        vm.expectEmit(true, true, true, true);
+        emit IPushOracleReceiverV2.IntentRejected(
+            unauthorizedHash,
+            "ETH",
+            address(0x999),
+            IPushOracleReceiverV2.RejectionReason.UnauthorizedSigner
+        );
+        
+        vm.expectEmit(true, true, true, true);
+        emit IPushOracleReceiverV2.IntentRejected(
+            invalidSigHash,
+            "ADA",
+            authorizedSigner,
+            IPushOracleReceiverV2.RejectionReason.InvalidSignature
+        );
+        
+         oracle.handleBatchIntentUpdates{value: 1 ether}(intents);
+        
+        // Verify only valid intents were processed
+        (uint128 btcValue,) = oracle.getValue("BTC");
+        assertEq(btcValue, TEST_PRICE);
+        
+        (uint128 dotValue,) = oracle.getValue("DOT");
+        assertEq(dotValue, TEST_PRICE);
+        
+        // Verify invalid intents were not processed (should return zero values)
+        (uint128 ethValue, uint128 ethTimestamp) = oracle.getValue("ETH");
+        assertEq(ethValue, 0);
+        assertEq(ethTimestamp, 0);
+        
+        (uint128 adaValue, uint128 adaTimestamp) = oracle.getValue("ADA");
+        assertEq(adaValue, 0);
+        assertEq(adaTimestamp, 0);
+    }
+    
+    function testBatchIntentUpdatesAlreadyProcessedRejection() public {
+         OracleIntentUtils.OracleIntent memory firstIntent = createValidIntent("XRP", 1);
+        firstIntent.signer = authorizedSigner;
+        bytes32 intentHash = oracle.calculateIntentHash(firstIntent);
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPk, intentHash);
+        firstIntent.signature = abi.encodePacked(r, s, v);
+        
+        oracle.handleIntentUpdate{value: 1 ether}(firstIntent);
+        
+         OracleIntentUtils.OracleIntent[] memory batchIntents = new OracleIntentUtils.OracleIntent[](2);
+        batchIntents[0] = firstIntent; // Already processed
+        
+        // Add a valid new intent
+        batchIntents[1] = createValidIntent("LTC", 2);
+        batchIntents[1].signer = authorizedSigner;
+        bytes32 validHash = oracle.calculateIntentHash(batchIntents[1]);
+        (uint8 v2, bytes32 r2, bytes32 s2) = vm.sign(signerPk, validHash);
+        batchIntents[1].signature = abi.encodePacked(r2, s2, v2);
+        
+        // Expect rejection event for already processed intent
+        vm.expectEmit(true, true, true, true);
+        emit IPushOracleReceiverV2.IntentRejected(
+            intentHash,
+            "XRP",
+            authorizedSigner,
+            IPushOracleReceiverV2.RejectionReason.AlreadyProcessed
+        );
+        
+         oracle.handleBatchIntentUpdates{value: 1 ether}(batchIntents);
+        
+         (uint128 ltcValue,) = oracle.getValue("LTC");
+        assertEq(ltcValue, TEST_PRICE);
+        
+         (uint128 xrpValue,) = oracle.getValue("XRP");
+        assertEq(xrpValue, TEST_PRICE);
+    }
+    
+    function testBatchIntentUpdatesRejectionReasons() public {
+         uint8 unauthorizedReason = uint8(IPushOracleReceiverV2.RejectionReason.UnauthorizedSigner);
+        uint8 alreadyProcessedReason = uint8(IPushOracleReceiverV2.RejectionReason.AlreadyProcessed);
+        uint8 invalidSignatureReason = uint8(IPushOracleReceiverV2.RejectionReason.InvalidSignature);
+        
+        assertEq(unauthorizedReason, 0, "UnauthorizedSigner should be 0");
+        assertEq(alreadyProcessedReason, 1, "AlreadyProcessed should be 1");
+        assertEq(invalidSignatureReason, 2, "InvalidSignature should be 2");
     }
     
     function testHandleIntentMessage() public {

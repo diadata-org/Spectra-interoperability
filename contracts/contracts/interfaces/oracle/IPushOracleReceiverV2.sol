@@ -78,6 +78,39 @@ interface IPushOracleReceiverV2 is
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
 
     /**
+     * @notice Emitted when ISM-validated data is received but ignored due to being stale
+     * @param key The key of the update
+     * @param timestamp The timestamp of the stale update
+     * @param value The value of the stale update
+     * @param existingTimestamp The existing newer timestamp
+     */
+    event ReceivedStaleMessage(string key, uint128 timestamp, uint128 value, uint128 existingTimestamp);
+
+    /**
+     * @notice Enumeration of possible intent rejection reasons
+     * @dev Used in IntentRejected event for gas efficiency and type safety
+     */
+    enum RejectionReason {
+        UnauthorizedSigner,  // 0 - Signer is not authorized
+        AlreadyProcessed,    // 1 - Intent has already been processed (replay protection)
+        InvalidSignature     // 2 - Signature verification failed
+    }
+
+    /**
+     * @notice Emitted when an intent is rejected during batch processing
+     * @param intentHash The hash of the rejected intent
+     * @param symbol The symbol of the intent
+     * @param signer The signer of the intent
+     * @param reason The reason for rejection (enum value for gas efficiency)
+     */
+    event IntentRejected(
+        bytes32 indexed intentHash,
+        string indexed symbol,
+        address indexed signer,
+        RejectionReason reason
+    );
+
+    /**
      * @notice Emitted when an intent-based update is received and applied
      * @param intentHash The hash of the intent
      * @param symbol The symbol of the update

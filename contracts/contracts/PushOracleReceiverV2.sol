@@ -23,10 +23,9 @@ import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
  * ## Direct Interaction:
  * External services can directly call handleIntentUpdate or handleBatchIntentUpdates
  * with properly formatted and signed OracleIntent structures. The contract will verify:
- * 1. The intent has not expired
- * 2. The signer is authorized
- * 3. The intent has not been processed before
- * 4. The signature is valid
+ * 1. The signer is authorized
+ * 2. The intent has not been processed before
+ * 3. The signature is valid
  *
  * ## Funding Mechanism:
  * - The contract should hold enough balance to cover transaction fees for updates.
@@ -69,7 +68,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     bytes32 public domainSeparator;
 
     /// @notice Validation status for intent checks used to avoid logic duplication
-    enum ValidationStatus { Ok, Expired, UnauthorizedSigner, AlreadyProcessed, InvalidSignature }
+    enum ValidationStatus { Ok, UnauthorizedSigner, AlreadyProcessed, InvalidSignature }
 
     /// @notice Error thrown when an ISM is not set (zero address) is used.
     error InvalidISMAddress();
@@ -183,6 +182,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
 
         // Ensure the new timestamp is more recent (freshness validation)
         if (updates[key].timestamp >= timestamp) {
+            emit ReceivedStaleMessage(key, timestamp, value, updates[key].timestamp);
             return; // Ignore outdated data
         }
 
@@ -503,10 +503,27 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         (ValidationStatus status, bytes32 intentHash) = _validateIntentStatus(intent);
         if (status != ValidationStatus.Ok) {
             if (revertOnFailure) {
-                if (status == ValidationStatus.Expired) revert IntentExpired();
                 if (status == ValidationStatus.UnauthorizedSigner) revert UnauthorizedSigner();
                 if (status == ValidationStatus.AlreadyProcessed) revert IntentAlreadyProcessed();
                 revert InvalidSignature();
+            } else {
+                // Emit rejection event for batch processing transparency
+                bytes32 hashForEvent = intentHash;
+                if (hashForEvent == bytes32(0)) {
+                    // Calculate hash for event even if validation failed
+                    hashForEvent = OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
+                }
+                
+                RejectionReason reason;
+                if (status == ValidationStatus.UnauthorizedSigner) {
+                    reason = RejectionReason.UnauthorizedSigner;
+                } else if (status == ValidationStatus.AlreadyProcessed) {
+                    reason = RejectionReason.AlreadyProcessed;
+                } else {
+                    reason = RejectionReason.InvalidSignature;
+                }
+                
+                emit IntentRejected(hashForEvent, intent.symbol, intent.signer, reason);
             }
             return false;
         }
