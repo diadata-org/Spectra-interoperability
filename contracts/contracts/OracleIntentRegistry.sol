@@ -84,6 +84,31 @@ contract OracleIntentRegistry {
      */
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
+    /**
+     * @notice Enumeration of possible intent rejection reasons
+     * @dev Used in IntentRejected event for gas efficiency and type safety
+     */
+    enum RejectionReason {
+        Expired,              
+        UnauthorizedSigner,  
+        AlreadyProcessed,     
+        InvalidSignature 
+    }
+
+    /**
+     * @notice Event when an intent is rejected during processing
+     * @param intentHash The hash of the rejected intent
+     * @param symbol The symbol of the intent
+     * @param signer The signer of the intent
+     * @param reason The reason for rejection (enum value for gas efficiency)
+     */
+    event IntentRejected(
+        bytes32 indexed intentHash, 
+        string indexed symbol, 
+        address indexed signer, 
+        RejectionReason reason
+    );
+
     /// @notice Contract owner
     address public owner;
     
@@ -250,10 +275,24 @@ contract OracleIntentRegistry {
     ) private returns (bool success) {
         bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, domainSep);
 
-        if (block.timestamp > data.expiry || 
-            !authorizedSigners[data.signer] || 
-            processedIntents[intentHash] ||
-            OracleIntentUtils.recoverSigner(intentHash, data.signature) != data.signer) {
+        if (block.timestamp > data.expiry) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.Expired);
+            return false;
+        }
+        
+        if (!authorizedSigners[data.signer]) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.UnauthorizedSigner);
+            return false;
+        }
+        
+        if (processedIntents[intentHash]) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.AlreadyProcessed);
+            return false;
+        }
+        
+        address recoveredSigner = OracleIntentUtils.recoverSigner(intentHash, data.signature);
+        if (recoveredSigner != data.signer) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.InvalidSignature);
             return false;
         }
          

@@ -35,6 +35,7 @@ contract OracleIntentRegistryTest is Test {
     event IntentRegistered(bytes32 indexed intentHash, string indexed symbol, uint256 indexed price, uint256 timestamp, address signer);
     event SignerAuthorized(address indexed signer, bool indexed status);
     event BatchIntentsRegistered(uint256 indexed count);
+    event IntentRejected(bytes32 indexed intentHash, string indexed symbol, address indexed signer, OracleIntentRegistry.RejectionReason reason);
     
     function setUp() public {
         owner = address(this);
@@ -885,5 +886,150 @@ contract OracleIntentRegistryTest is Test {
         
         // Verify latest didn't change
         assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), newerHash);
+    }
+    
+    
+    function testExpiredIntentEmitsEnumEvent() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent("BTC", 1);
+        intent.expiry = block.timestamp - 1; 
+        intent = createSignedIntent(intent, signer1Pk, signer1);
+        
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](1);
+        intents[0] = intent;
+        
+        vm.expectEmit(true, true, true, true);
+        emit IntentRejected(
+            OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator()),
+            "BTC", 
+            signer1, 
+            OracleIntentRegistry.RejectionReason.Expired
+        );
+        
+        registry.registerMultipleIntents(intents);
+    }
+    
+    function testUnauthorizedSignerEmitsEnumEvent() public {
+        address unauthorizedSigner = address(0x99);
+        uint256 unauthorizedPk = 0x99;
+        
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent("ETH", 1);
+        intent.expiry = block.timestamp + 3600;
+        intent = createSignedIntent(intent, unauthorizedPk, unauthorizedSigner);
+        
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](1);
+        intents[0] = intent;
+        
+        vm.expectEmit(true, true, true, true);
+        emit IntentRejected(
+            OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator()),
+            "ETH", 
+            unauthorizedSigner, 
+            OracleIntentRegistry.RejectionReason.UnauthorizedSigner
+        );
+        
+        registry.registerMultipleIntents(intents);
+    }
+    
+    function testAlreadyProcessedIntentEmitsEnumEvent() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent("ADA", 1);
+        intent = createSignedIntent(intent, signer1Pk, signer1);
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator());
+        
+        OracleIntentUtils.OracleIntent[] memory firstBatch = new OracleIntentUtils.OracleIntent[](1);
+        firstBatch[0] = intent;
+        registry.registerMultipleIntents(firstBatch);
+        
+        OracleIntentUtils.OracleIntent[] memory secondBatch = new OracleIntentUtils.OracleIntent[](1);
+        secondBatch[0] = intent;
+        
+        vm.expectEmit(true, true, true, true);
+        emit IntentRejected(
+            intentHash,
+            "ADA", 
+            signer1, 
+            OracleIntentRegistry.RejectionReason.AlreadyProcessed
+        );
+        
+        registry.registerMultipleIntents(secondBatch);
+    }
+    
+    function testInvalidSignatureEmitsEnumEvent() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent("DOT", 1);
+        intent = createSignedIntent(intent, signer2Pk, signer1);  
+        
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](1);
+        intents[0] = intent;
+        
+        vm.expectEmit(true, true, true, true);
+        emit IntentRejected(
+            OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator()),
+            "DOT", 
+            signer1, 
+            OracleIntentRegistry.RejectionReason.InvalidSignature
+        );
+        
+        registry.registerMultipleIntents(intents);
+    }
+    
+    function testEnumValuesAreCorrect() public pure {
+        assert(uint(OracleIntentRegistry.RejectionReason.Expired) == 0);
+        assert(uint(OracleIntentRegistry.RejectionReason.UnauthorizedSigner) == 1);
+        assert(uint(OracleIntentRegistry.RejectionReason.AlreadyProcessed) == 2);
+        assert(uint(OracleIntentRegistry.RejectionReason.InvalidSignature) == 3);
+    }
+    
+    function testAllRejectionReasonsInBatch() public {
+        registry.setSignerAuthorization(signer1, true);
+        address unauthorizedSigner = address(0x99);
+        uint256 unauthorizedPk = 0x99;
+        
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](4);
+        
+         intents[0] = createTestIntent("BTC", 1);
+        intents[0].expiry = block.timestamp - 1;
+        intents[0] = createSignedIntent(intents[0], signer1Pk, signer1);
+        
+         intents[1] = createTestIntent("ETH", 2);
+        intents[1] = createSignedIntent(intents[1], unauthorizedPk, unauthorizedSigner);
+        
+         intents[2] = createTestIntent("ADA", 3);
+        intents[2] = createSignedIntent(intents[2], signer1Pk, signer1);
+        
+         intents[3] = intents[2]; 
+        
+         vm.recordLogs();
+        registry.registerMultipleIntents(intents);
+        
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        
+        uint rejectionCount = 0;
+        uint successCount = 0;
+        
+        for (uint i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == keccak256("IntentRejected(bytes32,string,address,uint8)")) {
+                rejectionCount++;
+                
+                 uint8 reason = abi.decode(logs[i].data, (uint8));
+                
+                if (rejectionCount == 1) {
+                     assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.Expired));
+                } else if (rejectionCount == 2) {
+                     assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.UnauthorizedSigner));
+                } else if (rejectionCount == 3) {
+                     assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.AlreadyProcessed));
+                }
+            } else if (logs[i].topics[0] == keccak256("IntentRegistered(bytes32,string,uint256,uint256,address)")) {
+                successCount++;
+            }
+        }
+        
+        assertEq(rejectionCount, 3, "Should have 3 rejection events");
+        assertEq(successCount, 1, "Should have 1 success event");
     }
 }
