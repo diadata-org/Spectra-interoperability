@@ -16,7 +16,7 @@ contract OracleIntentRegistry {
     // Custom errors for gas-efficient reverts
     error NotOwner();
     error NotAuthorized();
-    error SignerNotAuthorized();
+    error SignerNotAuthorized(address signer);
     error IntentAlreadyProcessed();
     error InvalidSignature();
     error NoIntentForSymbol();
@@ -200,7 +200,7 @@ contract OracleIntentRegistry {
         }
 
         // Verify the signer is authorized
-        if (!authorizedSigners[signer]) revert SignerNotAuthorized();
+        if (!authorizedSigners[signer]) revert SignerNotAuthorized(signer);
         
         // Create intent struct using shared library
         OracleIntentUtils.OracleIntent memory intent = OracleIntentUtils.OracleIntent({
@@ -385,6 +385,7 @@ contract OracleIntentRegistry {
      * @param intentType The type of intent to query
      * @param symbol The symbol to query
      * @return intentHash The hash of the latest intent, or bytes32(0) if none exists
+     * @dev WARNING: This function does not validate signer authorization. Use getLatestAuthorizedIntentHashByType for security-critical applications.
      */
     function getLatestIntentHashByType(string calldata intentType, string calldata symbol) 
         external view returns (bytes32 intentHash) {
@@ -397,6 +398,7 @@ contract OracleIntentRegistry {
      * @param intentType The type of intent to query
      * @param symbol The symbol to query
      * @return intent The latest intent details
+     * @dev Reverts if the latest intent is from an unauthorized signer
      */
     function getLatestIntentByType(string calldata intentType, string calldata symbol) 
         external view returns (OracleIntentUtils.OracleIntent memory intent) {
@@ -405,6 +407,10 @@ contract OracleIntentRegistry {
         
         if (intentHash == bytes32(0)) revert NoIntentForSymbol();
         if (intents[intentHash].timestamp == 0) revert IntentNotFound();
+        
+        // Validate that the signer is still authorized
+        address intentSigner = intents[intentHash].signer;
+        if (!authorizedSigners[intentSigner]) revert SignerNotAuthorized(intentSigner);
         
         return intents[intentHash];
     }

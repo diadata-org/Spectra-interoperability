@@ -197,7 +197,7 @@ contract OracleIntentRegistryTest is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signer1Pk, intentHash);
         bytes memory signature = abi.encodePacked(r, s, v);
         
-        vm.expectRevert(OracleIntentRegistry.SignerNotAuthorized.selector);
+        vm.expectRevert(abi.encodeWithSelector(OracleIntentRegistry.SignerNotAuthorized.selector, signer1));
         registry.registerIntent(
             intent.intentType,
             intent.version,
@@ -684,6 +684,23 @@ contract OracleIntentRegistryTest is Test {
         registry.getLatestIntentByType("NonExistentType", "NonExistentSymbol");
     }
     
+    function testGetLatestIntentByTypeUnauthorizedSigner() public {
+        // Authorize signer and register an intent
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent("BTC", 1);
+        intent.intentType = "PriceUpdate";
+        intent.timestamp = TEST_TIMESTAMP;
+        registerValidIntent(intent, signer1Pk, signer1);
+        
+        // Deauthorize the signer
+        registry.setSignerAuthorization(signer1, false);
+        
+        // Now getLatestIntentByType should revert with SignerNotAuthorized including signer address
+        vm.expectRevert(abi.encodeWithSelector(OracleIntentRegistry.SignerNotAuthorized.selector, signer1));
+        registry.getLatestIntentByType("PriceUpdate", "BTC");
+    }
+    
     function testGetLatestIntentHashByType() public {
         registry.setSignerAuthorization(signer1, true);
         
@@ -1032,4 +1049,5 @@ contract OracleIntentRegistryTest is Test {
         assertEq(rejectionCount, 3, "Should have 3 rejection events");
         assertEq(successCount, 1, "Should have 1 success event");
     }
+    
 }

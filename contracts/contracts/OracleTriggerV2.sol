@@ -134,10 +134,12 @@ contract OracleTriggerV2 is
         
         IOracleIntentRegistry registryContract = IOracleIntentRegistry(registry);
 
-        intentHash = registryContract.getLatestIntentHashByType(_intentType, _key);
-        if (intentHash == bytes32(0)) revert RegistryUnavailable(_intentType, _key);
-
-        intent = registryContract.getIntent(intentHash);
+        try registryContract.getLatestIntentByType(_intentType, _key) returns (OracleIntentUtils.OracleIntent memory _intent) {
+            intent = _intent;
+            intentHash = OracleIntentUtils.calculateIntentHash(intent, registryContract.getDomainSeparator());
+        } catch {
+            revert RegistryUnavailable(_intentType, _key);
+        }
         
         // Validate basic intent data
         if (bytes(intent.symbol).length == 0) revert IntentDataInvalid(_key, "Empty symbol");
