@@ -160,7 +160,7 @@ contract OracleIntentRegistryTest is Test {
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectEmit(true, true, true, true);
-        emit IntentRegistered(intentHash, TEST_SYMBOL, TEST_PRICE, TEST_TIMESTAMP, signer1);
+        emit IntentRegistered(intentHash, TEST_SYMBOL, TEST_PRICE, block.timestamp, signer1);
         
         registry.registerIntent(
             intent.intentType,
@@ -184,7 +184,7 @@ contract OracleIntentRegistryTest is Test {
         OracleIntentUtils.OracleIntent memory storedIntent = registry.getIntent(intentHash);
         assertEq(storedIntent.symbol, TEST_SYMBOL);
         assertEq(storedIntent.price, TEST_PRICE);
-        assertEq(storedIntent.timestamp, TEST_TIMESTAMP);
+        assertEq(storedIntent.timestamp, block.timestamp);
         assertEq(storedIntent.signer, signer1);
     }
     
@@ -308,22 +308,27 @@ contract OracleIntentRegistryTest is Test {
     function testRegisterMultipleIntentsForSameSymbol() public {
         registry.setSignerAuthorization(signer1, true);
         
-        // Register first intent with older timestamp
+        // Use explicit timestamps to avoid timing issues
+        uint256 time1 = 1000;
+        uint256 time2 = 2000; // Newest - should remain latest
+        uint256 time3 = 1500; // Between time1 and time2 - should not become latest
+        
+        // Register first intent
+        vm.warp(time1);
         OracleIntentUtils.OracleIntent memory intent1 = createTestIntent(TEST_SYMBOL, 1);
-        intent1.timestamp = TEST_TIMESTAMP - 1000;
         registerValidIntent(intent1, signer1Pk, signer1);
         
         // Register second intent with newer timestamp
+        vm.warp(time2);
         OracleIntentUtils.OracleIntent memory intent2 = createTestIntent(TEST_SYMBOL, 2);
-        intent2.timestamp = TEST_TIMESTAMP;
         bytes32 intentHash2 = registerValidIntent(intent2, signer1Pk, signer1);
         
         // Latest intent should be the newer one
         assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), intentHash2);
 
-        // Register third intent with even older timestamp
+        // Register third intent with timestamp between first and second (should not become latest)
+        vm.warp(time3);
         OracleIntentUtils.OracleIntent memory intent3 = createTestIntent(TEST_SYMBOL, 3);
-        intent3.timestamp = TEST_TIMESTAMP - 2000;
         registerValidIntent(intent3, signer1Pk, signer1);
         
         // Latest should still be the newest timestamp (intent2)
@@ -480,7 +485,7 @@ contract OracleIntentRegistryTest is Test {
         OracleIntentUtils.OracleIntent memory retrievedIntent = registry.getIntent(intentHash);
         assertEq(retrievedIntent.symbol, TEST_SYMBOL);
         assertEq(retrievedIntent.price, TEST_PRICE);
-        assertEq(retrievedIntent.timestamp, TEST_TIMESTAMP);
+        assertEq(retrievedIntent.timestamp, block.timestamp);
         assertEq(retrievedIntent.signer, signer1);
     }
     
@@ -519,23 +524,26 @@ contract OracleIntentRegistryTest is Test {
     function testTimestampBasedLatestIntentUpdate() public {
         registry.setSignerAuthorization(signer1, true);
         
-        uint256 baseTimestamp = 1710000000;
+        // Use explicit timestamps to avoid timing confusion
+        uint256 time1 = 1000; // Oldest
+        uint256 time2 = 2000; // Middle  
+        uint256 time3 = 3000; // Latest - should remain final latest
         
-        // Register intent with timestamp 3
+        // Register intent with latest timestamp (should be final latest)
+        vm.warp(time3);
         OracleIntentUtils.OracleIntent memory intent3 = createTestIntent(TEST_SYMBOL, 3);
-        intent3.timestamp = baseTimestamp + 300;
         intent3.price = 300;
         bytes32 hash3 = registerValidIntent(intent3, signer1Pk, signer1);
         
-        // Register intent with timestamp 1 (older)
+        // Register intent with older timestamp (should not become latest)
+        vm.warp(time1);
         OracleIntentUtils.OracleIntent memory intent1 = createTestIntent(TEST_SYMBOL, 1);
-        intent1.timestamp = baseTimestamp + 100;
         intent1.price = 100;
         registerValidIntent(intent1, signer1Pk, signer1);
         
-        // Register intent with timestamp 2 (middle)
+        // Register intent with middle timestamp (should not become latest)
+        vm.warp(time2);
         OracleIntentUtils.OracleIntent memory intent2 = createTestIntent(TEST_SYMBOL, 2);
-        intent2.timestamp = baseTimestamp + 200;
         intent2.price = 200;
         registerValidIntent(intent2, signer1Pk, signer1);
         
@@ -548,9 +556,13 @@ contract OracleIntentRegistryTest is Test {
     function testRegisterIntentOlderThanExisting() public {
         registry.setSignerAuthorization(signer1, true);
         
+        // Use explicit timestamps to avoid timing confusion
+        uint256 newerTime = 2000;
+        uint256 olderTime = 1000;
+        
         // Register newer intent first
+        vm.warp(newerTime);
         OracleIntentUtils.OracleIntent memory newerIntent = createTestIntent(TEST_SYMBOL, 1);
-        newerIntent.timestamp = TEST_TIMESTAMP + 1000;
         newerIntent.price = 60000e18;
         bytes32 newerHash = registerValidIntent(newerIntent, signer1Pk, signer1);
         
@@ -558,8 +570,8 @@ contract OracleIntentRegistryTest is Test {
         assertEq(registry.getLatestIntentHashByType("OracleUpdate",TEST_SYMBOL), newerHash);
         
         // Register older intent (should not become latest)
+        vm.warp(olderTime);
         OracleIntentUtils.OracleIntent memory olderIntent = createTestIntent(TEST_SYMBOL, 2);
-        olderIntent.timestamp = TEST_TIMESTAMP; // Older timestamp
         olderIntent.price = 40000e18;
         bytes32 olderHash = registerValidIntent(olderIntent, signer1Pk, signer1);
         
@@ -590,9 +602,9 @@ contract OracleIntentRegistryTest is Test {
         registerValidIntent(oracleUpdateIntent, signer1Pk, signer1);
         
         // Register "PriceUpdate" intent for same symbol BTC with newer timestamp
+        vm.warp(block.timestamp + 1000); // Move time forward
         OracleIntentUtils.OracleIntent memory priceUpdateIntent = createTestIntent("BTC", 2);
         priceUpdateIntent.intentType = "PriceUpdate";  // Different intent type!
-        priceUpdateIntent.timestamp = block.timestamp + 1000; // Newer timestamp
         priceUpdateIntent.price = 60000e18; // Different price
         bytes32 priceUpdateHash = registerValidIntent(priceUpdateIntent, signer1Pk, signer1);
         
@@ -618,17 +630,17 @@ contract OracleIntentRegistryTest is Test {
     function testDifferentIntentTypesOlderOverridesNewer() public {
         registry.setSignerAuthorization(signer1, true);
         
-        // Register "PriceUpdate" intent for BTC with newer timestamp
+        // Register "PriceUpdate" intent for BTC
+        vm.warp(block.timestamp + 1000);
         OracleIntentUtils.OracleIntent memory priceUpdateIntent = createTestIntent("BTC", 1);
         priceUpdateIntent.intentType = "PriceUpdate";
-        priceUpdateIntent.timestamp = block.timestamp + 1000; // Newer
         priceUpdateIntent.price = 60000e18;
         bytes32 priceUpdateHash = registerValidIntent(priceUpdateIntent, signer1Pk, signer1);
         
         // Register "OracleUpdate" intent for same symbol with EVEN NEWER timestamp
+        vm.warp(block.timestamp + 1000); // Move time forward again
         OracleIntentUtils.OracleIntent memory oracleUpdateIntent = createTestIntent("BTC", 2);
         oracleUpdateIntent.intentType = "OracleUpdate";
-        oracleUpdateIntent.timestamp = block.timestamp + 2000; // Even newer
         oracleUpdateIntent.price = 70000e18; // Different price
         bytes32 oracleUpdateHash = registerValidIntent(oracleUpdateIntent, signer1Pk, signer1);
         
@@ -651,13 +663,12 @@ contract OracleIntentRegistryTest is Test {
         OracleIntentUtils.OracleIntent memory priceIntent = createTestIntent("BTC", 1);
         priceIntent.intentType = "PriceUpdate";
         priceIntent.price = 50000e18;
-        priceIntent.timestamp = block.timestamp;
         registerValidIntent(priceIntent, signer1Pk, signer1);
         
+        vm.warp(block.timestamp + 100);
         OracleIntentUtils.OracleIntent memory volumeIntent = createTestIntent("BTC", 2);
         volumeIntent.intentType = "VolumeUpdate";
         volumeIntent.price = 1000000e18; // This represents volume, not price
-        volumeIntent.timestamp = block.timestamp + 100;
         registerValidIntent(volumeIntent, signer1Pk, signer1);
         
         // Test getLatestIntentByType for each type
@@ -690,7 +701,7 @@ contract OracleIntentRegistryTest is Test {
         
         OracleIntentUtils.OracleIntent memory intent = createTestIntent("BTC", 1);
         intent.intentType = "PriceUpdate";
-        intent.timestamp = TEST_TIMESTAMP;
+        // Keep timestamp as block.timestamp from createTestIntent
         registerValidIntent(intent, signer1Pk, signer1);
         
         // Deauthorize the signer
@@ -747,7 +758,7 @@ contract OracleIntentRegistryTest is Test {
             expiry: block.timestamp + 3600,
             symbol: symbol,
             price: TEST_PRICE,
-            timestamp: TEST_TIMESTAMP,
+            timestamp: block.timestamp, // Use current block timestamp instead of fixed future timestamp
             source: TEST_SOURCE,
             signature: new bytes(65),
             signer: address(0)
@@ -828,33 +839,34 @@ contract OracleIntentRegistryTest is Test {
     function testBatchRegistrationTimestampOrdering() public {
         registry.setSignerAuthorization(signer1, true);
         
-        // Create intents with out-of-order timestamps but process in batch
-        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](3);
+        // Test that the latest intent hash is based on the highest timestamp when processed in batch
+        uint256 baseTime = block.timestamp;
         
-        // Intent with newest timestamp (should become latest)
-        OracleIntentUtils.OracleIntent memory intent1 = createTestIntent("TOKEN0", 1);
-        intent1.timestamp = block.timestamp + 300;
-        intent1.price = 300e18;
-        intents[0] = createSignedIntent(intent1, signer1Pk, signer1);
-        
-        // Intent with oldest timestamp
+        // Create intents at different times (in order: 100, 200, 300)
+        vm.warp(baseTime + 100);
         OracleIntentUtils.OracleIntent memory intent2 = createTestIntent("TOKEN0", 2);
-        intent2.timestamp = block.timestamp + 100;
         intent2.price = 100e18;
-        intents[1] = createSignedIntent(intent2, signer1Pk, signer1);
         
-        // Intent with middle timestamp
+        vm.warp(baseTime + 200);
         OracleIntentUtils.OracleIntent memory intent3 = createTestIntent("TOKEN0", 3);
-        intent3.timestamp = block.timestamp + 200;
         intent3.price = 200e18;
-        intents[2] = createSignedIntent(intent3, signer1Pk, signer1);
+        
+        vm.warp(baseTime + 300);
+        OracleIntentUtils.OracleIntent memory intent1 = createTestIntent("TOKEN0", 1);
+        intent1.price = 300e18;
+        
+        // Sign all intents (submit them out of chronological order to test batch processing)
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](3);
+        intents[0] = createSignedIntent(intent1, signer1Pk, signer1); // Latest timestamp (300)
+        intents[1] = createSignedIntent(intent2, signer1Pk, signer1); // Earliest timestamp (100)
+        intents[2] = createSignedIntent(intent3, signer1Pk, signer1); // Middle timestamp (200)
         
         registry.registerMultipleIntents(intents);
         
-        // Latest should be the one with highest timestamp (300)
+        // Latest should be the one with highest timestamp (intent1 with timestamp baseTime + 300)
         OracleIntentUtils.OracleIntent memory latestIntent = registry.getLatestIntentByType("OracleUpdate", "TOKEN0");
         assertEq(latestIntent.price, 300e18);
-        assertEq(latestIntent.timestamp, block.timestamp + 300);
+        assertEq(latestIntent.timestamp, baseTime + 300);
     }
     
     function testRegisterMultipleIntentsWithMalformedSignatures() public {
@@ -880,28 +892,33 @@ contract OracleIntentRegistryTest is Test {
     function testRegisterIntentLatestIntentCases() public {
         registry.setSignerAuthorization(signer1, true);
         
+        // Use fixed timestamps to avoid timing issues
+        uint256 time1 = 1000;
+        uint256 time2 = 2000; // Newer
+        uint256 time3 = 1500; // Between time1 and time2, should not become latest
+        
         // First, register an intent when no latest intent exists
+        vm.warp(time1);
         OracleIntentUtils.OracleIntent memory firstIntent = createTestIntent("NEWTOKEN", 1);
-        firstIntent.timestamp = block.timestamp;
         bytes32 firstHash = registerValidIntent(firstIntent, signer1Pk, signer1);
         
         // Verify it became the latest
         assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), firstHash);
         
-        // Register newer intent (covers first condition of OR)
+        // Register newer intent (should become latest)
+        vm.warp(time2);
         OracleIntentUtils.OracleIntent memory newerIntent = createTestIntent("NEWTOKEN", 2);
-        newerIntent.timestamp = block.timestamp + 1000;
         bytes32 newerHash = registerValidIntent(newerIntent, signer1Pk, signer1);
         
         // Verify newer intent became latest
         assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), newerHash);
         
-        // Register older intent 
-        OracleIntentUtils.OracleIntent memory olderIntent = createTestIntent("NEWTOKEN", 3);
-        olderIntent.timestamp = block.timestamp + 500; // Older than current latest
-        registerValidIntent(olderIntent, signer1Pk, signer1);
+        // Register intent with timestamp between first and second (should not become latest)
+        vm.warp(time3);
+        OracleIntentUtils.OracleIntent memory middleIntent = createTestIntent("NEWTOKEN", 3);
+        registerValidIntent(middleIntent, signer1Pk, signer1);
         
-        // Verify latest didn't change
+        // Verify latest didn't change (should still be newerIntent with time2)
         assertEq(registry.getLatestIntentHashByType("OracleUpdate", "NEWTOKEN"), newerHash);
     }
     
@@ -996,9 +1013,10 @@ contract OracleIntentRegistryTest is Test {
     
     function testEnumValuesAreCorrect() public pure {
         assert(uint(OracleIntentRegistry.RejectionReason.Expired) == 0);
-        assert(uint(OracleIntentRegistry.RejectionReason.UnauthorizedSigner) == 1);
-        assert(uint(OracleIntentRegistry.RejectionReason.AlreadyProcessed) == 2);
-        assert(uint(OracleIntentRegistry.RejectionReason.InvalidSignature) == 3);
+        assert(uint(OracleIntentRegistry.RejectionReason.InvalidTimestamp) == 1);
+        assert(uint(OracleIntentRegistry.RejectionReason.UnauthorizedSigner) == 2);
+        assert(uint(OracleIntentRegistry.RejectionReason.AlreadyProcessed) == 3);
+        assert(uint(OracleIntentRegistry.RejectionReason.InvalidSignature) == 4);
     }
     
     function testAllRejectionReasonsInBatch() public {
@@ -1035,11 +1053,11 @@ contract OracleIntentRegistryTest is Test {
                  uint8 reason = abi.decode(logs[i].data, (uint8));
                 
                 if (rejectionCount == 1) {
-                     assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.Expired));
+                    assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.Expired));
                 } else if (rejectionCount == 2) {
-                     assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.UnauthorizedSigner));
+                    assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.UnauthorizedSigner));
                 } else if (rejectionCount == 3) {
-                     assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.AlreadyProcessed));
+                    assertEq(reason, uint8(OracleIntentRegistry.RejectionReason.AlreadyProcessed));
                 }
             } else if (logs[i].topics[0] == keccak256("IntentRegistered(bytes32,string,uint256,uint256,address)")) {
                 successCount++;
@@ -1048,6 +1066,110 @@ contract OracleIntentRegistryTest is Test {
         
         assertEq(rejectionCount, 3, "Should have 3 rejection events");
         assertEq(successCount, 1, "Should have 1 success event");
+    }
+
+    function testRegisterIntentWithFutureTimestamp() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent memory intent = createTestIntent(TEST_SYMBOL, TEST_NONCE);
+        intent.timestamp = block.timestamp + 1000; // Future timestamp
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, registry.getDomainSeparator());
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signer1Pk, intentHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(abi.encodeWithSelector(OracleIntentRegistry.InvalidTimestamp.selector, intent.timestamp, block.timestamp));
+        registry.registerIntent(
+            intent.intentType,
+            intent.version,
+            intent.chainId,
+            intent.nonce,
+            intent.expiry,
+            intent.symbol,
+            intent.price,
+            intent.timestamp,
+            intent.source,
+            signature,
+            signer1
+        );
+    }
+
+    function testRegisterMultipleIntentsWithFutureTimestamp() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](1);
+        intents[0] = createTestIntent("BTC", 1);
+        intents[0].signer = signer1; 
+        intents[0].timestamp = block.timestamp + 1000; // Future timestamp
+        
+        vm.expectEmit(false, true, true, true);
+        emit IntentRejected(bytes32(0), "BTC", signer1, OracleIntentRegistry.RejectionReason.InvalidTimestamp);
+        
+        registry.registerMultipleIntents(intents);
+    }
+
+    function testFutureTimestampDOSAttackPrevention() public {
+        registry.setSignerAuthorization(signer1, true);
+        registry.setSignerAuthorization(signer2, true);
+        
+        // First, register a validIntent intent
+        OracleIntentUtils.OracleIntent memory validIntent = createTestIntent("BTC", 1);
+        validIntent.timestamp = block.timestamp;  
+        validIntent.price = 50000e18;
+        bytes32 legitimateHash = registerValidIntent(validIntent, signer1Pk, signer1);
+        
+        // Verify it's the latest
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate", "BTC"), legitimateHash);
+        
+        // Now try to attack with future timestamp - this should fail
+        OracleIntentUtils.OracleIntent memory attackIntent = createTestIntent("BTC", 2);
+        attackIntent.timestamp = block.timestamp + 365 days; // Far future timestamp
+        attackIntent.price = 99999e18;
+        
+        bytes32 attackHash = OracleIntentUtils.calculateIntentHash(attackIntent, registry.getDomainSeparator());
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signer1Pk, attackHash);
+        bytes memory signature = abi.encodePacked(r, s, v);
+        
+        vm.expectRevert(abi.encodeWithSelector(OracleIntentRegistry.InvalidTimestamp.selector, attackIntent.timestamp, block.timestamp));
+        registry.registerIntent(
+            attackIntent.intentType,
+            attackIntent.version,
+            attackIntent.chainId,
+            attackIntent.nonce,
+            attackIntent.expiry,
+            attackIntent.symbol,
+            attackIntent.price,
+            attackIntent.timestamp,
+            attackIntent.source,
+            signature,
+            signer1
+        );
+        
+        // Verify the original validIntent intent is still the latest 
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate", "BTC"), legitimateHash);
+        
+         vm.warp(block.timestamp + 1);
+
+        OracleIntentUtils.OracleIntent memory newerValidIntent = createTestIntent("BTC", 3);
+        newerValidIntent.timestamp = block.timestamp;  
+        newerValidIntent.price = 51000e18;
+        bytes32 newerHash = registerValidIntent(newerValidIntent, signer2Pk, signer2);
+
+        // Verify the newer validIntent intent is now the latest
+        assertEq(registry.getLatestIntentHashByType("OracleUpdate", "BTC"), newerHash);
+    }
+
+    function testInvalidTimestampRejectionReason() public {
+        registry.setSignerAuthorization(signer1, true);
+        
+        OracleIntentUtils.OracleIntent[] memory intents = new OracleIntentUtils.OracleIntent[](1);
+        intents[0] = createTestIntent("ETH", 1);
+        intents[0].signer = signer1; // Set the signer properly
+        intents[0].timestamp = block.timestamp + 1000; // Future timestamp
+        
+        vm.expectEmit(false, true, true, true);
+        emit IntentRejected(bytes32(0), "ETH", signer1, OracleIntentRegistry.RejectionReason.InvalidTimestamp);
+        
+        registry.registerMultipleIntents(intents);
     }
     
 }

@@ -22,6 +22,7 @@ contract OracleIntentRegistry {
     error NoIntentForSymbol();
     error IntentNotFound();
     error IntentExpired();
+    error InvalidTimestamp(uint256 timestamp, uint256 blockTimestamp);
     error ZeroAddress();
     
     // Note: Batch uses OracleIntentUtils.OracleIntent directly to avoid duplication
@@ -90,6 +91,7 @@ contract OracleIntentRegistry {
      */
     enum RejectionReason {
         Expired,              
+        InvalidTimestamp,     
         UnauthorizedSigner,  
         AlreadyProcessed,     
         InvalidSignature 
@@ -199,6 +201,11 @@ contract OracleIntentRegistry {
             revert IntentExpired();
         }
 
+        // Validate timestamp is not in the future to prevent DOS attacks
+        if (timestamp > block.timestamp) {
+            revert InvalidTimestamp(timestamp, block.timestamp);
+        }
+
         // Verify the signer is authorized
         if (!authorizedSigners[signer]) revert SignerNotAuthorized(signer);
         
@@ -277,6 +284,11 @@ contract OracleIntentRegistry {
 
         if (block.timestamp > data.expiry) {
             emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.Expired);
+            return false;
+        }
+        
+        if (data.timestamp > block.timestamp) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.InvalidTimestamp);
             return false;
         }
         

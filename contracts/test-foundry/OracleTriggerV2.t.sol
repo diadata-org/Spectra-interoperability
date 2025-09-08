@@ -34,7 +34,6 @@ contract OracleTriggerV2Test is Test {
     uint256 constant SOURCE_CHAIN_ID = 100640;
     string constant TEST_SYMBOL = "BTC";
     uint256 constant TEST_PRICE = 50000e18;
-    uint256 constant TEST_TIMESTAMP = 1710000000;
 
     function setUp() public {
         // Setup V2-specific addresses
@@ -476,7 +475,7 @@ contract OracleTriggerV2Test is Test {
             expiry: block.timestamp + 3600,
             symbol: "BTC",
             price: TEST_PRICE + 1000e18,
-            timestamp: TEST_TIMESTAMP - 1000, // Older timestamp
+            timestamp: block.timestamp, // Current timestamp
             source: "DIA",
             signature: new bytes(65),
             signer: address(0)
@@ -557,7 +556,7 @@ contract OracleTriggerV2Test is Test {
             expiry: block.timestamp + 3600,
             symbol: symbol,
             price: TEST_PRICE,
-            timestamp: TEST_TIMESTAMP,
+            timestamp: block.timestamp,
             source: "DIA",
             signature: new bytes(65),
             signer: address(0)
@@ -588,7 +587,7 @@ contract OracleTriggerV2Test is Test {
 
 // Mock contracts for testing edge cases
 contract MockInvalidIntentRegistry {
-    uint256 public returnType = 0; // 0=empty symbol, 1=zero price, 2=zero timestamp, 3=invalid signer, 4=empty signature
+    uint256 public returnType = 0; // 0=empty symbol, 1=zero price, 2=zero timestamp, 3=invalid signer, 4=empty signature, 5=future timestamp
     
     function setReturnType(uint256 _type) external {
         returnType = _type;
@@ -602,6 +601,14 @@ contract MockInvalidIntentRegistry {
         return bytes32(uint256(1)); // Non-zero hash
     }
     
+    function getLatestIntentByType(string calldata, string calldata) external view returns (OracleIntentUtils.OracleIntent memory) {
+        return this.getIntent(bytes32(uint256(1))); // Reuse the getIntent logic
+    }
+    
+    function getDomainSeparator() external pure returns (bytes32) {
+        return keccak256("MockDomainSeparator"); // Mock domain separator
+    }
+    
     function getIntent(bytes32) external view returns (OracleIntentUtils.OracleIntent memory) {
         if (returnType == 0) {
             // Empty symbol
@@ -613,7 +620,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "", // Empty symbol to trigger error
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(1)
@@ -628,7 +635,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 0, // Zero price to trigger error
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(1)
@@ -658,7 +665,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(0) // Invalid signer to trigger error
@@ -673,9 +680,24 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: "", // Empty signature to trigger error
+                signer: address(1)
+            });
+        } else if (returnType == 5) {
+            // Future timestamp, should be rejected by registry
+            return OracleIntentUtils.OracleIntent({
+                intentType: "OracleUpdate",
+                version: "1.0.0", 
+                chainId: 100640,
+                nonce: 1,
+                expiry: block.timestamp + 3600,
+                symbol: "BTC",
+                price: 50000e18,
+                timestamp: block.timestamp + 1000, // Future timestamp to trigger error
+                source: "DIA",
+                signature: hex"1234",
                 signer: address(1)
             });
         } else {
@@ -688,7 +710,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(1)

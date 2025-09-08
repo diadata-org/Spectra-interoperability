@@ -59,7 +59,6 @@ contract OracleIntentRegistryIntegrationTest is Test {
     // Test data
     string constant TEST_SYMBOL = "BTC";
     uint256 constant TEST_PRICE = 50000e18;
-    uint256 constant TEST_TIMESTAMP = 1710000000;
     
    
     event IntentBasedUpdateReceived(bytes32 indexed intentHash, string indexed symbol, uint256 price, uint256 timestamp, address indexed signer);
@@ -119,13 +118,13 @@ contract OracleIntentRegistryIntegrationTest is Test {
         assertEq(receiverIntentHash, registryIntentHash); // Should be same hash
         
         vm.expectEmit(true, true, true, true);
-        emit IntentBasedUpdateReceived(receiverIntentHash, TEST_SYMBOL, TEST_PRICE, TEST_TIMESTAMP, oracleSigner);
+        emit IntentBasedUpdateReceived(receiverIntentHash, TEST_SYMBOL, TEST_PRICE, block.timestamp, oracleSigner);
         
         receiver.handleIntentUpdate(receiverIntent);
         
         // Step 5: Verify data was updated in receiver
         (uint128 storedTimestamp, uint128 storedValue) = receiver.updates(TEST_SYMBOL);
-        assertEq(storedTimestamp, uint128(TEST_TIMESTAMP));
+        assertEq(storedTimestamp, uint128(block.timestamp));
         assertEq(storedValue, uint128(TEST_PRICE));
         assertTrue(receiver.isProcessedIntent(receiverIntentHash));
     }
@@ -168,7 +167,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         for (uint i = 0; i < batchSize; i++) {
             string memory symbol = string(abi.encodePacked("TOKEN", vm.toString(i)));
             (uint128 timestamp, uint128 value) = receiver.updates(symbol);
-            assertEq(timestamp, uint128(TEST_TIMESTAMP));
+            assertEq(timestamp, uint128(block.timestamp));
             assertEq(value, uint128(TEST_PRICE));
             
             bytes32 receiverHash = receiver.calculateIntentHash(receiverIntents[i]);
@@ -208,7 +207,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         
         // Step 5: Simulate cross-chain message via Hyperlane
         vm.expectEmit(true, true, true, true);
-        emit IntentBasedUpdateReceived(intentHash, TEST_SYMBOL, TEST_PRICE, TEST_TIMESTAMP, oracleSigner);
+        emit IntentBasedUpdateReceived(intentHash, TEST_SYMBOL, TEST_PRICE, block.timestamp, oracleSigner);
         
         vm.prank(trustedMailbox);
         receiver.handle(
@@ -219,7 +218,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         
         // Step 6: Verify data was updated
         (uint128 timestamp, uint128 value) = receiver.updates(TEST_SYMBOL);
-        assertEq(timestamp, uint128(TEST_TIMESTAMP));
+        assertEq(timestamp, uint128(block.timestamp));
         assertEq(value, uint128(TEST_PRICE));
         assertTrue(receiver.isProcessedIntent(intentHash));
     }
@@ -250,7 +249,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         );
         
         // Create legacy data (should be detected as legacy format)
-        bytes memory legacyData = abi.encode(TEST_SYMBOL, uint128(TEST_TIMESTAMP), uint128(TEST_PRICE));
+        bytes memory legacyData = abi.encode(TEST_SYMBOL, uint128(block.timestamp), uint128(TEST_PRICE));
         
         // Test intent format detection and processing
         vm.prank(trustedMailbox);
@@ -270,7 +269,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         
         // Both should result in the same final data (intent timestamp is newer, so it should overwrite)
         (uint128 timestamp, uint128 value) = receiver.updates(TEST_SYMBOL);
-        assertEq(timestamp, uint128(TEST_TIMESTAMP));
+        assertEq(timestamp, uint128(block.timestamp));
         assertEq(value, uint128(TEST_PRICE));
     }
     
@@ -313,7 +312,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
             expiry: block.timestamp + 3600,
             symbol: symbol,
             price: TEST_PRICE,
-            timestamp: TEST_TIMESTAMP,
+            timestamp: block.timestamp,
             source: "DIA",
             signature: new bytes(65),
             signer: address(0)
@@ -327,7 +326,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
         bytes memory signature = abi.encodePacked(r, s, v);
         
         vm.expectEmit(true, true, false, false, address(registry));
-        emit OracleIntentRegistry.IntentRegistered(intentHash, symbol, TEST_PRICE, TEST_TIMESTAMP, oracleSigner);
+        emit OracleIntentRegistry.IntentRegistered(intentHash, symbol, TEST_PRICE, block.timestamp, oracleSigner);
         
         registry.registerIntent(
             registryIntent.intentType,
@@ -375,7 +374,7 @@ contract OracleIntentRegistryIntegrationTest is Test {
             expiry: block.timestamp + 3600,
             symbol: symbol,
             price: TEST_PRICE,
-            timestamp: TEST_TIMESTAMP,
+            timestamp: block.timestamp,
             source: "DIA",
             signature: new bytes(65),
             signer: address(0)
