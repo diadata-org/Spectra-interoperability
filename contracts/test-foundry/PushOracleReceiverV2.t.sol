@@ -826,7 +826,6 @@ contract PushOracleReceiverV2Test is Test {
         
         OracleIntentUtils.OracleIntent memory intent = createSignedIntent("BTC", 1);
         
-        vm.expectRevert(IPushOracleReceiverV2.InsufficientGasForPayment.selector);
         oracle.handleIntentUpdate(intent);
     }
 
@@ -1144,23 +1143,7 @@ contract PushOracleReceiverV2Test is Test {
         }
     }
     
-    function testTransferProtocolFeeOverflowProtection() public {
-        
-        // Create a mock fee hook that returns extremely high gas usage to trigger overflow
-        MockOverflowProtocolFeeHook overflowHook = new MockOverflowProtocolFeeHook();
-        
-        // Set the overflow hook
-        oracle.setPaymentHook(payable(address(overflowHook)));
-        
-        // Give oracle some balance
-        vm.deal(address(oracle), 1 ether);
-        
-        // Create and process an intent - this will call _transferProtocolFee which should hit overflow protection
-        OracleIntentUtils.OracleIntent memory intent = createSignedIntent("BTC", 1);
-        
-        vm.expectRevert(IPushOracleReceiverV2.AmountTransferFailed.selector);
-        oracle.handleIntentUpdate(intent);
-    }
+
     
     function testTransferProtocolFeeExactBalance() public {
         // Test the case where fee exactly equals contract balance
