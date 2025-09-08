@@ -47,7 +47,7 @@ contract OracleIntentRegistry {
     uint256 private immutable CACHED_CHAIN_ID;
 
     ///@notice Cached contract address in case of fork
-    address private immutable CACHED_THIS;
+    address private immutable CACHED_SELF_ADDRESS;
  
     /// @notice EIP-712 domain name
     string private  _name;
@@ -129,7 +129,7 @@ contract OracleIntentRegistry {
         _name = domainName;
         _version = domainVersion;
         CACHED_CHAIN_ID = block.chainid;
-        CACHED_THIS = address(this);
+        CACHED_SELF_ADDRESS = address(this);
 
         // Create the EIP-712 domain separator using shared library
         CACHED_DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
@@ -145,7 +145,7 @@ contract OracleIntentRegistry {
      @return domain separator for the current chain.
      */
     function domainSeparator() internal view returns (bytes32) {
-        if (address(this) == CACHED_THIS && block.chainid == CACHED_CHAIN_ID) {
+        if (address(this) == CACHED_SELF_ADDRESS && block.chainid == CACHED_CHAIN_ID) {
             return CACHED_DOMAIN_SEPARATOR;
         } else {
             return _buildDomainSeparator();
@@ -237,7 +237,7 @@ contract OracleIntentRegistry {
         processedIntents[intentHash] = true;
         intents[intentHash] = intent;
         
-      
+       
         
         // Update latest intent by type and symbol (new functionality)
         bytes32 compositeKey = getCompositeKey(intentType, symbol);

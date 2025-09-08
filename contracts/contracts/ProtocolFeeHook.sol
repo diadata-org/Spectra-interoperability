@@ -11,13 +11,15 @@ import { Message } from "./libs/Message.sol";
  * to be paid after a message dispatch. The required fee is calculated based on
  * the current transaction gas price.
  */
-contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
+contract ProtocolFeeHook is IProtocolFeeHook, Ownable, ReentrancyGuard {
     using Message for bytes;
 
     uint256 public gasUsedPerTx = 97440; // Default gas used
+    uint256 public minFeeWei = 1; // Minimum base fee in wei
 
     /// @notice only Message from this mailbox will be handled
     address public trustedMailBox;
+    
 
     mapping(bytes32 messageId => bool validated) public messageValidated;
 
@@ -57,12 +59,17 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
         emit DispatchFeePaid(requiredFee, msg.value, messageId);
     }
 
+    /**
+     * @notice Calculates the required fee for message dispatch
+     * @dev Combines dynamic gas cost with fixed base fee
+     * @return Total fee in wei required to process the dispatch
+     */
     function quoteDispatch(
         bytes calldata,
         bytes calldata
     ) public view override returns (uint256) {
         uint256 gasPrice = tx.gasprice;
-        uint256 cost = gasUsedPerTx * gasPrice;
+        uint256 cost = (gasUsedPerTx * gasPrice) + minFeeWei;
         return cost;
     }
 
@@ -71,14 +78,15 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
         gasUsedPerTx = _gasUsedPerTx;
     }
 
-    function withdrawFees(address feeRecipient) external onlyOwner {
+    function withdrawFees(address feeRecipient) external onlyOwner nonReentrant {
         if (feeRecipient == address(0)) revert InvalidFeeRecipient();
         uint256 balance = address(this).balance;
         if (balance == 0) revert NoBalanceToWithdraw();
 
+        emit FeesWithdrawn(feeRecipient, balance);
+        
         (bool success, ) = payable(feeRecipient).call{ value: balance }("");
         if (!success) revert FeeTransferFailed();
-        emit FeesWithdrawn(feeRecipient, balance);
     }
 
     function setTrustedMailBox(
@@ -86,6 +94,11 @@ contract ProtocolFeeHook is IProtocolFeeHook, Ownable {
     ) external onlyOwner validateAddress(_mailbox) {
         emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
         trustedMailBox = _mailbox;
+    }
+
+    function setMinFeeWei(uint256 _minFeeWei) external onlyOwner {
+        emit MinFeeWeiUpdated(minFeeWei, _minFeeWei);
+        minFeeWei = _minFeeWei;
     }
 
     receive() external payable {}
