@@ -36,7 +36,7 @@ contract ProtocolFeeHookTest is Test {
         uint256 gasPrice = 10;
         vm.fee(gasPrice);
 
-        uint256 expectedFee = customGasUsed * gasPrice;
+        uint256 expectedFee = customGasUsed * gasPrice + feeHook.minFeeWei();
         uint256 fee = feeHook.quoteDispatch("dummy", "dummy");
 
         assertEq(

@@ -23,22 +23,32 @@ contract MockInterchainSecurityModule is IInterchainSecurityModule {
 
 contract MockProtocolFeeHook {
     uint256 public gasUsedPerTx;
+    uint256 public minFeeWei=1;
     
     constructor(uint256 _gasUsedPerTx) {
         gasUsedPerTx = _gasUsedPerTx;
     }
-    
-    receive() external payable {
-        // Mock successful fee receipt
+
+    function quoteDispatch(bytes calldata, bytes calldata) public view returns (uint256) {
+        return gasUsedPerTx * tx.gasprice + minFeeWei;
     }
     
-    fallback() external payable {
-        // Mock successful fee receipt
-    }
+        receive() external payable {
+            // Mock successful fee receipt
+        }
+        
+        fallback() external payable {
+            // Mock successful fee receipt
+        }
 }
 
 contract MockRejectingPaymentHook {
     uint256 public gasUsedPerTx = 1000;
+    uint256 public minFeeWei=1;
+
+    function quoteDispatch(bytes calldata, bytes calldata) public view returns (uint256) {
+        return gasUsedPerTx * tx.gasprice + minFeeWei;
+    }
     
     receive() external payable {
         revert("Payment rejected");
@@ -70,9 +80,14 @@ contract MockOverflowProtocolFeeHook {
 // Mock fee hook that expects an exact fee amount
 contract MockExactFeeProtocolFeeHook {
     uint256 public expectedFee;
+    uint256 public minFeeWei=1;
     
     constructor(uint256 _expectedFee) {
         expectedFee = _expectedFee;
+    }
+
+    function quoteDispatch(bytes calldata, bytes calldata) public view returns (uint256) {
+        return expectedFee;
     }
     
     function gasUsedPerTx() external view returns (uint256) {

@@ -23,9 +23,14 @@ contract MockInterchainSecurityModule is IInterchainSecurityModule {
 
 contract MockProtocolFeeHook {
     uint256 public gasUsedPerTx;
+    uint256 public minFeeWei = 1;
     
     constructor(uint256 _gasUsedPerTx) {
         gasUsedPerTx = _gasUsedPerTx;
+    }
+
+    function quoteDispatch(bytes calldata, bytes calldata) public view returns (uint256) {
+        return gasUsedPerTx * tx.gasprice + minFeeWei;
     }
     
     receive() external payable {}

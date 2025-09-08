@@ -200,12 +200,8 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @notice Calculates and transfers the protocol fee
      */
     function _transferProtocolFee() internal {
-        // Calculate the transaction fee based on gas used and gas price with overflow protection
-        uint256 gasPrice = tx.gasprice;
-        
-        uint256 gasUsed = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx();
-        
-        uint256 fee = gasUsed * gasPrice;
+        // Use the ProtocolFeeHook's quoteDispatch to calculate the fee
+        uint256 fee = ProtocolFeeHook(payable(paymentHook)).quoteDispatch("", "");
         
         uint256 contractBalance = address(this).balance;
         if (fee > contractBalance) {

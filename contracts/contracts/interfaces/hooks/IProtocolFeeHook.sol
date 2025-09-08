@@ -53,6 +53,12 @@ interface IProtocolFeeHook is IPostDispatchHook {
     // @param amount The amount of fees withdrawn
     event FeesWithdrawn(address indexed feeRecipient, uint256 amount);
 
+    // @notice Emitted when the minimum fee is updated
+    // @param previousMinFee The previous minimum fee
+    // @param newMinFee The new minimum fee
+    event MinFeeWeiUpdated(uint256 previousMinFee, uint256 newMinFee);
+
+
     // @notice Sets the gas used per tx
     // @param _gasUsedPerTx The new gas used per tx
     function setGasUsedPerTx(uint256 _gasUsedPerTx) external;
