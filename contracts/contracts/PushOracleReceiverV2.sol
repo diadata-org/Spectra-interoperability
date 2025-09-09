@@ -254,11 +254,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
             }
             unchecked { ++i; }
         }
-        
-        // Only charge fee if at least one update was processed
-        if (updatedCount > 0) {
             _transferProtocolFee();
-        }
     }
 
     /**
