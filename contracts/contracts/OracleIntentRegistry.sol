@@ -397,7 +397,7 @@ contract OracleIntentRegistry {
      * @param intentType The type of intent to query
      * @param symbol The symbol to query
      * @return intentHash The hash of the latest intent, or bytes32(0) if none exists
-     * @dev WARNING: This function does not validate signer authorization. Use getLatestAuthorizedIntentHashByType for security-critical applications.
+     * @dev WARNING: This function does not validate signer authorization. Use getLatestIntentByType for security-critical applications.
      */
     function getLatestIntentHashByType(string calldata intentType, string calldata symbol) 
         external view returns (bytes32 intentHash) {
