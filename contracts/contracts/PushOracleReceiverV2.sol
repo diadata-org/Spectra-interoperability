@@ -139,7 +139,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         }
     }
     
-
     /**
      * @notice Handles intent-based messages from the mailbox (internal)
      * @param _data The encoded intent data
@@ -253,7 +252,8 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
             }
             unchecked { ++i; }
         }
-            _transferProtocolFee();
+        
+        _transferProtocolFee();
     }
 
     /**
@@ -391,22 +391,17 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         return processedIntents[_intentHash];
     }
     
-    
-    
     /**
      * @notice Unified validation for memory intents
      * @param intent The OracleIntent to validate
      * @return intentHash The calculated intent hash
      */
     function _validateIntentCommonFromMemory(OracleIntentUtils.OracleIntent memory intent) internal view returns (bytes32 intentHash) {
-         
-        
         // Verify signer is authorized
         if (!authorizedSigners[intent.signer]) revert UnauthorizedSigner();
         
         // Calculate intent hash
         intentHash =  OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
-
         
         // Check if already processed
         if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
@@ -417,8 +412,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         return intentHash;
     }
 
-
-    
     /**
      * @notice Unified oracle data update function
      * @param symbol The oracle symbol to update
