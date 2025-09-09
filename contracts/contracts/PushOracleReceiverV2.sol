@@ -226,8 +226,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     function handleIntentUpdate(
         OracleIntentUtils.OracleIntent calldata intent
     ) external payable override validateAddress(paymentHook) nonReentrant {
-        // Process single intent with revert-on-failure behavior
-        _processIntent(intent, true);
+        _processIntent(intent);
         
         // Calculate and transfer the protocol fee
         _transferProtocolFee();
@@ -249,7 +248,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         // Process each intent
         for (uint256 i = 0; i < intents.length; ) {
             OracleIntentUtils.OracleIntent calldata intent = intents[i];
-            if (_processIntent(intent, false)) {
+            if (_processIntent(intent)) {
                 ++updatedCount;
             }
             unchecked { ++i; }
@@ -489,16 +488,11 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @notice Processes a single intent for batch operations
      * @param intent The OracleIntent to process
      * @return updated Whether the intent was processed and data updated
-     * @param revertOnFailure Whether to revert on failure or just return false
      */
-    function _processIntent(OracleIntentUtils.OracleIntent calldata intent, bool revertOnFailure) internal returns (bool updated) {
+    function _processIntent(OracleIntentUtils.OracleIntent calldata intent) internal returns (bool updated) {
         (ValidationStatus status, bytes32 intentHash) = _validateIntentStatus(intent);
         if (status != ValidationStatus.Ok) {
-            if (revertOnFailure) {
-                if (status == ValidationStatus.UnauthorizedSigner) revert UnauthorizedSigner();
-                if (status == ValidationStatus.AlreadyProcessed) revert IntentAlreadyProcessed();
-                revert InvalidSignature();
-            } else {
+            
                 // Emit rejection event for batch processing transparency
                 bytes32 hashForEvent = intentHash;
                 if (hashForEvent == bytes32(0)) {
@@ -516,7 +510,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
                 }
                 
                 emit IntentRejected(hashForEvent, intent.symbol, intent.signer, reason);
-            }
+            
             return false;
         }
 

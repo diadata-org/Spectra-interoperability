@@ -599,8 +599,17 @@ contract PushOracleReceiverV2Test is Test {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(unauthorizedPk, intentHash);
         intent.signature = abi.encodePacked(r, s, v);
         intent.signer = vm.addr(unauthorizedPk);
+
+        vm.expectEmit(true, true, true, false);
+        emit IPushOracleReceiverV2.IntentRejected(
+            intentHash,
+            "BTC",
+            intent.signer,
+            IPushOracleReceiverV2.RejectionReason.UnauthorizedSigner
+        );
         
-        vm.expectRevert(IPushOracleReceiverV2.UnauthorizedSigner.selector);
+    
+        
         oracle.handleIntentUpdate(intent);
     }
     
@@ -615,8 +624,15 @@ contract PushOracleReceiverV2Test is Test {
         oracle.handleIntentUpdate(intent);
         
         // Try to process again
-        vm.expectRevert(IPushOracleReceiverV2.IntentAlreadyProcessed.selector);
-        oracle.handleIntentUpdate(intent);
+ vm.expectEmit(true, true, true, false);
+        emit IPushOracleReceiverV2.IntentRejected(
+            intentHash,
+            "BTC",
+            intent.signer,
+            IPushOracleReceiverV2.RejectionReason.UnauthorizedSigner
+        );
+        
+                oracle.handleIntentUpdate(intent);
     }
     
     function testHandleIntentUpdateInvalidSignature() public {
@@ -627,7 +643,13 @@ contract PushOracleReceiverV2Test is Test {
         intent.signature = abi.encodePacked(r, s, v);
         intent.signer = authorizedSigner; // Claiming to be authorized but signed with wrong key
         
-        vm.expectRevert(IPushOracleReceiverV2.InvalidSignature.selector);
+         vm.expectEmit(true, true, true, false);
+        emit IPushOracleReceiverV2.IntentRejected(
+            intentHash,
+            "BTC",
+            intent.signer,
+            IPushOracleReceiverV2.RejectionReason.AlreadyProcessed
+        );
         oracle.handleIntentUpdate(intent);
     }
     
