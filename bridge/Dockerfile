@@ -32,8 +32,8 @@ RUN go mod download
 # Copy bridge source code
 COPY bridge ./
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bridge ./cmd/bridge
+# Tidy dependencies and build the application
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bridge ./cmd/bridge
 
 # Final stage
 FROM alpine:latest

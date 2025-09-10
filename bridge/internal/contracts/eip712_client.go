@@ -12,7 +12,6 @@ import (
 // EIP712OracleClient implements specific logic for EIP-712 Oracle contracts
 type EIP712OracleClient struct {
 	*BaseContractClient
-	domainSeparator common.Hash
 }
 
 // NewEIP712OracleClient creates a new EIP-712 Oracle client
@@ -67,16 +66,3 @@ func (c *EIP712OracleClient) validateRequest(request *bridgeTypes.UpdateRequest)
 	return nil
 }
 
-// selectMethod overrides to potentially use batch methods for EIP-712
-func (c *EIP712OracleClient) selectMethod(request *bridgeTypes.UpdateRequest) (*MethodConfig, error) {
-	// For EIP-712, we might have batch update methods
-	// Check if batch_update is configured and appropriate
-	if batchConfig, exists := c.methods["batch_update"]; exists {
-		// In a real implementation, we might accumulate updates for batching
-		// For now, fall back to single update
-		_ = batchConfig
-	}
-
-	// Default to single update
-	return c.BaseContractClient.selectMethod(request)
-}

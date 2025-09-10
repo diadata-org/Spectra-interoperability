@@ -148,17 +148,21 @@ func (x *OracleIntent) GetSigner() string {
 
 // Request to trigger a failover
 type FailoverRequest struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	MessageId          string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	IntentHash         string                 `protobuf:"bytes,2,opt,name=intent_hash,json=intentHash,proto3" json:"intent_hash,omitempty"`
-	PairId             string                 `protobuf:"bytes,3,opt,name=pair_id,json=pairId,proto3" json:"pair_id,omitempty"`
-	SourceChainId      int64                  `protobuf:"varint,4,opt,name=source_chain_id,json=sourceChainId,proto3" json:"source_chain_id,omitempty"`
-	DestinationChainId int64                  `protobuf:"varint,5,opt,name=destination_chain_id,json=destinationChainId,proto3" json:"destination_chain_id,omitempty"`
-	ReceiverAddress    string                 `protobuf:"bytes,6,opt,name=receiver_address,json=receiverAddress,proto3" json:"receiver_address,omitempty"`
-	IntentData         *OracleIntent          `protobuf:"bytes,7,opt,name=intent_data,json=intentData,proto3" json:"intent_data,omitempty"`
-	Reason             string                 `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"open.v1"`
+	MessageId                string                 `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	IntentHash               string                 `protobuf:"bytes,2,opt,name=intent_hash,json=intentHash,proto3" json:"intent_hash,omitempty"`
+	PairId                   string                 `protobuf:"bytes,3,opt,name=pair_id,json=pairId,proto3" json:"pair_id,omitempty"`
+	SourceChainId            int64                  `protobuf:"varint,4,opt,name=source_chain_id,json=sourceChainId,proto3" json:"source_chain_id,omitempty"`
+	DestinationChainId       int64                  `protobuf:"varint,5,opt,name=destination_chain_id,json=destinationChainId,proto3" json:"destination_chain_id,omitempty"`
+	ReceiverAddress          string                 `protobuf:"bytes,6,opt,name=receiver_address,json=receiverAddress,proto3" json:"receiver_address,omitempty"`
+	IntentData               *OracleIntent          `protobuf:"bytes,7,opt,name=intent_data,json=intentData,proto3" json:"intent_data,omitempty"`
+	Reason                   string                 `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
+	DetectionTimestamp       int64                  `protobuf:"varint,9,opt,name=detection_timestamp,json=detectionTimestamp,proto3" json:"detection_timestamp,omitempty"`
+	MonitoringStartTimestamp int64                  `protobuf:"varint,10,opt,name=monitoring_start_timestamp,json=monitoringStartTimestamp,proto3" json:"monitoring_start_timestamp,omitempty"`
+	FailoverTimestamp        int64                  `protobuf:"varint,11,opt,name=failover_timestamp,json=failoverTimestamp,proto3" json:"failover_timestamp,omitempty"`
+	ReceiverKey              string                 `protobuf:"bytes,12,opt,name=receiver_key,json=receiverKey,proto3" json:"receiver_key,omitempty"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *FailoverRequest) Reset() {
@@ -243,6 +247,34 @@ func (x *FailoverRequest) GetIntentData() *OracleIntent {
 func (x *FailoverRequest) GetReason() string {
 	if x != nil {
 		return x.Reason
+	}
+	return ""
+}
+
+func (x *FailoverRequest) GetDetectionTimestamp() int64 {
+	if x != nil {
+		return x.DetectionTimestamp
+	}
+	return 0
+}
+
+func (x *FailoverRequest) GetMonitoringStartTimestamp() int64 {
+	if x != nil {
+		return x.MonitoringStartTimestamp
+	}
+	return 0
+}
+
+func (x *FailoverRequest) GetFailoverTimestamp() int64 {
+	if x != nil {
+		return x.FailoverTimestamp
+	}
+	return 0
+}
+
+func (x *FailoverRequest) GetReceiverKey() string {
+	if x != nil {
+		return x.ReceiverKey
 	}
 	return ""
 }
@@ -631,7 +663,7 @@ const file_proto_bridge_proto_rawDesc = "" +
 	"\x06source\x18\t \x01(\tR\x06source\x12\x1c\n" +
 	"\tsignature\x18\n" +
 	" \x01(\fR\tsignature\x12\x16\n" +
-	"\x06signer\x18\v \x01(\tR\x06signer\"\xbe\x02\n" +
+	"\x06signer\x18\v \x01(\tR\x06signer\"\xff\x03\n" +
 	"\x0fFailoverRequest\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1f\n" +
@@ -643,7 +675,12 @@ const file_proto_bridge_proto_rawDesc = "" +
 	"\x10receiver_address\x18\x06 \x01(\tR\x0freceiverAddress\x125\n" +
 	"\vintent_data\x18\a \x01(\v2\x14.bridge.OracleIntentR\n" +
 	"intentData\x12\x16\n" +
-	"\x06reason\x18\b \x01(\tR\x06reason\"\x81\x01\n" +
+	"\x06reason\x18\b \x01(\tR\x06reason\x12/\n" +
+	"\x13detection_timestamp\x18\t \x01(\x03R\x12detectionTimestamp\x12<\n" +
+	"\x1amonitoring_start_timestamp\x18\n" +
+	" \x01(\x03R\x18monitoringStartTimestamp\x12-\n" +
+	"\x12failover_timestamp\x18\v \x01(\x03R\x11failoverTimestamp\x12!\n" +
+	"\freceiver_key\x18\f \x01(\tR\vreceiverKey\"\x81\x01\n" +
 	"\x10FailoverResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +

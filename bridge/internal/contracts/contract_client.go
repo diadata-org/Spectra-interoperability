@@ -56,7 +56,6 @@ type BaseContractClient struct {
 	gasLimit        uint64
 	gasMultiplier   float64
 	maxGasPrice     *big.Int
-	nonce           uint64
 	nonceManager    *NonceManager
 }
 

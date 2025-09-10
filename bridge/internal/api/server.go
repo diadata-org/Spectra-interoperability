@@ -17,6 +17,11 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 )
 
+const (
+	// Version of the bridge service
+	Version = "1.0.0"
+)
+
 // Server represents the API server
 type Server struct {
 	config         *config.APIConfig
@@ -241,7 +246,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	response := map[string]interface{}{
 		"status":     "operational",
-		"version":    "1.0.0", // TODO: Get from build info
+		"version":    Version,
 		"uptime":     s.getUptime(),
 		"components": componentStatus,
 		"statistics": stats,

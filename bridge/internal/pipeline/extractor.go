@@ -1,7 +1,6 @@
 package pipeline
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math/big"
 	"regexp"
@@ -303,9 +302,3 @@ func (de *DataExtractor) ConvertToEventData(eventName string, extracted *config.
 	return eventData
 }
 
-func hexToBytes(hexStr string) ([]byte, error) {
-	if strings.HasPrefix(hexStr, "0x") {
-		hexStr = hexStr[2:]
-	}
-	return hex.DecodeString(hexStr)
-}

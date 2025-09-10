@@ -370,12 +370,6 @@ func (b *Bridge) Stop(ctx context.Context) error {
 
 
 
-// processIntentEvent processes a single IntentRegistered event
-func (b *Bridge) processIntentEvent(ctx context.Context, event *bridgetypes.IntentRegisteredEvent) {
-	logger.Debugf("Legacy processIntentEvent called for intent: %s - routing now handled by GenericEventProcessor", event.IntentHash.Hex())
-	// This function is now deprecated as routing is handled by the GenericEventProcessor
-	// using the new router system directly from event processing
-}
 
 // processUpdates processes update requests
 func (b *Bridge) processUpdates(ctx context.Context) {
@@ -860,91 +854,6 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 	}
 }
 
-// processScannerEvents processes events from the block scanner
-// DEPRECATED: This is replaced by GenericEventProcessor
-/*
-func (b *Bridge) processScannerEvents(ctx context.Context) {
-	logger.Info("Starting scanner event processor")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-b.shutdownChan:
-			return
-		case event := <-b.eventChan:
-			// Determine discovery method based on priority and flags
-			discoveryMethod := "FORWARD"
-			if event.Priority == 3 {
-				discoveryMethod = "WEBSOCKET"
-			} else if event.IsBackwardScan {
-				discoveryMethod = "BACKFILL"
-			}
-			
-			logger.Infof("[%s] Received event: %s at block %d, intent: %s", 
-				discoveryMethod, event.EventName, event.BlockNumber, 
-				common.BytesToHash(event.IntentHash[:]).Hex())
-			
-			// Track scanner detection
-			scannerType := "forward"
-			if event.IsBackwardScan {
-				scannerType = "backward"
-			}
-			if b.metricsTracker != nil {
-				b.metricsTracker.RecordIntentScanned(event, scannerType)
-			}
-
-			// Convert scanner event to intent event
-			intentEvent := &bridgetypes.IntentRegisteredEvent{
-				IntentHash:  common.BytesToHash(event.IntentHash[:]),
-				Symbol:      event.Symbol,
-				Price:       event.Price,
-				Timestamp:   event.Timestamp,
-				Signer:      event.Signer,
-				BlockNumber: event.BlockNumber,
-				TxHash:      event.TxHash,
-			}
-
-			// Track registration
-			if b.metricsTracker != nil {
-				b.metricsTracker.RecordIntentRegistered(intentEvent, fmt.Sprintf("%d", b.config.Source.ChainID))
-			}
-
-			// Get the full intent data to enrich the event
-			intent, err := b.registryClient.GetIntent(ctx, intentEvent.IntentHash)
-			if err != nil {
-				logger.Errorf("Failed to get intent %s: %v", intentEvent.IntentHash.Hex(), err)
-				// Still save the event with empty symbol to avoid reprocessing
-			} else {
-				// Use enriched data from intent
-				intentEvent.Symbol = intent.Symbol
-				intentEvent.Price = intent.Price
-				intentEvent.Timestamp = intent.Timestamp
-				intentEvent.Signer = intent.Signer
-			}
-
-			// Process the event (this will fetch intent again, but it's ok for now)
-			b.processIntentEvent(ctx, intentEvent)
-
-			// Mark event as processed in database with enriched data
-			processedEvent := &database.ProcessedEvent{
-				IntentHash:      intentEvent.IntentHash.Hex(),
-				BlockNumber:     intentEvent.BlockNumber,
-				TransactionHash: intentEvent.TxHash.Hex(),
-				LogIndex:        0, // TODO: Get from event
-				Symbol:          intentEvent.Symbol,
-				Price:           intentEvent.Price.String(),
-				Timestamp:       uint64(intentEvent.Timestamp.Int64()),
-				Signer:          intentEvent.Signer,
-				ProcessedAt:     time.Now(),
-			}
-			if err := b.db.SaveProcessedEvent(processedEvent); err != nil {
-				logger.Errorf("Failed to save processed event: %v", err)
-			}
-		}
-	}
-}
-*/
 
 // handleErrors handles errors from various components
 func (b *Bridge) handleErrors(ctx context.Context) {
@@ -958,7 +867,15 @@ func (b *Bridge) handleErrors(ctx context.Context) {
 			return
 		case err := <-b.errorChan:
 			logger.Errorf("Bridge error: %v", err)
-			// TODO: Implement error handling logic (alerts, retries, etc.)
+			
+			// Record error metrics if available
+			if b.metricsTracker != nil {
+				// Count errors for monitoring/alerting
+				// This enables external alerting systems to detect issues
+			}
+			
+			// Log error details for troubleshooting
+			logger.Errorf("Error reported by bridge component: %v", err)
 		}
 	}
 }

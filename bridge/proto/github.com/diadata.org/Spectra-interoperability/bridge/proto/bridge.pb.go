@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.6
 // 	protoc        v5.29.3
-// source: proto/bridge.proto
+// source: bridge.proto
 
 package proto
 
@@ -41,7 +41,7 @@ type OracleIntent struct {
 
 func (x *OracleIntent) Reset() {
 	*x = OracleIntent{}
-	mi := &file_proto_bridge_proto_msgTypes[0]
+	mi := &file_bridge_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -53,7 +53,7 @@ func (x *OracleIntent) String() string {
 func (*OracleIntent) ProtoMessage() {}
 
 func (x *OracleIntent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[0]
+	mi := &file_bridge_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -66,7 +66,7 @@ func (x *OracleIntent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OracleIntent.ProtoReflect.Descriptor instead.
 func (*OracleIntent) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{0}
+	return file_bridge_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *OracleIntent) GetIntentType() string {
@@ -157,19 +157,13 @@ type FailoverRequest struct {
 	ReceiverAddress    string                 `protobuf:"bytes,6,opt,name=receiver_address,json=receiverAddress,proto3" json:"receiver_address,omitempty"`
 	IntentData         *OracleIntent          `protobuf:"bytes,7,opt,name=intent_data,json=intentData,proto3" json:"intent_data,omitempty"`
 	Reason             string                 `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
-	// Additional timestamps for phase tracking (Unix timestamps in seconds)
-	DetectionTimestamp       int64 `protobuf:"varint,9,opt,name=detection_timestamp,json=detectionTimestamp,proto3" json:"detection_timestamp,omitempty"`                      // When message was detected by monitoring
-	MonitoringStartTimestamp int64 `protobuf:"varint,10,opt,name=monitoring_start_timestamp,json=monitoringStartTimestamp,proto3" json:"monitoring_start_timestamp,omitempty"` // When monitoring started checking
-	FailoverTimestamp        int64 `protobuf:"varint,11,opt,name=failover_timestamp,json=failoverTimestamp,proto3" json:"failover_timestamp,omitempty"`                        // When failover was triggered
-	// Receiver identification using Option 1 format
-	ReceiverKey   string `protobuf:"bytes,12,opt,name=receiver_key,json=receiverKey,proto3" json:"receiver_key,omitempty"` // Format: "chainId:last6chars:maxWait" e.g. "11155420:14bCAF:0s"
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *FailoverRequest) Reset() {
 	*x = FailoverRequest{}
-	mi := &file_proto_bridge_proto_msgTypes[1]
+	mi := &file_bridge_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -181,7 +175,7 @@ func (x *FailoverRequest) String() string {
 func (*FailoverRequest) ProtoMessage() {}
 
 func (x *FailoverRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[1]
+	mi := &file_bridge_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -194,7 +188,7 @@ func (x *FailoverRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailoverRequest.ProtoReflect.Descriptor instead.
 func (*FailoverRequest) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{1}
+	return file_bridge_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *FailoverRequest) GetMessageId() string {
@@ -253,34 +247,6 @@ func (x *FailoverRequest) GetReason() string {
 	return ""
 }
 
-func (x *FailoverRequest) GetDetectionTimestamp() int64 {
-	if x != nil {
-		return x.DetectionTimestamp
-	}
-	return 0
-}
-
-func (x *FailoverRequest) GetMonitoringStartTimestamp() int64 {
-	if x != nil {
-		return x.MonitoringStartTimestamp
-	}
-	return 0
-}
-
-func (x *FailoverRequest) GetFailoverTimestamp() int64 {
-	if x != nil {
-		return x.FailoverTimestamp
-	}
-	return 0
-}
-
-func (x *FailoverRequest) GetReceiverKey() string {
-	if x != nil {
-		return x.ReceiverKey
-	}
-	return ""
-}
-
 // Response from failover trigger
 type FailoverResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -294,7 +260,7 @@ type FailoverResponse struct {
 
 func (x *FailoverResponse) Reset() {
 	*x = FailoverResponse{}
-	mi := &file_proto_bridge_proto_msgTypes[2]
+	mi := &file_bridge_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -306,7 +272,7 @@ func (x *FailoverResponse) String() string {
 func (*FailoverResponse) ProtoMessage() {}
 
 func (x *FailoverResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[2]
+	mi := &file_bridge_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -319,7 +285,7 @@ func (x *FailoverResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailoverResponse.ProtoReflect.Descriptor instead.
 func (*FailoverResponse) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{2}
+	return file_bridge_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *FailoverResponse) GetRequestId() string {
@@ -360,7 +326,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_proto_bridge_proto_msgTypes[3]
+	mi := &file_bridge_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -372,7 +338,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[3]
+	mi := &file_bridge_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -385,7 +351,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{3}
+	return file_bridge_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StatusRequest) GetRequestId() string {
@@ -410,7 +376,7 @@ type StatusResponse struct {
 
 func (x *StatusResponse) Reset() {
 	*x = StatusResponse{}
-	mi := &file_proto_bridge_proto_msgTypes[4]
+	mi := &file_bridge_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -422,7 +388,7 @@ func (x *StatusResponse) String() string {
 func (*StatusResponse) ProtoMessage() {}
 
 func (x *StatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[4]
+	mi := &file_bridge_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -435,7 +401,7 @@ func (x *StatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusResponse.ProtoReflect.Descriptor instead.
 func (*StatusResponse) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{4}
+	return file_bridge_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StatusResponse) GetRequestId() string {
@@ -489,7 +455,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_proto_bridge_proto_msgTypes[5]
+	mi := &file_bridge_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -501,7 +467,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[5]
+	mi := &file_bridge_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -514,7 +480,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{5}
+	return file_bridge_proto_rawDescGZIP(), []int{5}
 }
 
 // Health check response
@@ -530,7 +496,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_proto_bridge_proto_msgTypes[6]
+	mi := &file_bridge_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -542,7 +508,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[6]
+	mi := &file_bridge_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -555,7 +521,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{6}
+	return file_bridge_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HealthResponse) GetHealthy() bool {
@@ -598,7 +564,7 @@ type ChainStatus struct {
 
 func (x *ChainStatus) Reset() {
 	*x = ChainStatus{}
-	mi := &file_proto_bridge_proto_msgTypes[7]
+	mi := &file_bridge_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -610,7 +576,7 @@ func (x *ChainStatus) String() string {
 func (*ChainStatus) ProtoMessage() {}
 
 func (x *ChainStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_bridge_proto_msgTypes[7]
+	mi := &file_bridge_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -623,7 +589,7 @@ func (x *ChainStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChainStatus.ProtoReflect.Descriptor instead.
 func (*ChainStatus) Descriptor() ([]byte, []int) {
-	return file_proto_bridge_proto_rawDescGZIP(), []int{7}
+	return file_bridge_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ChainStatus) GetConnected() bool {
@@ -647,11 +613,11 @@ func (x *ChainStatus) GetError() string {
 	return ""
 }
 
-var File_proto_bridge_proto protoreflect.FileDescriptor
+var File_bridge_proto protoreflect.FileDescriptor
 
-const file_proto_bridge_proto_rawDesc = "" +
+const file_bridge_proto_rawDesc = "" +
 	"\n" +
-	"\x12proto/bridge.proto\x12\x06bridge\"\xac\x02\n" +
+	"\fbridge.proto\x12\x06bridge\"\xac\x02\n" +
 	"\fOracleIntent\x12\x1f\n" +
 	"\vintent_type\x18\x01 \x01(\tR\n" +
 	"intentType\x12\x18\n" +
@@ -665,7 +631,7 @@ const file_proto_bridge_proto_rawDesc = "" +
 	"\x06source\x18\t \x01(\tR\x06source\x12\x1c\n" +
 	"\tsignature\x18\n" +
 	" \x01(\fR\tsignature\x12\x16\n" +
-	"\x06signer\x18\v \x01(\tR\x06signer\"\xff\x03\n" +
+	"\x06signer\x18\v \x01(\tR\x06signer\"\xbe\x02\n" +
 	"\x0fFailoverRequest\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x01 \x01(\tR\tmessageId\x12\x1f\n" +
@@ -677,12 +643,7 @@ const file_proto_bridge_proto_rawDesc = "" +
 	"\x10receiver_address\x18\x06 \x01(\tR\x0freceiverAddress\x125\n" +
 	"\vintent_data\x18\a \x01(\v2\x14.bridge.OracleIntentR\n" +
 	"intentData\x12\x16\n" +
-	"\x06reason\x18\b \x01(\tR\x06reason\x12/\n" +
-	"\x13detection_timestamp\x18\t \x01(\x03R\x12detectionTimestamp\x12<\n" +
-	"\x1amonitoring_start_timestamp\x18\n" +
-	" \x01(\x03R\x18monitoringStartTimestamp\x12-\n" +
-	"\x12failover_timestamp\x18\v \x01(\x03R\x11failoverTimestamp\x12!\n" +
-	"\freceiver_key\x18\f \x01(\tR\vreceiverKey\"\x81\x01\n" +
+	"\x06reason\x18\b \x01(\tR\x06reason\"\x81\x01\n" +
 	"\x10FailoverResponse\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
@@ -722,19 +683,19 @@ const file_proto_bridge_proto_rawDesc = "" +
 	"\vHealthCheck\x12\x15.bridge.HealthRequest\x1a\x16.bridge.HealthResponseB>Z<github.com/diadata.org/Spectra-interoperability/bridge/protob\x06proto3"
 
 var (
-	file_proto_bridge_proto_rawDescOnce sync.Once
-	file_proto_bridge_proto_rawDescData []byte
+	file_bridge_proto_rawDescOnce sync.Once
+	file_bridge_proto_rawDescData []byte
 )
 
-func file_proto_bridge_proto_rawDescGZIP() []byte {
-	file_proto_bridge_proto_rawDescOnce.Do(func() {
-		file_proto_bridge_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_bridge_proto_rawDesc), len(file_proto_bridge_proto_rawDesc)))
+func file_bridge_proto_rawDescGZIP() []byte {
+	file_bridge_proto_rawDescOnce.Do(func() {
+		file_bridge_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_bridge_proto_rawDesc), len(file_bridge_proto_rawDesc)))
 	})
-	return file_proto_bridge_proto_rawDescData
+	return file_bridge_proto_rawDescData
 }
 
-var file_proto_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
-var file_proto_bridge_proto_goTypes = []any{
+var file_bridge_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_bridge_proto_goTypes = []any{
 	(*OracleIntent)(nil),     // 0: bridge.OracleIntent
 	(*FailoverRequest)(nil),  // 1: bridge.FailoverRequest
 	(*FailoverResponse)(nil), // 2: bridge.FailoverResponse
@@ -745,7 +706,7 @@ var file_proto_bridge_proto_goTypes = []any{
 	(*ChainStatus)(nil),      // 7: bridge.ChainStatus
 	nil,                      // 8: bridge.HealthResponse.ChainStatusEntry
 }
-var file_proto_bridge_proto_depIdxs = []int32{
+var file_bridge_proto_depIdxs = []int32{
 	0, // 0: bridge.FailoverRequest.intent_data:type_name -> bridge.OracleIntent
 	8, // 1: bridge.HealthResponse.chain_status:type_name -> bridge.HealthResponse.ChainStatusEntry
 	7, // 2: bridge.HealthResponse.ChainStatusEntry.value:type_name -> bridge.ChainStatus
@@ -762,26 +723,26 @@ var file_proto_bridge_proto_depIdxs = []int32{
 	0, // [0:3] is the sub-list for field type_name
 }
 
-func init() { file_proto_bridge_proto_init() }
-func file_proto_bridge_proto_init() {
-	if File_proto_bridge_proto != nil {
+func init() { file_bridge_proto_init() }
+func file_bridge_proto_init() {
+	if File_bridge_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_bridge_proto_rawDesc), len(file_proto_bridge_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_bridge_proto_rawDesc), len(file_bridge_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_bridge_proto_goTypes,
-		DependencyIndexes: file_proto_bridge_proto_depIdxs,
-		MessageInfos:      file_proto_bridge_proto_msgTypes,
+		GoTypes:           file_bridge_proto_goTypes,
+		DependencyIndexes: file_bridge_proto_depIdxs,
+		MessageInfos:      file_bridge_proto_msgTypes,
 	}.Build()
-	File_proto_bridge_proto = out.File
-	file_proto_bridge_proto_goTypes = nil
-	file_proto_bridge_proto_depIdxs = nil
+	File_bridge_proto = out.File
+	file_bridge_proto_goTypes = nil
+	file_bridge_proto_depIdxs = nil
 }
