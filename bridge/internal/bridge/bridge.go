@@ -414,6 +414,15 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	var identifier string
 	if updateReq.Intent != nil {
 		identifier = updateReq.Intent.Symbol
+		// Debug log the received intent
+		logger.Debugf("Received intent: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s", 
+			updateReq.Intent.Symbol,
+			updateReq.Intent.Price.String(),
+			updateReq.Intent.Timestamp.String(), 
+			updateReq.Intent.Nonce.String(),
+			updateReq.Intent.Expiry.String(),
+			updateReq.Intent.Signer.Hex(),
+			updateReq.Intent.Source)
 	} else if updateReq.Event != nil {
 		identifier = fmt.Sprintf("%s(requestId:%s)", updateReq.Event.EventName, updateReq.Event.RequestId.String())
 	} else {
@@ -586,34 +595,103 @@ func (b *Bridge) callRouterMethod(ctx context.Context, destClient *WriteClient, 
 	return b.callContractMethod(ctx, destClient, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit)
 }
 
-// buildMethodParams builds method parameters from router configuration
+// buildMethodParams builds method parameters from router configuration using generic param mapping
 func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig, updateReq *bridgetypes.UpdateRequest) ([]interface{}, error) {
 	var params []interface{}
 	
-	// For fulfillRandomInt method, we need requestId and randomInts
-	if methodConfig.Name == "fulfillRandomInt" {
-		// Get requestId from event
-		if updateReq.Event != nil && updateReq.Event.RequestId != nil {
-			params = append(params, updateReq.Event.RequestId)
-		} else {
-			return nil, fmt.Errorf("requestId not found in event data")
+	// Build parameters based on config mapping
+	for paramName, paramSource := range methodConfig.Params {
+		value, err := b.resolveParameterValue(paramSource, updateReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve parameter %s: %w", paramName, err)
 		}
 		
-		// Get randomInts from enrichment data
-		if updateReq.ExtractedData != nil && updateReq.ExtractedData.Enrichment != nil {
-			if randomInts, exists := updateReq.ExtractedData.Enrichment["randomInts"]; exists {
-				params = append(params, randomInts)
+		// Debug log for intent parameter specifically
+		if paramName == "intent" && paramSource == "${enrichment.fullIntent}" {
+			if intent, ok := value.(*bridgetypes.OracleIntent); ok {
+				logger.Debugf("Sending intent to method %s: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s", 
+					methodConfig.Name,
+					intent.Symbol,
+					intent.Price.String(),
+					intent.Timestamp.String(), 
+					intent.Nonce.String(),
+					intent.Expiry.String(),
+					intent.Signer.Hex(),
+					intent.Source)
 			} else {
-				return nil, fmt.Errorf("randomInts not found in enrichment data")
+				logger.Debugf("Sending parameter to method %s: type=%T value=%+v", methodConfig.Name, value, value)
 			}
-		} else {
-			return nil, fmt.Errorf("enrichment data not available")
 		}
-	} else {
-		return nil, fmt.Errorf("unsupported method: %s", methodConfig.Name)
+		
+		params = append(params, value)
 	}
 	
 	return params, nil
+}
+
+// resolveParameterValue resolves a parameter value from the configuration source
+func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.UpdateRequest) (interface{}, error) {
+	// Handle template variables like ${enrichment.fullIntent}
+	if strings.HasPrefix(source, "${") && strings.HasSuffix(source, "}") {
+		templateVar := strings.TrimSuffix(strings.TrimPrefix(source, "${"), "}")
+		
+		switch {
+		case strings.HasPrefix(templateVar, "enrichment."):
+			enrichmentKey := strings.TrimPrefix(templateVar, "enrichment.")
+			if updateReq.ExtractedData != nil && updateReq.ExtractedData.Enrichment != nil {
+				if value, exists := updateReq.ExtractedData.Enrichment[enrichmentKey]; exists {
+					// Debug log for fullIntent specifically
+					if enrichmentKey == "fullIntent" {
+						if intent, ok := value.(*bridgetypes.OracleIntent); ok {
+							logger.Debugf("Retrieved fullIntent from enrichment: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s", 
+								intent.Symbol,
+								intent.Price.String(),
+								intent.Timestamp.String(), 
+								intent.Nonce.String(),
+								intent.Expiry.String(),
+								intent.Signer.Hex(),
+								intent.Source)
+						} else {
+							logger.Debugf("Retrieved fullIntent from enrichment: type=%T value=%+v", value, value)
+						}
+					}
+					return value, nil
+				}
+				return nil, fmt.Errorf("enrichment key %s not found", enrichmentKey)
+			}
+			return nil, fmt.Errorf("enrichment data not available")
+			
+		case strings.HasPrefix(templateVar, "event."):
+			eventField := strings.TrimPrefix(templateVar, "event.")
+			if updateReq.Event == nil {
+				return nil, fmt.Errorf("event data not available")
+			}
+			
+			// Handle common event fields
+			switch eventField {
+			case "requestId":
+				if updateReq.Event.RequestId != nil {
+					return updateReq.Event.RequestId, nil
+				}
+				return nil, fmt.Errorf("event requestId not found")
+			default:
+				return nil, fmt.Errorf("unsupported event field: %s", eventField)
+			}
+			
+		case strings.HasPrefix(templateVar, "intent."):
+			if updateReq.Intent == nil {
+				return nil, fmt.Errorf("intent data not available")
+			}
+			// Return the entire intent for handleIntentUpdate
+			return updateReq.Intent, nil
+			
+		default:
+			return nil, fmt.Errorf("unsupported template variable: %s", templateVar)
+		}
+	}
+	
+	// Handle literal values
+	return source, nil
 }
 
 // callContractMethod calls a generic contract method
