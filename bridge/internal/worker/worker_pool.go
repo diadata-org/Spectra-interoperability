@@ -105,7 +105,7 @@ func NewWorkerPool(
 
 // Start begins processing tasks
 func (wp *WorkerPool) Start(ctx context.Context) error {
-	logger.Info("Starting worker pool with %d workers", wp.config.MaxWorkers)
+	logger.Infof("Starting worker pool with %d workers", wp.config.MaxWorkers)
 
 	// Start priority queue processor
 	go wp.priorityQueueProcessor(ctx)
@@ -246,7 +246,7 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 	}
 
 	// Create task context with timeout
-	taskCtx, cancel := context.WithTimeout(ctx, w.pool.config.TaskTimeout)
+	taskCtx, cancel := context.WithTimeout(ctx, w.pool.config.TaskTimeout.Duration())
 	defer cancel()
 
 	// Log transaction attempt
@@ -300,7 +300,7 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 			atomic.AddUint64(&w.pool.stats.TasksRetried, 1)
 			
 			// Re-queue with exponential backoff
-			time.Sleep(time.Duration(task.RetryCount) * w.pool.config.RetryDelay)
+			time.Sleep(time.Duration(task.RetryCount) * w.pool.config.RetryDelay.Duration())
 			w.pool.Submit(task.UpdateRequest)
 			
 			logger.Infof("Retrying task (attempt %d/%d)", task.RetryCount+1, task.MaxRetries)

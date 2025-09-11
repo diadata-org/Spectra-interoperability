@@ -114,6 +114,7 @@
       "Ism": "0xb869617a3CFcdA07A4cC230d996120074e7c817e",
       "RequestOracle": "0x61D217a26D0Bff1D2b4c6f5880e621071326aadC",
       "PushOracleReceiver": "0x9bb71344Ed950F9cFD85EE1C7258553B01d95FA0",
+      "PushOracleReceiverV2": "0x45096cb6f581A306f6Aa9A70076bfE3d127e52E5",
       "ProtocolFeeHook": "0x611C8b288c642336136a436d7125AC49FA71468B"
     }
   },

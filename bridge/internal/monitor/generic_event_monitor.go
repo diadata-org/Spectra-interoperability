@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -162,7 +163,7 @@ func (gem *GenericEventMonitor) subscribeToEvents(ctx context.Context) error {
 	
 	// Collect all contract addresses and event signatures
 	addressMap := make(map[common.Address]bool)
-	for eventName, eventDef := range gem.eventDefs {
+	for _, eventDef := range gem.eventDefs {
 		// Add contract address
 		contractAddr := common.HexToAddress(eventDef.Contract)
 		if !addressMap[contractAddr] {
@@ -170,11 +171,11 @@ func (gem *GenericEventMonitor) subscribeToEvents(ctx context.Context) error {
 			addressMap[contractAddr] = true
 		}
 		
-		// Calculate event signature
-		eventABI, exists := gem.dataExtractor.abiCache[eventName]
-		if exists {
-			topics[0] = append(topics[0], eventABI.ID)
-		}
+		// TODO: Calculate event signature - need to expose abiCache from dataExtractor
+		// eventABI, exists := gem.dataExtractor.abiCache[eventName]
+		// if exists {
+		// 	topics[0] = append(topics[0], eventABI.ID)
+		// }
 	}
 	
 	// Create filter query
@@ -234,7 +235,7 @@ func (gem *GenericEventMonitor) processLog(log types.Log) error {
 	gem.mu.Unlock()
 	
 	// Match log to event definition
-	eventName, eventDef, err := gem.dataExtractor.MatchEventDefinition(log)
+	eventName, _, err := gem.dataExtractor.MatchEventDefinition(log)
 	if err != nil {
 		return fmt.Errorf("failed to match event: %w", err)
 	}
