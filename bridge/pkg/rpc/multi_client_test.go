@@ -2,9 +2,11 @@ package rpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math/big"
-	"strings"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -107,6 +109,63 @@ func (m *MockEthClient) SubscribeFilterLogs(ctx context.Context, q ethereum.Filt
 	return args.Get(0).(ethereum.Subscription), args.Error(1)
 }
 
+// JSON-RPC request and response structures for mock server
+type jsonRPCRequest struct {
+	ID     interface{} `json:"id"`
+	Method string      `json:"method"`
+	Params []interface{} `json:"params"`
+}
+
+type jsonRPCResponse struct {
+	ID     interface{} `json:"id"`
+	Result interface{} `json:"result,omitempty"`
+	Error  *jsonRPCError `json:"error,omitempty"`
+}
+
+type jsonRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+// createMockEthereumServer creates a mock HTTP server that responds to Ethereum JSON-RPC calls
+func createMockEthereumServer(t *testing.T) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("Failed to decode JSON-RPC request: %v", err)
+			http.Error(w, "Bad Request", http.StatusBadRequest)
+			return
+		}
+
+		var response jsonRPCResponse
+		response.ID = req.ID
+
+		// Handle different RPC methods
+		switch req.Method {
+		case "eth_chainId":
+			// Return mock chain ID (1337 in hex)
+			response.Result = "0x539"
+		case "eth_blockNumber":
+			// Return mock block number (1000 in hex)
+			response.Result = "0x3e8"
+		case "net_version":
+			// Return network version
+			response.Result = "1337"
+		default:
+			// Return error for unsupported methods
+			response.Error = &jsonRPCError{
+				Code:    -32601,
+				Message: "Method not found",
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Errorf("Failed to encode JSON-RPC response: %v", err)
+		}
+	}))
+}
+
 // Test helper to create a mock MultiClient with controlled behavior
 func createTestMultiClient(t *testing.T, mockBehaviors []MockBehavior) *testMultiClient {
 	return &testMultiClient{
@@ -133,11 +192,8 @@ type testMultiClient struct {
 	mu            sync.RWMutex
 }
 
-// TestNewMultiClient_Success tests successful creation with working RPCs
+// TestNewMultiClient_Success tests successful creation with working RPCs using mock server
 func TestNewMultiClient_Success(t *testing.T) {
-	// Note: This test would require actual RPC endpoints or a mock server
-	// For now, we'll test the validation logic
-	
 	t.Run("EmptyURLs", func(t *testing.T) {
 		mc, err := NewMultiClient([]string{})
 		assert.Error(t, err)
@@ -145,8 +201,63 @@ func TestNewMultiClient_Success(t *testing.T) {
 		assert.Contains(t, err.Error(), "no RPC URLs provided")
 	})
 	
-	// For testing with actual network calls, we'd need integration test setup
-	// Let's focus on the logic and error handling tests
+	t.Run("SingleWorkingRPC", func(t *testing.T) {
+		// Create a mock HTTP server that responds to JSON-RPC calls
+		server := createMockEthereumServer(t)
+		defer server.Close()
+		
+		mc, err := NewMultiClient([]string{server.URL})
+		assert.NoError(t, err)
+		assert.NotNil(t, mc)
+		assert.Equal(t, server.URL, mc.GetCurrentRPCURL())
+		
+		// Test that the client can make calls
+		ctx := context.Background()
+		chainID, err := mc.ChainID(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1337), chainID.Int64()) // Mock chain ID
+		
+		mc.Close()
+	})
+	
+	t.Run("MultipleWorkingRPCs", func(t *testing.T) {
+		// Create multiple mock servers
+		server1 := createMockEthereumServer(t)
+		server2 := createMockEthereumServer(t)
+		defer server1.Close()
+		defer server2.Close()
+		
+		mc, err := NewMultiClient([]string{server1.URL, server2.URL})
+		assert.NoError(t, err)
+		assert.NotNil(t, mc)
+		
+		// Should connect to first working server
+		assert.Equal(t, server1.URL, mc.GetCurrentRPCURL())
+		
+		mc.Close()
+	})
+	
+	t.Run("PartiallyWorkingRPCs", func(t *testing.T) {
+		// Create one working server
+		workingServer := createMockEthereumServer(t)
+		defer workingServer.Close()
+		
+		// Mix working and non-working URLs
+		urls := []string{
+			"http://invalid-url-12345", // This will fail
+			workingServer.URL,          // This should work
+			"http://another-invalid-url", // This will fail
+		}
+		
+		mc, err := NewMultiClient(urls)
+		assert.NoError(t, err)
+		assert.NotNil(t, mc)
+		
+		// Should connect to the working server
+		assert.Equal(t, workingServer.URL, mc.GetCurrentRPCURL())
+		
+		mc.Close()
+	})
 }
 
 // TestNewMultiClient_ValidationEdgeCases tests input validation

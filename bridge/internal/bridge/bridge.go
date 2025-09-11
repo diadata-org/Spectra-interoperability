@@ -32,9 +32,9 @@ import (
 type Bridge struct {
 	config             *config.Config
 	db                 *database.DB
-	sourceClient       rpc.EthClient
+	readClient         rpc.EthClient
 	registryClient     *contracts.RegistryClient
-	destinationClients map[int64]*DestinationClient
+	writeClients       map[int64]*WriteClient
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -67,8 +67,8 @@ type Bridge struct {
 	metrics         *metrics.Metrics
 }
 
-// DestinationClient represents a client for a destination chain
-type DestinationClient struct {
+// WriteClient represents a client for write operations to a destination chain
+type WriteClient struct {
 	config         *config.DestinationConfig
 	client         rpc.EthClient
 	receiverClient *contracts.ReceiverClient
@@ -79,11 +79,11 @@ type DestinationClient struct {
 // NewBridge creates a new bridge instance
 func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Collector) (*Bridge, error) {
 	// Connect to source chain with multiple RPC support
-	sourceClient, err := rpc.NewMultiClient(cfg.Source.RPCURLs)
+	readClient, err := rpc.NewMultiClient(cfg.Source.RPCURLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to source chain: %w", err)
 	}
-	logger.Infof("Connected to source chain %s via %s", cfg.Source.Name, sourceClient.GetCurrentRPCURL())
+	logger.Infof("Connected to source chain %s via %s", cfg.Source.Name, readClient.GetCurrentRPCURL())
 
 	// Create registry client
 	// For new config, registry address would come from event definitions
@@ -102,7 +102,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	}
 
 	// Get the underlying ethclient for contracts
-	ethClient, err := sourceClient.GetClient()
+	ethClient, err := readClient.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get eth client: %w", err)
 	}
@@ -116,9 +116,9 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	}
 
 	// Create destination clients
-	destClients := make(map[int64]*DestinationClient)
+	destClients := make(map[int64]*WriteClient)
 	for _, destConfig := range cfg.GetEnabledDestinations() {
-		destClient, err := NewDestinationClient(destConfig, cfg.PrivateKey)
+		destClient, err := NewWriteClient(destConfig, cfg.PrivateKey)
 		if err != nil {
 			logger.Errorf("Failed to create destination client for chain %d: %v", destConfig.ChainID, err)
 			continue
@@ -152,9 +152,9 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	bridge := &Bridge{
 		config:             cfg,
 		db:                 db,
-		sourceClient:       sourceClient,
+		readClient:         readClient,
 		registryClient:     registryClient,
-		destinationClients: destClients,
+		writeClients:       destClients,
 		updateChan:         make(chan *bridgetypes.UpdateRequest, 1000),
 		eventChan:          eventChan,
 		errorChan:          errorChan,
@@ -171,7 +171,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 
 	// Create block scanner if enabled
 	if cfg.BlockScanner.Enabled {
-		scanner, err := CreateBlockScanner(cfg, sourceClient, db, eventChan, errorChan)
+		scanner, err := CreateBlockScanner(cfg, readClient, db, eventChan, errorChan)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create block scanner: %w", err)
 		}
@@ -220,8 +220,8 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	return bridge, nil
 }
 
-// NewDestinationClient creates a new destination client
-func NewDestinationClient(cfg *config.DestinationConfig, privateKey string) (*DestinationClient, error) {
+// NewWriteClient creates a new write client for destination operations
+func NewWriteClient(cfg *config.DestinationConfig, privateKey string) (*WriteClient, error) {
 	// Connect to destination chain with multiple RPC support
 	client, err := rpc.NewMultiClient(cfg.RPCURLs)
 	if err != nil {
@@ -257,7 +257,7 @@ func NewDestinationClient(cfg *config.DestinationConfig, privateKey string) (*De
 		return nil, fmt.Errorf("failed to create receiver client: %w", err)
 	}
 
-	return &DestinationClient{
+	return &WriteClient{
 		config:         cfg,
 		client:         client,
 		receiverClient: receiverClient,
@@ -359,8 +359,8 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	b.workerPool.Stop(ctx)
 
 	// Close connections
-	b.sourceClient.Close()
-	for _, destClient := range b.destinationClients {
+	b.readClient.Close()
+	for _, destClient := range b.writeClients {
 		destClient.client.Close()
 	}
 
@@ -405,7 +405,7 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 // handleUpdateRequest handles a single update request
 func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) error {
 	updateReq := task.Request
-	destClient := b.destinationClients[updateReq.DestinationChain.ChainID]
+	destClient := b.writeClients[updateReq.DestinationChain.ChainID]
 	if destClient == nil {
 		return fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
 	}
@@ -573,7 +573,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 }
 
 // callRouterMethod calls a contract method using router configuration
-func (b *Bridge) callRouterMethod(ctx context.Context, destClient *DestinationClient, updateReq *bridgetypes.UpdateRequest, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+func (b *Bridge) callRouterMethod(ctx context.Context, destClient *WriteClient, updateReq *bridgetypes.UpdateRequest, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
 	methodConfig := updateReq.DestinationMethodConfig
 	
 	// Build method parameters from router configuration
@@ -617,7 +617,7 @@ func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig,
 }
 
 // callContractMethod calls a generic contract method
-func (b *Bridge) callContractMethod(ctx context.Context, destClient *DestinationClient, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
 	// Parse the method ABI
 	parsedABI, err := abi.JSON(strings.NewReader(fmt.Sprintf(`[%s]`, abiJSON)))
 	if err != nil {
@@ -646,14 +646,14 @@ func (b *Bridge) callContractMethod(ctx context.Context, destClient *Destination
 }
 
 // updateLastUpdate updates the last update time for a symbol
-func (dc *DestinationClient) updateLastUpdate(symbol string) {
-	dc.mu.Lock()
-	defer dc.mu.Unlock()
-	dc.lastUpdate[symbol] = time.Now()
+func (wc *WriteClient) updateLastUpdate(symbol string) {
+	wc.mu.Lock()
+	defer wc.mu.Unlock()
+	wc.lastUpdate[symbol] = time.Now()
 }
 
 // getGasPrice gets the current gas price for a destination chain
-func (b *Bridge) getGasPrice(ctx context.Context, destClient *DestinationClient) (*big.Int, error) {
+func (b *Bridge) getGasPrice(ctx context.Context, destClient *WriteClient) (*big.Int, error) {
 	gasPrice, err := destClient.client.SuggestGasPrice(ctx)
 	if err != nil {
 		return nil, err
@@ -726,7 +726,7 @@ func (b *Bridge) initializeChainStats() {
 	}
 
 	// Destination chain stats
-	for _, destClient := range b.destinationClients {
+	for _, destClient := range b.writeClients {
 		b.stats.ChainStats[destClient.config.ChainID] = &bridgetypes.ChainStatus{
 			ChainID:   destClient.config.ChainID,
 			Name:      destClient.config.Name,
@@ -771,12 +771,12 @@ func (b *Bridge) healthCheck(ctx context.Context) {
 // performHealthCheck performs health checks on all chains
 func (b *Bridge) performHealthCheck(ctx context.Context) {
 	// Check source chain
-	if err := b.checkChainHealth(ctx, b.sourceClient, b.config.Source.ChainID); err != nil {
+	if err := b.checkChainHealth(ctx, b.readClient, b.config.Source.ChainID); err != nil {
 		logger.Errorf("Source chain health check failed: %v", err)
 	}
 
 	// Check destination chains
-	for _, destClient := range b.destinationClients {
+	for _, destClient := range b.writeClients {
 		if err := b.checkChainHealth(ctx, destClient.client, destClient.config.ChainID); err != nil {
 			logger.Errorf("Destination chain %d health check failed: %v", destClient.config.ChainID, err)
 		}
