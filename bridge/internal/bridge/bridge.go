@@ -15,26 +15,26 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/contracts"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/grpc"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/processor"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/utils"
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/router"
+	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // Bridge represents the main bridge service
 type Bridge struct {
-	config             *config.Config
-	db                 *database.DB
-	readClient         rpc.EthClient
-	registryClient     *contracts.RegistryClient
-	writeClients       map[int64]*WriteClient
+	config         *config.Config
+	db             *database.DB
+	readClient     rpc.EthClient
+	registryClient *contracts.RegistryClient
+	writeClients   map[int64]*WriteClient
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -56,15 +56,15 @@ type Bridge struct {
 
 	// Block scanner
 	blockScanner BlockScanner
-	
+
 	// Event processor
 	eventProcessor *processor.GenericEventProcessor
 
 	// Metrics tracking
 	metricsTracker *MetricsTracker
 	// API components
-	apiServer       *api.Server
-	metrics         *metrics.Metrics
+	apiServer *api.Server
+	metrics   *metrics.Metrics
 }
 
 // WriteClient represents a client for write operations to a destination chain
@@ -96,7 +96,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 			break
 		}
 	}
-	
+
 	if registryAddress == "" {
 		return nil, fmt.Errorf("no registry contract address found in event definitions")
 	}
@@ -150,15 +150,15 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	}
 
 	bridge := &Bridge{
-		config:             cfg,
-		db:                 db,
-		readClient:         readClient,
-		registryClient:     registryClient,
-		writeClients:       destClients,
-		updateChan:         make(chan *bridgetypes.UpdateRequest, 1000),
-		eventChan:          eventChan,
-		errorChan:          errorChan,
-		shutdownChan:       make(chan struct{}),
+		config:         cfg,
+		db:             db,
+		readClient:     readClient,
+		registryClient: registryClient,
+		writeClients:   destClients,
+		updateChan:     make(chan *bridgetypes.UpdateRequest, 1000),
+		eventChan:      eventChan,
+		errorChan:      errorChan,
+		shutdownChan:   make(chan struct{}),
 		stats: &bridgetypes.BridgeStats{
 			ChainStats: make(map[int64]*bridgetypes.ChainStatus),
 			StartTime:  time.Now(),
@@ -177,7 +177,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		}
 		bridge.blockScanner = scanner
 	}
-	
+
 	// Get destination eth clients for event processor
 	destEthClients := make(map[int64]*ethclient.Client)
 	for chainID, destClient := range destClients {
@@ -187,7 +187,7 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		}
 		destEthClients[chainID] = ethClient
 	}
-	
+
 	// Create generic event processor
 	eventProcessor, err := processor.NewGenericEventProcessor(
 		&cfg.EventProcessor,
@@ -306,7 +306,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}()
 	}
 
-
 	// Start update processor
 	wg.Add(1)
 	go func() {
@@ -368,9 +367,6 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	return nil
 }
 
-
-
-
 // processUpdates processes update requests
 func (b *Bridge) processUpdates(ctx context.Context) {
 	logger.Info("Starting update processor")
@@ -392,7 +388,7 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 			} else {
 				taskID = fmt.Sprintf("unknown-%d-%d", updateReq.DestinationChain.ChainID, time.Now().Unix())
 			}
-			
+
 			b.workerPool.Submit(&WorkerTask{
 				ID:      taskID,
 				Request: updateReq,
@@ -415,10 +411,10 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	if updateReq.Intent != nil {
 		identifier = updateReq.Intent.Symbol
 		// Debug log the received intent
-		logger.Debugf("Received intent: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s", 
+		logger.Debugf("Received intent: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s",
 			updateReq.Intent.Symbol,
 			updateReq.Intent.Price.String(),
-			updateReq.Intent.Timestamp.String(), 
+			updateReq.Intent.Timestamp.String(),
 			updateReq.Intent.Nonce.String(),
 			updateReq.Intent.Expiry.String(),
 			updateReq.Intent.Signer.Hex(),
@@ -428,7 +424,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	} else {
 		identifier = "unknown"
 	}
-	
+
 	logger.Infof("Processing update for %s on chain %d", identifier, updateReq.DestinationChain.ChainID)
 
 	// Check if intent has expired before processing (only for Intent-based requests)
@@ -494,10 +490,10 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		if updateReq.DestinationMethodConfig.GasLimit > 0 {
 			gasLimit = uint64(updateReq.DestinationMethodConfig.GasLimit)
 		}
-		
-		logger.Infof("Sending transaction for %s on chain %d using method %s with gas limit %d", 
+
+		logger.Infof("Sending transaction for %s on chain %d using method %s with gas limit %d",
 			identifier, updateReq.DestinationChain.ChainID, updateReq.DestinationMethodConfig.Name, gasLimit)
-		
+
 		tx, err = b.callRouterMethod(ctx, destClient, updateReq, gasPrice, gasLimit)
 	} else {
 		// Fallback to legacy HandleIntentUpdate for oracle intents
@@ -548,7 +544,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	}
 
 	logger.Infof("About to wait for receipt for tx %s", tx.Hash().Hex())
-	
+
 	// Wait for transaction receipt
 	receipt, err := b.waitForReceipt(ctx, destClient.client, tx.Hash())
 	if err != nil {
@@ -584,36 +580,36 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 // callRouterMethod calls a contract method using router configuration
 func (b *Bridge) callRouterMethod(ctx context.Context, destClient *WriteClient, updateReq *bridgetypes.UpdateRequest, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
 	methodConfig := updateReq.DestinationMethodConfig
-	
+
 	// Build method parameters from router configuration
 	params, err := b.buildMethodParams(methodConfig, updateReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build method params: %w", err)
 	}
-	
-	// Call the contract method
-	return b.callContractMethod(ctx, destClient, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit)
+
+	contractAddress := common.HexToAddress(updateReq.Contract.Address)
+	return b.callContractMethod(ctx, destClient, contractAddress, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit)
 }
 
 // buildMethodParams builds method parameters from router configuration using generic param mapping
 func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig, updateReq *bridgetypes.UpdateRequest) ([]interface{}, error) {
 	var params []interface{}
-	
+
 	// Build parameters based on config mapping
 	for paramName, paramSource := range methodConfig.Params {
 		value, err := b.resolveParameterValue(paramSource, updateReq)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve parameter %s: %w", paramName, err)
 		}
-		
+
 		// Debug log for intent parameter specifically
 		if paramName == "intent" && paramSource == "${enrichment.fullIntent}" {
 			if intent, ok := value.(*bridgetypes.OracleIntent); ok {
-				logger.Debugf("Sending intent to method %s: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s", 
+				logger.Debugf("Sending intent to method %s: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s",
 					methodConfig.Name,
 					intent.Symbol,
 					intent.Price.String(),
-					intent.Timestamp.String(), 
+					intent.Timestamp.String(),
 					intent.Nonce.String(),
 					intent.Expiry.String(),
 					intent.Signer.Hex(),
@@ -622,10 +618,10 @@ func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig,
 				logger.Debugf("Sending parameter to method %s: type=%T value=%+v", methodConfig.Name, value, value)
 			}
 		}
-		
+
 		params = append(params, value)
 	}
-	
+
 	return params, nil
 }
 
@@ -634,7 +630,7 @@ func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.Upd
 	// Handle template variables like ${enrichment.fullIntent}
 	if strings.HasPrefix(source, "${") && strings.HasSuffix(source, "}") {
 		templateVar := strings.TrimSuffix(strings.TrimPrefix(source, "${"), "}")
-		
+
 		switch {
 		case strings.HasPrefix(templateVar, "enrichment."):
 			enrichmentKey := strings.TrimPrefix(templateVar, "enrichment.")
@@ -643,10 +639,10 @@ func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.Upd
 					// Debug log for fullIntent specifically
 					if enrichmentKey == "fullIntent" {
 						if intent, ok := value.(*bridgetypes.OracleIntent); ok {
-							logger.Debugf("Retrieved fullIntent from enrichment: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s", 
+							logger.Debugf("Retrieved fullIntent from enrichment: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s",
 								intent.Symbol,
 								intent.Price.String(),
-								intent.Timestamp.String(), 
+								intent.Timestamp.String(),
 								intent.Nonce.String(),
 								intent.Expiry.String(),
 								intent.Signer.Hex(),
@@ -660,13 +656,13 @@ func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.Upd
 				return nil, fmt.Errorf("enrichment key %s not found", enrichmentKey)
 			}
 			return nil, fmt.Errorf("enrichment data not available")
-			
+
 		case strings.HasPrefix(templateVar, "event."):
 			eventField := strings.TrimPrefix(templateVar, "event.")
 			if updateReq.Event == nil {
 				return nil, fmt.Errorf("event data not available")
 			}
-			
+
 			// Handle common event fields
 			switch eventField {
 			case "requestId":
@@ -677,49 +673,48 @@ func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.Upd
 			default:
 				return nil, fmt.Errorf("unsupported event field: %s", eventField)
 			}
-			
+
 		case strings.HasPrefix(templateVar, "intent."):
 			if updateReq.Intent == nil {
 				return nil, fmt.Errorf("intent data not available")
 			}
 			// Return the entire intent for handleIntentUpdate
 			return updateReq.Intent, nil
-			
+
 		default:
 			return nil, fmt.Errorf("unsupported template variable: %s", templateVar)
 		}
 	}
-	
+
 	// Handle literal values
 	return source, nil
 }
 
 // callContractMethod calls a generic contract method
-func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient, contractAddress common.Address, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
 	// Parse the method ABI
 	parsedABI, err := abi.JSON(strings.NewReader(fmt.Sprintf(`[%s]`, abiJSON)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse method ABI: %w", err)
 	}
-	
+
 	// Verify the method exists
 	if _, exists := parsedABI.Methods[methodName]; !exists {
 		return nil, fmt.Errorf("method %s not found in ABI", methodName)
 	}
-	
+
 	// Get auth transactor
 	auth := destClient.receiverClient.GetAuth()
 	auth.GasLimit = gasLimit
 	auth.GasPrice = gasPrice
 	auth.Context = ctx
-	
-	// Create transaction
-	contractAddress := destClient.receiverClient.GetAddress()
+
+	// Create transaction using the provided contract address
 	tx, err := bind.NewBoundContract(contractAddress, parsedABI, destClient.client, destClient.client, destClient.client).Transact(auth, methodName, params...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send transaction: %w", err)
 	}
-	
+
 	return tx, nil
 }
 
@@ -756,7 +751,7 @@ func (b *Bridge) getGasPrice(ctx context.Context, destClient *WriteClient) (*big
 		}
 	}
 
-	logger.Infof("Using gas price: %s wei (%s gwei)", gasPrice.String(), 
+	logger.Infof("Using gas price: %s wei (%s gwei)", gasPrice.String(),
 		new(big.Int).Div(gasPrice, big.NewInt(1e9)).String())
 
 	return gasPrice, nil
@@ -765,12 +760,12 @@ func (b *Bridge) getGasPrice(ctx context.Context, destClient *WriteClient) (*big
 // waitForReceipt waits for a transaction receipt
 func (b *Bridge) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash) (*types.Receipt, error) {
 	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
-	
+
 	// Maximum wait time: 5 minutes
 	timeout := time.After(5 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-	
+
 	attempts := 0
 	for {
 		select {
@@ -787,7 +782,7 @@ func (b *Bridge) waitForReceipt(ctx context.Context, client rpc.EthClient, txHas
 				}
 				continue
 			}
-			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d", 
+			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d",
 				txHash.Hex(), receipt.Status, receipt.GasUsed)
 			return receipt, nil
 		}
@@ -906,18 +901,18 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 			// Override the FailoverMetrics with the bridge's instance
 			metricsCollector.FailoverMetrics = b.metrics
 		}
-		
+
 		// API server needs nil health monitor and router registry for now
 		apiServer := api.NewServer(b.config, b.db, nil, metricsCollector, b.routerRegistry)
-		
+
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
 				logger.Errorf("API server error: %v", err)
 			}
 		}()
-		
+
 		b.apiServer = apiServer
-		
+
 		// Start gRPC server if failover handler is available
 		if apiServer.GetFailoverHandler() != nil {
 			grpcServer := grpc.NewServer(apiServer.GetFailoverHandler())
@@ -932,7 +927,6 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 	}
 }
 
-
 // handleErrors handles errors from various components
 func (b *Bridge) handleErrors(ctx context.Context) {
 	logger.Info("Starting error handler")
@@ -945,13 +939,13 @@ func (b *Bridge) handleErrors(ctx context.Context) {
 			return
 		case err := <-b.errorChan:
 			logger.Errorf("Bridge error: %v", err)
-			
+
 			// Record error metrics if available
 			if b.metricsTracker != nil {
 				// Count errors for monitoring/alerting
 				// This enables external alerting systems to detect issues
 			}
-			
+
 			// Log error details for troubleshooting
 			logger.Errorf("Error reported by bridge component: %v", err)
 		}
