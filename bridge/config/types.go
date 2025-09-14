@@ -79,11 +79,13 @@ type EventMonitorConfig struct {
 
 // BlockScannerConfig represents block scanner configuration
 type BlockScannerConfig struct {
-	Enabled        bool          `json:"enabled"`
-	ScanInterval   Duration      `json:"scan_interval"`
-	BlockRange     uint64        `json:"block_range"`
-	MaxBlockGap    uint64        `json:"max_block_gap"`
-	BackwardSync   bool          `json:"backward_sync"`   // Enable backward sync for faster gap recovery
+	Enabled              bool     `json:"enabled"`
+	ScanInterval         Duration `json:"scan_interval"`
+	BlockRange           uint64   `json:"block_range"`
+	MaxBlockGap          uint64   `json:"max_block_gap"`
+	BackwardSync         bool     `json:"backward_sync"` // Enable backward sync for faster gap recovery
+	HeadTrackerInterval  Duration `json:"headTrackerInterval,omitempty"`
+	GapDetectionInterval Duration `json:"gapDetectionInterval,omitempty"`
 }
 
 // EventProcessorConfig represents event processor configuration

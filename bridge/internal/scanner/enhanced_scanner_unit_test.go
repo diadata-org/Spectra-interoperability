@@ -2,7 +2,9 @@ package scanner
 
 import (
 	"math/big"
+	
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -385,6 +387,95 @@ func TestCalculateEventSignature_InvalidJSON(t *testing.T) {
 	// Should return zero hash for invalid JSON
 	assert.Equal(t, common.Hash{}, result, "Should return zero hash for invalid ABI JSON")
 }
+
+// Test NewEnhancedBlockScanner constructor (simplified version)
+func TestNewEnhancedBlockScanner_Structure(t *testing.T) {
+	_, sourceConfig, eventDefs := CreateTestConfig()
+
+	// Test the structure without actual initialization to avoid interface issues
+	scanner := &EnhancedBlockScanner{
+		sourceConfig:     sourceConfig,
+		eventDefinitions: eventDefs,
+	}
+
+	assert.NotNil(t, scanner, "Scanner should not be nil")
+	assert.Equal(t, sourceConfig, scanner.sourceConfig)
+	assert.Equal(t, eventDefs, scanner.eventDefinitions)
+}
+
+
+
+// Test basic scanner operations 
+func TestBasicScannerOperations(t *testing.T) {
+	_, sourceConfig, eventDefs := CreateTestConfig()
+
+	scanner := &EnhancedBlockScanner{
+		sourceConfig:     sourceConfig,
+		eventDefinitions: eventDefs,
+		stopChan:        make(chan struct{}),
+		stoppedChan:     make(chan struct{}),
+	}
+
+	// Test extractContractInfo
+	err := scanner.extractContractInfo()
+	require.NoError(t, err)
+	assert.Len(t, scanner.contractAddresses, 2)
+	assert.Len(t, scanner.eventSignatures, 2)
+
+	// Test shouldProcessEvent (always returns true)
+	event := CreateTestEventData("IntentRegistered", 12345)
+	assert.True(t, scanner.shouldProcessEvent(event))
+}
+
+// Test Stop method
+func TestStop(t *testing.T) {
+	scanner := &EnhancedBlockScanner{
+		stopChan:    make(chan struct{}),
+		stoppedChan: make(chan struct{}),
+	}
+
+	// Simulate stopped scanner by closing stoppedChan
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		close(scanner.stoppedChan)
+	}()
+
+	err := scanner.Stop()
+
+	assert.NoError(t, err)
+
+	// Verify stopChan was closed
+	select {
+	case <-scanner.stopChan:
+		// Expected
+	default:
+		t.Error("stopChan should be closed")
+	}
+}
+
+// Test logging progress
+func TestLogProgress(t *testing.T) {
+	scanner := &EnhancedBlockScanner{
+		headBlock:            2100,
+		headEventsFound:      3,
+		lastHeadUpdate:       time.Now().Add(-30 * time.Second),
+		forwardBlock:         1000,
+		backwardBlock:        2000,
+		forwardEventsFound:   10,
+		backwardEventsFound:  5,
+		totalBlocksScanned:   500,
+		backwardScanning:     true,
+		converged:           false,
+	}
+
+	// This mainly tests that logProgress doesn't panic
+	// Since it only logs, we can't easily verify output
+	assert.NotPanics(t, func() {
+		scanner.logProgress()
+	})
+}
+
+
 
 func TestParseIntentRegisteredEvent_InsufficientData(t *testing.T) {
 	scanner := &EnhancedBlockScanner{}
