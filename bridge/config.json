@@ -92,7 +92,11 @@
     "batch_size": 100,
     "validation_timeout": "30s",
     "dedup_cache_size": 10000,
-    "dedup_cache_ttl": "1h"
+    "dedup_cache_ttl": "1h",
+    "enable_parallel_mode": true,
+    "parallel_worker_count": 4,
+    "parallel_queue_size": 500,
+    "parallel_timeout": "30s"
   },
   "worker_pool": {
     "max_workers": 10,

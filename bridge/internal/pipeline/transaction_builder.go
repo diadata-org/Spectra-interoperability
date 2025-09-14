@@ -22,13 +22,15 @@ type TransactionBuilder struct {
 	destinationConfigs map[int64]*config.DestinationConfig
 	clients           map[int64]*ethclient.Client
 	abiCache          map[string]abi.Method
+	nonceManager      *NonceManager
 }
 
 // NewTransactionBuilder creates a new transaction builder
 func NewTransactionBuilder(clients map[int64]*ethclient.Client) (*TransactionBuilder, error) {
 	return &TransactionBuilder{
-		clients:    clients,
-		abiCache:   make(map[string]abi.Method),
+		clients:      clients,
+		abiCache:     make(map[string]abi.Method),
+		nonceManager: NewNonceManager(clients),
 	}, nil
 }
 
@@ -386,7 +388,7 @@ func (tb *TransactionBuilder) BuildAndSendTransaction(ctx context.Context, priva
 	
 	fromAddress := crypto.PubkeyToAddress(privateKey.PublicKey)
 	
-	nonce, err := client.PendingNonceAt(ctx, fromAddress)
+	nonce, err := tb.nonceManager.GetNextNonce(ctx, txData.ChainID, fromAddress)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed to get nonce: %w", err)
 	}
@@ -417,6 +419,15 @@ func (tb *TransactionBuilder) BuildAndSendTransaction(ctx context.Context, priva
 	}
 	
 	if err := client.SendTransaction(ctx, signedTx); err != nil {
+		// Check if this is a nonce-related error and reset if needed
+		errStr := err.Error()
+		if strings.Contains(errStr, "nonce too low") || strings.Contains(errStr, "nonce too high") {
+			logger.Warnf("Nonce error detected (%s), resetting nonce for address %s on chain %d", 
+				errStr, fromAddress.Hex(), txData.ChainID)
+			if resetErr := tb.nonceManager.ResetNonce(ctx, txData.ChainID, fromAddress); resetErr != nil {
+				logger.Errorf("Failed to reset nonce: %v", resetErr)
+			}
+		}
 		return common.Hash{}, fmt.Errorf("failed to send transaction: %w", err)
 	}
 	

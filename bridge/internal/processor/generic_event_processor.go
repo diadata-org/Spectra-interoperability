@@ -2,8 +2,10 @@ package processor
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +47,14 @@ type GenericEventProcessor struct {
 	
 	stats           types.ProcessorStats
 	
+	// Event processing worker pool
+	eventWorkerPool  *EventWorkerPool
+	useParallelMode  bool
+	
+	// Parallel pipeline processing
+	parallelPipeline *ParallelPipeline
+	useParallelPipeline bool
+	
 	stopChan        chan struct{}
 	wg              sync.WaitGroup
 }
@@ -80,7 +90,7 @@ func NewGenericEventProcessor(
 		return nil, fmt.Errorf("failed to create transaction builder: %w", err)
 	}
 	
-	return &GenericEventProcessor{
+	gep := &GenericEventProcessor{
 		config:           cfg,
 		eventDefs:        eventDefs,
 		destinations:     destinations,
@@ -98,15 +108,80 @@ func NewGenericEventProcessor(
 		dedupCache:       NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration()),
 		metricsCollector: metricsCollector,
 		stopChan:         make(chan struct{}),
-	}, nil
+	}
+	
+	// Initialize event worker pool for parallel processing
+	gep.useParallelMode = cfg.EnableParallelMode
+	if gep.useParallelMode {
+		eventWorkerConfig := DefaultEventWorkerPoolConfig()
+		
+		// Use configuration settings if provided
+		if cfg.ParallelWorkerCount > 0 {
+			eventWorkerConfig.WorkerCount = cfg.ParallelWorkerCount
+		}
+		if cfg.ParallelQueueSize > 0 {
+			eventWorkerConfig.EventQueueSize = cfg.ParallelQueueSize
+		}
+		if cfg.ParallelTimeout.Duration() > 0 {
+			eventWorkerConfig.ProcessingTimeout = cfg.ParallelTimeout.Duration()
+		}
+		
+		gep.eventWorkerPool = NewEventWorkerPool(eventWorkerConfig, gep)
+		logger.Infof("Event worker pool enabled: %d workers, queue size %d", 
+			eventWorkerConfig.WorkerCount, eventWorkerConfig.EventQueueSize)
+	} else {
+		logger.Info("Event worker pool disabled, using sequential processing")
+	}
+	
+	// Initialize parallel pipeline for enrichment and gas estimation
+	gep.useParallelPipeline = cfg.EnableParallelMode // Use same flag for now
+	if gep.useParallelPipeline {
+		// Create service adapters
+		enrichmentService := NewEnrichmentServiceAdapter(enricher)
+		routingService := NewRoutingServiceAdapter(routerRegistry)
+		gasEstimationService := NewGasEstimationService(destClients)
+		
+		// Create parallel pipeline
+		parallelConfig := DefaultParallelPipelineConfig()
+		if cfg.ParallelTimeout.Duration() > 0 {
+			// Use the same timeout for both enrichment and gas estimation
+			parallelConfig.EnrichmentTimeout = cfg.ParallelTimeout.Duration()
+			parallelConfig.GasEstimationTimeout = cfg.ParallelTimeout.Duration() / 2 // Shorter timeout for gas
+		}
+		
+		gep.parallelPipeline = NewParallelPipeline(
+			parallelConfig,
+			enrichmentService,
+			gasEstimationService,
+			routingService,
+		)
+		
+		logger.Info("Parallel pipeline enabled for enrichment and gas estimation")
+	} else {
+		logger.Info("Parallel pipeline disabled, using sequential processing")
+	}
+	
+	return gep, nil
 }
 
 // Start begins processing events
 func (gep *GenericEventProcessor) Start(ctx context.Context) error {
 	logger.Info("Starting generic event processor")
 	
-	gep.wg.Add(1)
-	go gep.processLoop(ctx)
+	// Start event worker pool if enabled
+	if gep.useParallelMode && gep.eventWorkerPool != nil {
+		if err := gep.eventWorkerPool.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start event worker pool: %w", err)
+		}
+		
+		// Start event dispatcher (feeds events to worker pool)
+		gep.wg.Add(1)
+		go gep.eventDispatcher(ctx)
+	} else {
+		// Use traditional sequential processing
+		gep.wg.Add(1)
+		go gep.processLoop(ctx)
+	}
 	
 	gep.wg.Add(1)
 	go gep.statsReporter(ctx)
@@ -117,6 +192,14 @@ func (gep *GenericEventProcessor) Start(ctx context.Context) error {
 // Stop gracefully stops the processor
 func (gep *GenericEventProcessor) Stop() error {
 	logger.Info("Stopping generic event processor")
+	
+	// Stop event worker pool if enabled
+	if gep.useParallelMode && gep.eventWorkerPool != nil {
+		if err := gep.eventWorkerPool.Stop(); err != nil {
+			logger.Errorf("Error stopping event worker pool: %v", err)
+		}
+	}
+	
 	close(gep.stopChan)
 	gep.wg.Wait()
 	return nil
@@ -163,22 +246,8 @@ func (gep *GenericEventProcessor) processLoop(ctx context.Context) {
 func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types.EventData) error {
 	eventID := fmt.Sprintf("%s-%d-%d", event.TxHash.Hex(), event.BlockNumber, event.LogIndex)
 	
-	if gep.dedupCache.Has(eventID) {
-		atomic.AddUint64(&gep.stats.EventsDuplicate, 1)
-		logger.Debugf("Event already in cache: %s", eventID)
-		return nil
-	}
-	
-	processed, err := gep.db.IsEventProcessed(eventID)
-	if err != nil {
-		return fmt.Errorf("failed to check event status: %w", err)
-	}
-	if processed {
-		gep.dedupCache.Add(eventID)
-		atomic.AddUint64(&gep.stats.EventsDuplicate, 1)
-		logger.Debugf("Event already processed: %s", eventID)
-		return nil
-	}
+	// Note: We'll handle deduplication after routing to check against composite IntentHashes
+	// that include destination information for proper uniqueness across multiple destinations
 	
 	log, ok := event.Raw.(ethtypes.Log)
 	if !ok {
@@ -191,13 +260,11 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 	
 	logger.Debugf("Extracted data for %s: %+v", event.EventName, extractedData)
 	
-	eventDef, exists := gep.eventDefs[event.EventName]
-	if exists && eventDef.Enrichment != nil {
-		if err := gep.enricher.EnrichEventData(ctx, event.EventName, extractedData); err != nil {
-			logger.Warnf("Failed to enrich event data: %v", err)
-		} else {
-			logger.Debugf("Enriched data: %+v", extractedData.Enrichment)
-		}
+	// Handle enrichment (with optional parallel processing)
+	if err := gep.handleEnrichment(ctx, event.EventName, extractedData); err != nil {
+		logger.Warnf("Failed to enrich event data: %v", err)
+	} else {
+		logger.Debugf("Enriched data: %+v", extractedData.Enrichment)
 	}
 	
 	// Use new router system - route events directly
@@ -273,39 +340,106 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 		logger.Debugf("No routers handled event %s", event.EventName)
 	}
 	
-	processedEvent := &database.ProcessedEvent{
-		EventID:         eventID,
-		EventName:       event.EventName,
-		BlockNumber:     event.BlockNumber,
-		TransactionHash: event.TxHash.Hex(),
-		LogIndex:        event.LogIndex,
-		ProcessedAt:     time.Now(),
-	}
+	// For events with multiple routing destinations, we need to save separate ProcessedEvent records
+	// for each destination to avoid constraint violations. We'll create a composite IntentHash 
+	// that includes the original IntentHash + destination info for uniqueness.
 	
-	if symbol, ok := extractedData.Event["symbol"].(string); ok {
-		processedEvent.Symbol = symbol
-	}
-	
-	if priceValue, ok := extractedData.Event["price"]; ok && priceValue != nil {
-		switch v := priceValue.(type) {
-		case *big.Int:
-			processedEvent.Price = v.String()
-		case string:
-			processedEvent.Price = v
-		default:
-			processedEvent.Price = fmt.Sprintf("%v", v)
+	// Collect all routing destinations to generate composite IntentHashes
+	var routingDestinations []string
+	for _, result := range routingResults {
+		if result.Routed {
+			for _, dest := range result.Destinations {
+				routingDestinations = append(routingDestinations, fmt.Sprintf("%d-%s", dest.ChainID, dest.Contract))
+			}
 		}
-	} else {
-		processedEvent.Price = "0"
 	}
 	
-	if err := gep.db.SaveProcessedEvent(processedEvent); err != nil {
-		return fmt.Errorf("failed to save processed event: %w", err)
+	// If no routing destinations, use a single generic destination ID
+	if len(routingDestinations) == 0 {
+		routingDestinations = append(routingDestinations, "no-routing")
 	}
 	
-	gep.dedupCache.Add(eventID)
+	// Create ProcessedEvent records for each routing destination
+	for _, destID := range routingDestinations {
+		// Create composite IntentHash: hash(originalIntentHash + eventID + destID + contractAddress)
+		// Use SHA256 to ensure it fits in VARCHAR(66) database column and includes destination contract
+		hashInput := fmt.Sprintf("0x%x-%s-%s", event.IntentHash, eventID, destID)
+		hash := sha256.Sum256([]byte(hashInput))
+		compositeIntentHash := fmt.Sprintf("0x%x", hash)
+		logger.Debugf("Generated composite IntentHash - Input: %s, Hash: %s", hashInput, compositeIntentHash)
+		
+		// Check deduplication for this specific destination
+		if gep.dedupCache.Has(compositeIntentHash) {
+			atomic.AddUint64(&gep.stats.EventsDuplicate, 1)
+			logger.Debugf("Event already in cache for destination %s: %s", destID, compositeIntentHash)
+			continue
+		}
+		
+		// Check if this specific composite IntentHash was already processed
+		processed, err := gep.db.IsEventProcessed(compositeIntentHash)
+		if err != nil {
+			logger.Errorf("Failed to check processed status for %s: %v", compositeIntentHash, err)
+			continue
+		}
+		if processed {
+			gep.dedupCache.Add(compositeIntentHash)
+			atomic.AddUint64(&gep.stats.EventsDuplicate, 1)
+			logger.Debugf("Event already processed for destination %s: %s", destID, compositeIntentHash)
+			continue
+		}
+		
+		processedEvent := &database.ProcessedEvent{
+			EventID:         eventID,
+			EventName:       event.EventName,
+			IntentHash:      compositeIntentHash,
+			BlockNumber:     event.BlockNumber,
+			TransactionHash: event.TxHash.Hex(),
+			LogIndex:        event.LogIndex,
+			ProcessedAt:     time.Now(),
+		}
+		
+		if symbol, ok := extractedData.Event["symbol"].(string); ok {
+			processedEvent.Symbol = symbol
+		}
+		
+		if priceValue, ok := extractedData.Event["price"]; ok && priceValue != nil {
+			logger.Infof("Processing price value: %v (type: %T)", priceValue, priceValue)
+			switch v := priceValue.(type) {
+			case *big.Int:
+				processedEvent.Price = v.String()
+			case string:
+				// Handle hex strings by converting to big.Int first, then to decimal string
+				if strings.HasPrefix(v, "0x") || strings.HasPrefix(v, "0X") {
+					logger.Infof("Converting hex price value %s to decimal", v)
+					if bigInt, success := new(big.Int).SetString(v, 0); success {
+						processedEvent.Price = bigInt.String()
+						logger.Infof("Successfully converted hex %s to decimal %s", v, processedEvent.Price)
+					} else {
+						logger.Warnf("Failed to parse hex price value: %s", v)
+						processedEvent.Price = "0"
+					}
+				} else {
+					processedEvent.Price = v
+				}
+			default:
+				processedEvent.Price = fmt.Sprintf("%v", v)
+			}
+		} else {
+			processedEvent.Price = "0"
+		}
+		
+		logger.Debugf("Saving ProcessedEvent with composite IntentHash: %s for destination: %s", compositeIntentHash, destID)
+		if err := gep.db.SaveProcessedEvent(processedEvent); err != nil {
+			logger.Errorf("Failed to save processed event for destination %s: %v", destID, err)
+			continue
+		}
+		
+		// Use composite IntentHash for dedup cache as well
+		gep.dedupCache.Add(compositeIntentHash)
+		logger.Debugf("Added composite IntentHash to dedup cache: %s", compositeIntentHash)
+	}
+	
 	gep.stats.LastProcessedTime = time.Now()
-	
 	return nil
 }
 
@@ -338,6 +472,101 @@ func (gep *GenericEventProcessor) statsReporter(ctx context.Context) {
 // GetStats returns processor statistics
 func (gep *GenericEventProcessor) GetStats() types.ProcessorStats {
 	return gep.stats
+}
+
+// eventDispatcher feeds events from the main channel to the worker pool
+func (gep *GenericEventProcessor) eventDispatcher(ctx context.Context) {
+	defer gep.wg.Done()
+	
+	logger.Info("Starting event dispatcher for parallel processing")
+	
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-gep.stopChan:
+			return
+		case event := <-gep.eventChan:
+			if event == nil {
+				continue
+			}
+			
+			// Update main stats
+			atomic.AddUint64(&gep.stats.EventsReceived, 1)
+			if gep.metricsCollector != nil {
+				gep.metricsCollector.IncEventsReceived()
+			}
+			
+			// Submit to worker pool for parallel processing
+			if err := gep.eventWorkerPool.SubmitEvent(event); err != nil {
+				logger.Warnf("Failed to submit event to worker pool: %v", err)
+				// Continue processing to avoid blocking
+			}
+		}
+	}
+}
+
+// ProcessEvent implements EventProcessor interface for the worker pool
+// This method will be called by worker pool workers in parallel
+func (gep *GenericEventProcessor) ProcessEvent(ctx context.Context, event *types.EventData) error {
+	// This is the same logic as processEvent but called from worker pool
+	if err := gep.processEvent(ctx, event); err != nil {
+		atomic.AddUint64(&gep.stats.EventsFailed, 1)
+		if gep.metricsCollector != nil {
+			gep.metricsCollector.IncEventsFailed()
+		}
+		return err
+	}
+	
+	atomic.AddUint64(&gep.stats.EventsProcessed, 1)
+	if gep.metricsCollector != nil {
+		gep.metricsCollector.IncEventsProcessed()
+	}
+	return nil
+}
+
+// handleEnrichment handles event enrichment with optional parallel processing
+func (gep *GenericEventProcessor) handleEnrichment(ctx context.Context, eventName string, extractedData *config.ExtractedData) error {
+	eventDef, exists := gep.eventDefs[eventName]
+	if !exists || eventDef.Enrichment == nil {
+		return nil // No enrichment needed
+	}
+	
+	// Use parallel enrichment if enabled, otherwise fall back to sequential
+	if gep.useParallelPipeline && gep.parallelPipeline != nil {
+		return gep.enrichParallel(ctx, eventName, extractedData)
+	}
+	
+	// Sequential enrichment (original implementation)
+	return gep.enricher.EnrichEventData(ctx, eventName, extractedData)
+}
+
+// enrichParallel performs enrichment using the parallel pipeline
+func (gep *GenericEventProcessor) enrichParallel(ctx context.Context, eventName string, extractedData *config.ExtractedData) error {
+	// Create a timeout context for parallel enrichment
+	enrichCtx, cancel := context.WithTimeout(ctx, 15*time.Second) // Shorter timeout for parallel
+	defer cancel()
+	
+	// Create a dummy event for the parallel pipeline (we only need enrichment)
+	dummyEvent := &types.EventData{
+		EventName: eventName,
+		// Other fields aren't needed for enrichment
+	}
+	
+	result, err := gep.parallelPipeline.ProcessEventParallel(enrichCtx, dummyEvent, extractedData)
+	if err != nil {
+		// Fall back to sequential processing
+		logger.Warnf("Parallel enrichment failed, falling back to sequential: %v", err)
+		return gep.enricher.EnrichEventData(ctx, eventName, extractedData)
+	}
+	
+	// The enrichment result is already stored in extractedData
+	if result.EnrichmentError != nil {
+		return result.EnrichmentError
+	}
+	
+	logger.Debugf("Parallel enrichment completed in %v", result.ProcessingTime)
+	return nil
 }
 
 

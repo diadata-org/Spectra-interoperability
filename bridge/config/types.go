@@ -88,10 +88,14 @@ type BlockScannerConfig struct {
 
 // EventProcessorConfig represents event processor configuration
 type EventProcessorConfig struct {
-	BatchSize         int           `json:"batch_size"`
-	ValidationTimeout Duration `json:"validation_timeout"`
-	DedupCacheSize    int           `json:"dedup_cache_size"`
-	DedupCacheTTL     Duration `json:"dedup_cache_ttl"`
+	BatchSize             int           `json:"batch_size"`
+	ValidationTimeout     Duration      `json:"validation_timeout"`
+	DedupCacheSize        int           `json:"dedup_cache_size"`
+	DedupCacheTTL         Duration      `json:"dedup_cache_ttl"`
+	EnableParallelMode    bool          `json:"enable_parallel_mode"`
+	ParallelWorkerCount   int           `json:"parallel_worker_count"`
+	ParallelQueueSize     int           `json:"parallel_queue_size"`
+	ParallelTimeout       Duration      `json:"parallel_timeout"`
 }
 
 // WorkerPoolConfig represents worker pool configuration
