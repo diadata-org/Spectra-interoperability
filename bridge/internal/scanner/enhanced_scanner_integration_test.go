@@ -230,20 +230,19 @@ func (m *MockClientWithSimulator) matchesQuery(log types.Log, query ethereum.Fil
 		}
 	}
 	
-	// Check topics
-	if len(query.Topics) > 0 && len(query.Topics[0]) > 0 {
-		if len(log.Topics) == 0 {
-			return false
-		}
-		topicMatch := false
-		for _, topic := range query.Topics[0] {
-			if log.Topics[0] == topic {
-				topicMatch = true
-				break
+	// Enhanced topic filtering to support multi-level topic matching
+	for topicLevel, topicOptions := range query.Topics {
+		if len(topicOptions) > 0 && topicLevel < len(log.Topics) {
+			topicMatch := false
+			for _, topic := range topicOptions {
+				if log.Topics[topicLevel] == topic {
+					topicMatch = true
+					break
+				}
 			}
-		}
-		if !topicMatch {
-			return false
+			if !topicMatch {
+				return false
+			}
 		}
 	}
 	
@@ -541,7 +540,9 @@ func TestEnhancedScanner_GapDetectionAndFill(t *testing.T) {
 	// Action 1: Override the default consumer with one that intentionally creates a processing gap.
 	h.consumer = func(event *bridgeTypes.EventData) {
 		// Create a gap: don't mark events from blocks 1005-1010 as processed
-		if event.BlockNumber < 1005 || event.BlockNumber > 1010 {
+		if event.BlockNumber >= 1005 && event.BlockNumber <= 1010 {
+			// Skip marking these events as processed to create a gap
+		} else {
 			h.mockDB.MarkEventProcessed(event)
 		}
 		h.mockDB.mu.Lock()
@@ -590,5 +591,115 @@ func TestEnhancedScanner_GapDetectionAndFill(t *testing.T) {
 		assert.LessOrEqual(t, event.BlockNumber, uint64(1010))
 		assert.True(t, event.IsGapFill, "Events found during gap fill should be marked as such")
 	}
+}
+
+// TestEnhancedScanner_WebSocketReconnection tests the scanner's ability to handle WebSocket subscription errors
+func TestEnhancedScanner_WebSocketReconnection(t *testing.T) {
+	h := setupScannerTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Setup
+	h.mockDB.InitializeChainState(11155420, "test-chain", 1000)
+	h.scanner.config.HeadTrackerInterval = config.Duration(100 * time.Millisecond)
+
+	// Mock WebSocket subscription that fails
+	mockSub := NewMockSubscription()
+	h.mockClient.On("SubscribeFilterLogs", mock.Anything, mock.Anything, mock.Anything).Return(mockSub, nil)
+
+	// Start scanner
+	h.start(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	// Simulate WebSocket error
+	mockSub.SendError(fmt.Errorf("websocket connection lost"))
+
+	// Scanner should continue working despite WebSocket issues
+	h.simulator.SimulateNewBlocks(5, 1)
+
+	assert.Eventually(t, func() bool {
+		h.mockDB.mu.RLock()
+		defer h.mockDB.mu.RUnlock()
+		return len(h.collectedEvents) >= 5
+	}, 5*time.Second, 100*time.Millisecond, "Scanner should continue working after WebSocket error")
+
+	h.stop()
+}
+
+// TestEnhancedScanner_RPCTimeouts tests the scanner's behavior when RPC calls timeout
+func TestEnhancedScanner_RPCTimeouts(t *testing.T) {
+	h := setupScannerTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Setup with longer RPC delays to simulate timeouts
+	h.simulator.rpcDelay = 500 * time.Millisecond
+	h.mockDB.InitializeChainState(11155420, "test-chain", 1000)
+	h.scanner.config.ScanInterval = config.Duration(1 * time.Second)
+
+	// Add some RPC errors to simulate intermittent failures
+	h.simulator.SetRPCError(1005, fmt.Errorf("RPC timeout"))
+	h.simulator.SetRPCError(1008, fmt.Errorf("RPC connection refused"))
+
+	h.start(ctx)
+	h.simulator.SimulateNewBlocks(10, 1)
+
+	// Scanner should eventually process events despite some RPC failures
+	assert.Eventually(t, func() bool {
+		h.mockDB.mu.RLock()
+		defer h.mockDB.mu.RUnlock()
+		return len(h.collectedEvents) >= 8 // Should get most events despite 2 RPC errors
+	}, 12*time.Second, 500*time.Millisecond, "Scanner should handle RPC timeouts gracefully")
+
+	h.stop()
+
+	// Should have some errors logged but not complete failure
+	assert.True(t, len(h.collectedErrors) > 0, "Should have logged RPC errors")
+	assert.True(t, len(h.collectedEvents) > 0, "Should have processed some events despite errors")
+}
+
+// TestEnhancedScanner_DatabaseConstraintViolation tests the scanner's behavior when database constraints are violated
+func TestEnhancedScanner_DatabaseConstraintViolation(t *testing.T) {
+	h := setupScannerTest(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Setup
+	h.mockDB.InitializeChainState(11155420, "test-chain", 1000)
+	h.scanner.config.HeadTrackerInterval = config.Duration(100 * time.Millisecond)
+
+	// Override the consumer to simulate database constraint violations
+	h.consumer = func(event *bridgeTypes.EventData) {
+		// Simulate constraint violation for every 3rd event
+		if event.BlockNumber%3 == 0 {
+			// Don't mark as processed to simulate DB constraint failure
+		} else {
+			h.mockDB.MarkEventProcessed(event)
+		}
+		h.mockDB.mu.Lock()
+		h.collectedEvents = append(h.collectedEvents, event)
+		h.mockDB.mu.Unlock()
+	}
+
+	h.start(ctx)
+	time.Sleep(200 * time.Millisecond)
+	h.simulator.SimulateNewBlocks(9, 1) // Blocks 1001-1009
+
+	// Wait for processing
+	assert.Eventually(t, func() bool {
+		h.mockDB.mu.RLock()
+		defer h.mockDB.mu.RUnlock()
+		return len(h.collectedEvents) == 9
+	}, 5*time.Second, 100*time.Millisecond, "Should collect all events")
+
+	h.stop()
+
+	// Verify that only some events were marked as processed due to constraint violations
+	h.mockDB.mu.RLock()
+	processedCount := len(h.mockDB.processedEvents)
+	h.mockDB.mu.RUnlock()
+	
+	assert.Equal(t, 9, len(h.collectedEvents), "Should have collected all 9 events")
+	assert.Equal(t, 6, processedCount, "Should have marked 6 events as processed (blocks 1001,1002,1004,1005,1007,1008)")
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -366,7 +367,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 		hashInput := fmt.Sprintf("0x%x-%s-%s", event.IntentHash, eventID, destID)
 		hash := sha256.Sum256([]byte(hashInput))
 		compositeIntentHash := fmt.Sprintf("0x%x", hash)
-		logger.Debugf("Generated composite IntentHash - Input: %s, Hash: %s", hashInput, compositeIntentHash)
+		logger.Infof("Generated composite IntentHash - Input: %s (len=%d), Hash: %s (len=%d)", hashInput, len(hashInput), compositeIntentHash, len(compositeIntentHash))
 		
 		// Check deduplication for this specific destination
 		if gep.dedupCache.Has(compositeIntentHash) {
@@ -422,13 +423,77 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 					processedEvent.Price = v
 				}
 			default:
-				processedEvent.Price = fmt.Sprintf("%v", v)
+				// Convert any other type to string, handle hex values
+				valueStr := fmt.Sprintf("%v", v)
+				if strings.HasPrefix(valueStr, "0x") || strings.HasPrefix(valueStr, "0X") {
+					logger.Infof("Converting default case hex price value %s to decimal", valueStr)
+					if bigInt, success := new(big.Int).SetString(valueStr, 0); success {
+						processedEvent.Price = bigInt.String()
+						logger.Infof("Successfully converted default case hex %s to decimal %s", valueStr, processedEvent.Price)
+					} else {
+						logger.Warnf("Failed to parse default case hex price value: %s", valueStr)
+						processedEvent.Price = "0"
+					}
+				} else {
+					processedEvent.Price = valueStr
+				}
 			}
 		} else {
 			processedEvent.Price = "0"
 		}
 		
-		logger.Debugf("Saving ProcessedEvent with composite IntentHash: %s for destination: %s", compositeIntentHash, destID)
+		// Handle timestamp field
+		if timestampValue, ok := extractedData.Event["timestamp"]; ok && timestampValue != nil {
+			logger.Infof("Processing timestamp value: %v (type: %T)", timestampValue, timestampValue)
+			switch v := timestampValue.(type) {
+			case uint64:
+				processedEvent.Timestamp = v
+			case *big.Int:
+				processedEvent.Timestamp = v.Uint64()
+			case string:
+				if strings.HasPrefix(v, "0x") || strings.HasPrefix(v, "0X") {
+					logger.Infof("Converting hex timestamp value %s to uint64", v)
+					if bigInt, success := new(big.Int).SetString(v, 0); success {
+						processedEvent.Timestamp = bigInt.Uint64()
+						logger.Infof("Successfully converted hex timestamp %s to uint64 %d", v, processedEvent.Timestamp)
+					} else {
+						logger.Warnf("Failed to parse hex timestamp value: %s", v)
+						processedEvent.Timestamp = 0
+					}
+				} else {
+					if ts, err := strconv.ParseUint(v, 10, 64); err == nil {
+						processedEvent.Timestamp = ts
+					} else {
+						logger.Warnf("Failed to parse timestamp string: %s", v)
+						processedEvent.Timestamp = 0
+					}
+				}
+			default:
+				// Convert any other type, handle hex values
+				valueStr := fmt.Sprintf("%v", v)
+				if strings.HasPrefix(valueStr, "0x") || strings.HasPrefix(valueStr, "0X") {
+					logger.Infof("Converting default case hex timestamp value %s to uint64", valueStr)
+					if bigInt, success := new(big.Int).SetString(valueStr, 0); success {
+						processedEvent.Timestamp = bigInt.Uint64()
+						logger.Infof("Successfully converted default case hex timestamp %s to uint64 %d", valueStr, processedEvent.Timestamp)
+					} else {
+						logger.Warnf("Failed to parse default case hex timestamp value: %s", valueStr)
+						processedEvent.Timestamp = 0
+					}
+				} else {
+					if ts, err := strconv.ParseUint(valueStr, 10, 64); err == nil {
+						processedEvent.Timestamp = ts
+					} else {
+						logger.Warnf("Failed to parse default case timestamp: %s", valueStr)
+						processedEvent.Timestamp = 0
+					}
+				}
+			}
+		} else {
+			processedEvent.Timestamp = 0
+		}
+		
+		logger.Infof("Saving ProcessedEvent with composite IntentHash: %s (len=%d) for destination: %s", compositeIntentHash, len(compositeIntentHash), destID)
 		if err := gep.db.SaveProcessedEvent(processedEvent); err != nil {
 			logger.Errorf("Failed to save processed event for destination %s: %v", destID, err)
 			continue

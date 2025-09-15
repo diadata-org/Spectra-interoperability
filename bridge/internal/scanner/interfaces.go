@@ -72,6 +72,7 @@ func (da *databaseAdapter) MarkEventProcessed(event *bridgeTypes.EventData) {
 		Symbol:          event.Symbol,
 		Price:           func() string {
 				if event.Price != nil {
+					// Convert big.Int to decimal string for database (not hex)
 					return event.Price.String()
 				}
 				return "0" // Default price

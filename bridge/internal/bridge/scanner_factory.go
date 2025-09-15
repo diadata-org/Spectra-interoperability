@@ -11,7 +11,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/bridge/pkg/rpc"
 )
 
-// CreateBlockScanner creates the appropriate block scanner based on configuration
+// CreateBlockScanner creates the enhanced block scanner
 func CreateBlockScanner(
 	cfg *config.Config,
 	client rpc.EthClient,
@@ -19,34 +19,13 @@ func CreateBlockScanner(
 	eventChan chan<- *bridgeTypes.EventData,
 	errorChan chan<- error,
 ) (BlockScanner, error) {
-	// Check if backward sync is enabled via configuration
-	useEnhancedScanner := cfg.BlockScanner.Enabled && cfg.BlockScanner.BackwardSync
-
-	// Create the database adapter once
-	dbAdapter := scanner.NewDatabaseAdapter(db)
-
-	if useEnhancedScanner {
-		// Get the underlying ethclient for scanner
-		ethClient, err := client.GetClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get eth client: %w", err)
-		}
-
-		// Create enhanced scanner with backward sync
-		enhancedScanner, err := scanner.NewEnhancedBlockScanner(
-			&cfg.BlockScanner,
-			&cfg.Source,
-			cfg.EventDefinitions,
-			ethClient,
-			dbAdapter,
-			eventChan,
-			errorChan,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create enhanced block scanner: %w", err)
-		}
-		return &enhancedScannerAdapter{enhancedScanner}, nil
+	// Always use enhanced scanner for all scenarios
+	if !cfg.BlockScanner.Enabled {
+		return nil, fmt.Errorf("block scanner is disabled")
 	}
+
+	// Create the database adapter
+	dbAdapter := scanner.NewDatabaseAdapter(db)
 
 	// Get the underlying ethclient for scanner
 	ethClient, err := client.GetClient()
@@ -54,31 +33,27 @@ func CreateBlockScanner(
 		return nil, fmt.Errorf("failed to get eth client: %w", err)
 	}
 
-	standardScanner, err := scanner.NewBlockScanner(
+	// Create enhanced scanner
+	enhancedScanner, err := scanner.NewEnhancedBlockScanner(
 		&cfg.BlockScanner,
 		&cfg.Source,
 		cfg.EventDefinitions,
 		ethClient,
-		db,
+		dbAdapter,
 		eventChan,
 		errorChan,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create block scanner: %w", err)
+		return nil, fmt.Errorf("failed to create enhanced block scanner: %w", err)
 	}
-	return &standardScannerAdapter{standardScanner}, nil
+	return &enhancedScannerAdapter{enhancedScanner}, nil
 }
 
-// BlockScanner interface for both scanner types
+// BlockScanner interface for enhanced scanner
 type BlockScanner interface {
 	Start(ctx context.Context) error
 	Stop() error
 	GetStats() *bridgeTypes.ScannerStats
-}
-
-// Adapter for standard scanner
-type standardScannerAdapter struct {
-	*scanner.BlockScanner
 }
 
 // Adapter for enhanced scanner
