@@ -330,9 +330,8 @@ contract OracleIntentUtilsTest is Test {
     // ===== INTENT FORMAT DETECTION TESTS =====
     
     function testIsIntentFormatLargeData() public {
-        // Create data larger than 200 bytes
-        bytes memory largeData = new bytes(300);
-        for (uint i = 0; i < 300; i++) {
+         bytes memory largeData = new bytes(512);
+        for (uint i = 0; i < 512; i++) {
             largeData[i] = bytes1(uint8(i % 256));
         }
         
@@ -350,12 +349,12 @@ contract OracleIntentUtilsTest is Test {
     
     function testIsIntentFormatExactBoundary() public {
         // Test exactly 200 bytes
-        bytes memory exactData = new bytes(200);
+        bytes memory exactData = new bytes(512);
         bool isIntent = this.checkIsIntentFormat(exactData);
         assertTrue(isIntent);
         
         // Test 199 bytes
-        bytes memory almostData = new bytes(199);
+        bytes memory almostData = new bytes(511);
         bool isNotIntent = this.checkIsIntentFormat(almostData);
         assertFalse(isNotIntent);
     }

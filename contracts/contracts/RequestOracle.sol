@@ -260,7 +260,7 @@ contract RequestOracle is
     fallback() external payable {}
 
     /**
-     * @notice Withdraw ETH to reover stuck funds
+     * @notice Withdraw ETH to recover stuck funds
      */
     function retrieveLostTokens(
         address receiver

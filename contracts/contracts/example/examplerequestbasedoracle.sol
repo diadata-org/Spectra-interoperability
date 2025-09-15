@@ -36,7 +36,7 @@ contract RequestBasedOracleExample is
 
     function request(
         IMailbox _mailbox,
-        address reciever,
+        address receiver,
         uint32 _destinationDomain,
         bytes calldata _messageBody
     ) external payable returns (bytes32 messageId) {
@@ -45,7 +45,7 @@ contract RequestBasedOracleExample is
         return
             _mailbox.dispatch{ value: msg.value }(
                 _destinationDomain,
-                reciever.addressToBytes32(),
+                receiver.addressToBytes32(),
                 _messageBody,
                 bytes(""),
                 IPostDispatchHook(0x0000000000000000000000000000000000000000)

@@ -28,6 +28,9 @@ interface IOracleTriggerV2 {
     // @notice Thrown when there is no balance in the contract to withdraw from
     error NoBalanceToWithdraw();
 
+    // @notice Thrown when requested amount exceeds available balance
+    error InsufficientBalance();
+
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
     

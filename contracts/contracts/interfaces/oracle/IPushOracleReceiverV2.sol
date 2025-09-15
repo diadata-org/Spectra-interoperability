@@ -36,8 +36,15 @@ interface IPushOracleReceiverV2 is
     // @notice Thrown when there is no balance in the contract to withdraw from
     error NoBalanceToWithdraw();
 
+    // @notice Thrown when requested amount exceeds available balance
+    error InsufficientBalance();
+
     // @notice Thrown when the transfer of any amount fails
     error AmountTransferFailed();
+
+
+    // @notice InsufficientGasForPayment is thrown when there is not enough gas to pay for the message
+    error InsufficientGasForPayment();
     
     
     // @notice Thrown when batch size exceeds maximum allowed
@@ -69,6 +76,39 @@ interface IPushOracleReceiverV2 is
      * @param value The value of the update
      */
     event ReceivedMessage(string key, uint128 timestamp, uint128 value);
+
+    /**
+     * @notice Emitted when ISM-validated data is received but ignored due to being stale
+     * @param key The key of the update
+     * @param timestamp The timestamp of the stale update
+     * @param value The value of the stale update
+     * @param existingTimestamp The existing newer timestamp
+     */
+    event ReceivedStaleMessage(string key, uint128 timestamp, uint128 value, uint128 existingTimestamp);
+
+    /**
+     * @notice Enumeration of possible intent rejection reasons
+     * @dev Used in IntentRejected event for gas efficiency and type safety
+     */
+    enum RejectionReason {
+        UnauthorizedSigner,  // 0 - Signer is not authorized
+        AlreadyProcessed,    // 1 - Intent has already been processed (replay protection)
+        InvalidSignature     // 2 - Signature verification failed
+    }
+
+    /**
+     * @notice Emitted when an intent is rejected during batch processing
+     * @param intentHash The hash of the rejected intent
+     * @param symbol The symbol of the intent
+     * @param signer The signer of the intent
+     * @param reason The reason for rejection (enum value for gas efficiency)
+     */
+    event IntentRejected(
+        bytes32 indexed intentHash,
+        string indexed symbol,
+        address indexed signer,
+        RejectionReason reason
+    );
 
     /**
      * @notice Emitted when an intent-based update is received and applied
@@ -240,11 +280,12 @@ interface IPushOracleReceiverV2 is
     ) external;
 
     /**
-     * @notice Withdraws stuck funds to the specified address
+     * @notice Withdraws specific amount of stuck funds to the specified address
      * @dev restricted to onlyOwner
      * @param receiver The address to receive the funds.
+     * @param amount The amount to withdraw (must be <= balance)
      */
-    function retrieveLostTokens(address receiver) external;
+    function retrieveLostTokens(address receiver, uint256 amount) external;
     
     /**
      * @notice Returns the domain separator for EIP-712 signatures
