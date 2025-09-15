@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/database"
 )
 
@@ -102,9 +103,9 @@ func (s *Server) getSystemStats() (map[string]interface{}, error) {
 	}, nil
 }
 
-func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int) ([]*database.ProcessedEvent, error) {
+func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int, eventName string) ([]*database.ProcessedEvent, error) {
 	query := `
-		SELECT id, intent_hash, block_number, transaction_hash, log_index,
+		SELECT id, event_id, event_name, intent_hash, block_number, transaction_hash, log_index,
 		       symbol, price, timestamp, signer, processed_at
 		FROM processed_events
 		WHERE 1=1
@@ -122,6 +123,12 @@ func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int) ([]
 		argCount++
 		query += " AND block_number <= $" + strconv.Itoa(argCount)
 		args = append(args, endBlock)
+	}
+
+	if eventName != "" {
+		argCount++
+		query += " AND event_name = $" + strconv.Itoa(argCount)
+		args = append(args, eventName)
 	}
 	
 	query += " ORDER BY block_number DESC, log_index DESC"
@@ -146,6 +153,8 @@ func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int) ([]
 		var signerHex string
 		err := rows.Scan(
 			&event.ID,
+			&event.EventID,
+			&event.EventName,
 			&event.IntentHash,
 			&event.BlockNumber,
 			&event.TransactionHash,
@@ -159,6 +168,7 @@ func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int) ([]
 		if err != nil {
 			return nil, err
 		}
+		event.Signer = common.HexToAddress(signerHex)
 		events = append(events, event)
 	}
 	
@@ -429,4 +439,29 @@ var startTime = time.Now()
 
 func (s *Server) getUptime() string {
 	return time.Since(startTime).String()
+}
+
+func (s *Server) getEventNames() ([]string, error) {
+	query := `
+		SELECT DISTINCT event_name
+		FROM processed_events
+		ORDER BY event_name
+	`
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+
+	return names, nil
 }

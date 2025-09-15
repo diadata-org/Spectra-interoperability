@@ -1,28 +1,32 @@
+
 package router
 
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	
+
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // GenericRouter routes events based on configuration
 type GenericRouter struct {
-	config     *config.RouterConfig
-	privateKey *ecdsa.PrivateKey
-	address    common.Address
-	
-	mu         sync.RWMutex
-	stats      GenericRouterStats
+	config        *config.RouterConfig
+	triggerEvents map[string]struct{}
+	privateKey    *ecdsa.PrivateKey
+	address       common.Address
+
+	mu    sync.RWMutex
+	stats GenericRouterStats
 }
 
 // GenericRouterStats tracks router statistics
@@ -35,10 +39,16 @@ type GenericRouterStats struct {
 
 // NewGenericRouter creates a new generic router from configuration
 func NewGenericRouter(cfg *config.RouterConfig) (*GenericRouter, error) {
-	router := &GenericRouter{
-		config: cfg,
+	triggerEvents := make(map[string]struct{}, len(cfg.Triggers.Events))
+	for _, event := range cfg.Triggers.Events {
+		triggerEvents[event] = struct{}{}
 	}
-	
+
+	router := &GenericRouter{
+		config:        cfg,
+		triggerEvents: triggerEvents,
+	}
+
 	if cfg.PrivateKey != "" {
 		key, err := crypto.HexToECDSA(strings.TrimPrefix(cfg.PrivateKey, "0x"))
 		if err != nil {
@@ -46,10 +56,10 @@ func NewGenericRouter(cfg *config.RouterConfig) (*GenericRouter, error) {
 		}
 		router.privateKey = key
 		router.address = crypto.PubkeyToAddress(key.PublicKey)
-		
+
 		logger.Infof("Router %s initialized with address: %s", cfg.ID, router.address.Hex())
 	}
-	
+
 	return router, nil
 }
 
@@ -74,26 +84,18 @@ func (gr *GenericRouter) ShouldRoute(eventName string, data *config.ExtractedDat
 	gr.stats.EventsReceived++
 	gr.stats.LastEventTime = time.Now()
 	gr.mu.Unlock()
-	
+
 	if !gr.config.Enabled {
 		return false, "router disabled"
 	}
-	
-	eventMatches := false
-	for _, triggerEvent := range gr.config.Triggers.Events {
-		if triggerEvent == eventName {
-			eventMatches = true
-			break
-		}
-	}
-	
-	if !eventMatches {
+
+	if _, ok := gr.triggerEvents[eventName]; !ok {
 		gr.mu.Lock()
 		gr.stats.EventsFiltered++
 		gr.mu.Unlock()
 		return false, fmt.Sprintf("event %s not in trigger list", eventName)
 	}
-	
+
 	for _, condition := range gr.config.Triggers.Conditions {
 		if !gr.evaluateCondition(condition, data) {
 			gr.mu.Lock()
@@ -102,11 +104,11 @@ func (gr *GenericRouter) ShouldRoute(eventName string, data *config.ExtractedDat
 			return false, fmt.Sprintf("condition failed: %s %s %v", condition.Field, condition.Operator, condition.Value)
 		}
 	}
-	
+
 	gr.mu.Lock()
 	gr.stats.EventsRouted++
 	gr.mu.Unlock()
-	
+
 	return true, "all conditions met"
 }
 
@@ -117,24 +119,24 @@ func (gr *GenericRouter) evaluateCondition(condition config.TriggerCondition, da
 		logger.Debugf("Failed to get field value for condition: %v", err)
 		return false
 	}
-	
+
 	switch condition.Operator {
 	case "==", "eq":
-		return gr.compareEqual(value, condition.Value)
+		return compareEqual(value, condition.Value)
 	case "!=", "ne":
-		return !gr.compareEqual(value, condition.Value)
+		return !compareEqual(value, condition.Value)
 	case ">", "gt":
-		return gr.compareGreater(value, condition.Value)
+		return compareGreater(value, condition.Value)
 	case "<", "lt":
-		return gr.compareLess(value, condition.Value)
+		return compareLess(value, condition.Value)
 	case ">=", "gte":
-		return !gr.compareLess(value, condition.Value)
+		return !compareLess(value, condition.Value)
 	case "<=", "lte":
-		return !gr.compareGreater(value, condition.Value)
+		return !compareGreater(value, condition.Value)
 	case "contains":
-		return gr.compareContains(value, condition.Value)
+		return compareContains(value, condition.Value)
 	case "in":
-		return gr.compareIn(value, condition.Value)
+		return compareIn(value, condition.Value)
 	default:
 		logger.Warnf("Unknown operator: %s", condition.Operator)
 		return false
@@ -146,14 +148,14 @@ func (gr *GenericRouter) getFieldValue(field string, data *config.ExtractedData)
 	if !strings.HasPrefix(field, "${") || !strings.HasSuffix(field, "}") {
 		return nil, fmt.Errorf("invalid field syntax: %s", field)
 	}
-	
+
 	path := field[2 : len(field)-1]
 	parts := strings.Split(path, ".")
-	
+
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid field path: %s", path)
 	}
-	
+
 	var source map[string]interface{}
 	switch parts[0] {
 	case "event":
@@ -165,7 +167,7 @@ func (gr *GenericRouter) getFieldValue(field string, data *config.ExtractedData)
 	default:
 		return nil, fmt.Errorf("unknown source: %s", parts[0])
 	}
-	
+
 	var current interface{} = source
 	for i := 1; i < len(parts); i++ {
 		m, ok := current.(map[string]interface{})
@@ -177,53 +179,99 @@ func (gr *GenericRouter) getFieldValue(field string, data *config.ExtractedData)
 			return nil, fmt.Errorf("field not found: %s", parts[i])
 		}
 	}
-	
+
 	return current, nil
 }
 
 // Comparison functions
-func (gr *GenericRouter) compareEqual(a, b interface{}) bool {
+func compareEqual(a, b interface{}) bool {
+	aFloat, aIsNum := toFloat64(a)
+	bFloat, bIsNum := toFloat64(b)
+
+	if aIsNum && bIsNum {
+		return aFloat == bFloat
+	}
+
 	return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
 }
 
-func (gr *GenericRouter) compareGreater(a, b interface{}) bool {
+func compareGreater(a, b interface{}) bool {
+	aFloat, aIsNum := toFloat64(a)
+	bFloat, bIsNum := toFloat64(b)
+
+	if aIsNum && bIsNum {
+		return aFloat > bFloat
+	}
+
 	return fmt.Sprintf("%v", a) > fmt.Sprintf("%v", b)
 }
 
-func (gr *GenericRouter) compareLess(a, b interface{}) bool {
+func compareLess(a, b interface{}) bool {
+	aFloat, aIsNum := toFloat64(a)
+	bFloat, bIsNum := toFloat64(b)
+
+	if aIsNum && bIsNum {
+		return aFloat < bFloat
+	}
+
 	return fmt.Sprintf("%v", a) < fmt.Sprintf("%v", b)
 }
 
-func (gr *GenericRouter) compareContains(a, b interface{}) bool {
-	return strings.Contains(fmt.Sprintf("%v", a), fmt.Sprintf("%v", b))
+func compareContains(a, b interface{}) bool {
+	aStr := fmt.Sprintf("%v", a)
+	bStr := fmt.Sprintf("%v", b)
+	return strings.Contains(aStr, bStr)
 }
 
-func (gr *GenericRouter) compareIn(a, b interface{}) bool {
-	if arr, ok := b.([]interface{}); ok {
-		aStr := fmt.Sprintf("%v", a)
-		for _, item := range arr {
-			if fmt.Sprintf("%v", item) == aStr {
-				return true
-			}
+func compareIn(a, b interface{}) bool {
+	bSlice, ok := b.([]interface{})
+	if !ok {
+		return false
+	}
+
+	for _, item := range bSlice {
+		if compareEqual(a, item) {
+			return true
 		}
 	}
+
 	return false
+}
+
+// toFloat64 attempts to convert an interface{} to a float64 for numeric comparisons.
+func toFloat64(v interface{}) (float64, bool) {
+	val := reflect.ValueOf(v)
+
+	switch val.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return float64(val.Int()), true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return float64(val.Uint()), true
+	case reflect.Float32, reflect.Float64:
+		return val.Float(), true
+	case reflect.String:
+		if f, err := strconv.ParseFloat(val.String(), 64); err == nil {
+			return f, true
+		}
+	}
+
+	return 0, false
 }
 
 // GetDestinations returns the router's destinations with evaluated conditions
 func (gr *GenericRouter) GetDestinations(data *config.ExtractedData) []config.RouterDestination {
 	var destinations []config.RouterDestination
-	
+
 	for _, dest := range gr.config.Destinations {
 		if dest.Condition != "" {
 			if !gr.evaluateDestinationCondition(dest.Condition, data) {
 				continue
 			}
 		}
-		
+
 		destinations = append(destinations, dest)
 	}
-	
+
 	return destinations
 }
 
@@ -260,8 +308,7 @@ func (gr *GenericRouter) BuildUpdateRequest(
 		CreatedAt: time.Now(),
 		Priority:  1,
 	}
-	
-	
+
 	return updateReq, nil
 }
 

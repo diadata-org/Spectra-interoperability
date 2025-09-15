@@ -10,14 +10,16 @@ import (
 
 // GenericRegistry manages generic routers
 type GenericRegistry struct {
-	mu      sync.RWMutex
-	routers map[string]*GenericRouter
+	mu             sync.RWMutex
+	routers        map[string]*GenericRouter
+	eventToRouters map[string][]*GenericRouter
 }
 
 // NewGenericRegistry creates a new router registry
 func NewGenericRegistry() *GenericRegistry {
 	return &GenericRegistry{
-		routers: make(map[string]*GenericRouter),
+		routers:        make(map[string]*GenericRouter),
+		eventToRouters: make(map[string][]*GenericRouter),
 	}
 }
 
@@ -25,24 +27,29 @@ func NewGenericRegistry() *GenericRegistry {
 func (gr *GenericRegistry) LoadRouters(routerConfigs []config.RouterConfig) error {
 	gr.mu.Lock()
 	defer gr.mu.Unlock()
-	
+
 	gr.routers = make(map[string]*GenericRouter)
-	
+	gr.eventToRouters = make(map[string][]*GenericRouter)
+
 	for _, cfg := range routerConfigs {
 		routerCfg := cfg
-		
+
 		router, err := NewGenericRouter(&routerCfg)
 		if err != nil {
 			logger.Errorf("Failed to create router %s: %v", cfg.ID, err)
 			continue
 		}
-		
+
 		gr.routers[router.ID()] = router
-		logger.Infof("Loaded router: %s (type: %s, enabled: %v)", 
+		for _, eventName := range router.config.Triggers.Events {
+			gr.eventToRouters[eventName] = append(gr.eventToRouters[eventName], router)
+		}
+
+		logger.Infof("Loaded router: %s (type: %s, enabled: %v)",
 			router.ID(), router.Type(), router.IsEnabled())
 	}
-	
-	logger.Infof("Loaded %d routers", len(gr.routers))
+
+	logger.Infof("Loaded %d routers and built event index", len(gr.routers))
 	return nil
 }
 
@@ -50,7 +57,7 @@ func (gr *GenericRegistry) LoadRouters(routerConfigs []config.RouterConfig) erro
 func (gr *GenericRegistry) GetRouter(id string) (*GenericRouter, bool) {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
-	
+
 	router, exists := gr.routers[id]
 	return router, exists
 }
@@ -59,14 +66,14 @@ func (gr *GenericRegistry) GetRouter(id string) (*GenericRouter, bool) {
 func (gr *GenericRegistry) GetActiveRouters() []*GenericRouter {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
-	
+
 	var active []*GenericRouter
 	for _, router := range gr.routers {
 		if router.IsEnabled() {
 			active = append(active, router)
 		}
 	}
-	
+
 	return active
 }
 
@@ -74,46 +81,45 @@ func (gr *GenericRegistry) GetActiveRouters() []*GenericRouter {
 func (gr *GenericRegistry) GetRoutersForEvent(eventName string) []*GenericRouter {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
-	
-	var matching []*GenericRouter
-	for _, router := range gr.routers {
-		if !router.IsEnabled() {
-			continue
-		}
-		
-		for _, triggerEvent := range router.config.Triggers.Events {
-			if triggerEvent == eventName {
-				matching = append(matching, router)
-				break
-			}
+
+	routers, exists := gr.eventToRouters[eventName]
+	if !exists {
+		return nil
+	}
+
+	// Filter out disabled routers
+	activeRouters := make([]*GenericRouter, 0, len(routers))
+	for _, router := range routers {
+		if router.IsEnabled() {
+			activeRouters = append(activeRouters, router)
 		}
 	}
-	
-	return matching
+
+	return activeRouters
 }
 
 // RouteEvent routes an event through all applicable routers
 func (gr *GenericRegistry) RouteEvent(eventName string, data *config.ExtractedData) []RoutingResult {
 	routers := gr.GetRoutersForEvent(eventName)
-	
+
 	var results []RoutingResult
 	for _, router := range routers {
 		shouldRoute, reason := router.ShouldRoute(eventName, data)
-		
+
 		result := RoutingResult{
 			RouterID: router.ID(),
 			Routed:   shouldRoute,
 			Reason:   reason,
 		}
-		
+
 		if shouldRoute {
 			destinations := router.GetDestinations(data)
 			result.Destinations = destinations
 		}
-		
+
 		results = append(results, result)
 	}
-	
+
 	return results
 }
 
@@ -129,12 +135,12 @@ type RoutingResult struct {
 func (gr *GenericRegistry) GetAllStats() map[string]GenericRouterStats {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
-	
+
 	stats := make(map[string]GenericRouterStats)
 	for id, router := range gr.routers {
 		stats[id] = router.GetStats()
 	}
-	
+
 	return stats
 }
 
@@ -142,12 +148,12 @@ func (gr *GenericRegistry) GetAllStats() map[string]GenericRouterStats {
 func (gr *GenericRegistry) EnableRouter(id string) error {
 	gr.mu.Lock()
 	defer gr.mu.Unlock()
-	
+
 	router, exists := gr.routers[id]
 	if !exists {
 		return fmt.Errorf("router not found: %s", id)
 	}
-	
+
 	router.config.Enabled = true
 	logger.Infof("Enabled router: %s", id)
 	return nil
@@ -157,12 +163,12 @@ func (gr *GenericRegistry) EnableRouter(id string) error {
 func (gr *GenericRegistry) DisableRouter(id string) error {
 	gr.mu.Lock()
 	defer gr.mu.Unlock()
-	
+
 	router, exists := gr.routers[id]
 	if !exists {
 		return fmt.Errorf("router not found: %s", id)
 	}
-	
+
 	router.config.Enabled = false
 	logger.Infof("Disabled router: %s", id)
 	return nil
@@ -172,19 +178,28 @@ func (gr *GenericRegistry) DisableRouter(id string) error {
 func (gr *GenericRegistry) ReloadRouter(cfg *config.RouterConfig) error {
 	gr.mu.Lock()
 	defer gr.mu.Unlock()
-	
+
 	if old, exists := gr.routers[cfg.ID]; exists {
 		logger.Infof("Replacing router: %s", cfg.ID)
 		delete(gr.routers, old.ID())
 	}
-	
+
 	router, err := NewGenericRouter(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to create router %s: %w", cfg.ID, err)
 	}
-	
+
 	gr.routers[router.ID()] = router
-	logger.Infof("Reloaded router: %s", cfg.ID)
+
+	// Rebuild the index
+	gr.eventToRouters = make(map[string][]*GenericRouter)
+	for _, r := range gr.routers {
+		for _, eventName := range r.config.Triggers.Events {
+			gr.eventToRouters[eventName] = append(gr.eventToRouters[eventName], r)
+		}
+	}
+
+	logger.Infof("Reloaded router: %s and rebuilt event index", cfg.ID)
 	return nil
 }
 
@@ -199,7 +214,7 @@ func (gr *GenericRegistry) Count() int {
 func (gr *GenericRegistry) CountActive() int {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
-	
+
 	count := 0
 	for _, router := range gr.routers {
 		if router.IsEnabled() {

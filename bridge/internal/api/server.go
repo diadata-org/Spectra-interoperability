@@ -155,6 +155,7 @@ func (s *Server) setupRoutes() {
 
 	// Event endpoints
 	v1.HandleFunc("/events", s.handleGetEvents).Methods("GET")
+	v1.HandleFunc("/events/names", s.handleGetEventNames).Methods("GET")
 	v1.HandleFunc("/events/{hash}", s.handleGetEvent).Methods("GET")
 
 	// Transaction endpoints
@@ -268,6 +269,7 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	endBlock := s.parseUint64Param(r, "end_block", 0)
 	limit := s.parseIntParam(r, "limit", 100)
 	offset := s.parseIntParam(r, "offset", 0)
+	eventName := r.URL.Query().Get("eventName")
 
 	// Validate parameters
 	if limit > 1000 {
@@ -275,7 +277,7 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Query events
-	events, err := s.queryEvents(startBlock, endBlock, limit, offset)
+	events, err := s.queryEvents(startBlock, endBlock, limit, offset, eventName)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to query events", err)
 		return
@@ -286,6 +288,19 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		"count":  len(events),
 		"limit":  limit,
 		"offset": offset,
+	})
+}
+
+func (s *Server) handleGetEventNames(w http.ResponseWriter, r *http.Request) {
+	eventNames, err := s.getEventNames()
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to get event names", err)
+		return
+	}
+
+	s.writeJSON(w, map[string]interface{}{
+		"eventNames": eventNames,
+		"count":      len(eventNames),
 	})
 }
 

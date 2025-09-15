@@ -1,4 +1,3 @@
-
 package router
 
 import (
@@ -14,6 +13,7 @@ func TestNewGenericRouter(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, router)
 	assert.Equal(t, "test-router", router.ID())
+	assert.NotNil(t, router.triggerEvents)
 }
 
 func TestShouldRoute_Disabled(t *testing.T) {
@@ -79,13 +79,15 @@ func TestShouldRoute_ConditionFails(t *testing.T) {
 }
 
 func TestEvaluateCondition_Operators(t *testing.T) {
-	router := &GenericRouter{}
+	cfg := &config.RouterConfig{}
+	router, _ := NewGenericRouter(cfg)
 	data := &config.ExtractedData{
 		Event: map[string]interface{}{
-			"symbol":   "ETH",
-			"price":    3000,
-			"source":   "exchange-A",
-			"tags":     []interface{}{"tag1", "tag2"},
+			"symbol":     "ETH",
+			"price":      3000,
+			"price_str":  "3000",
+			"source":     "exchange-A",
+			"tags":       []interface{}{"tag1", "tag2"},
 		},
 	}
 
@@ -94,6 +96,7 @@ func TestEvaluateCondition_Operators(t *testing.T) {
 		condition config.TriggerCondition
 		expected  bool
 	}{
+		// Standard comparisons
 		{"eq_true", config.TriggerCondition{Field: "${event.symbol}", Operator: "eq", Value: "ETH"}, true},
 		{"eq_false", config.TriggerCondition{Field: "${event.symbol}", Operator: "eq", Value: "BTC"}, false},
 		{"ne_true", config.TriggerCondition{Field: "${event.symbol}", Operator: "ne", Value: "BTC"}, true},
@@ -110,6 +113,14 @@ func TestEvaluateCondition_Operators(t *testing.T) {
 		{"contains_false", config.TriggerCondition{Field: "${event.source}", Operator: "contains", Value: "oracle"}, false},
 		{"in_true", config.TriggerCondition{Field: "${event.symbol}", Operator: "in", Value: []interface{}{"ETH", "BTC"}}, true},
 		{"in_false", config.TriggerCondition{Field: "${event.symbol}", Operator: "in", Value: []interface{}{"BTC", "XRP"}}, false},
+
+		// Type-aware numeric comparisons
+		{"eq_num_str_true", config.TriggerCondition{Field: "${event.price}", Operator: "eq", Value: "3000"}, true},
+		{"eq_num_str_false", config.TriggerCondition{Field: "${event.price}", Operator: "eq", Value: "3001"}, false},
+		{"gt_num_str_true", config.TriggerCondition{Field: "${event.price}", Operator: "gt", Value: "2000"}, true},
+		{"lt_num_str_true", config.TriggerCondition{Field: "${event.price}", Operator: "lt", Value: "4000"}, true},
+		{"eq_str_num_true", config.TriggerCondition{Field: "${event.price_str}", Operator: "eq", Value: 3000}, true},
+		{"in_num_str", config.TriggerCondition{Field: "${event.price}", Operator: "in", Value: []interface{}{"1000", 3000, "5000"}}, true},
 	}
 
 	for _, tc := range testCases {
@@ -135,14 +146,14 @@ func TestGetFieldValue(t *testing.T) {
 	val, err = router.getFieldValue("${enrichment.usd_price}", data)
 	assert.NoError(t, err)
 	assert.Equal(t, 3000, val)
-	
+
 	val, err = router.getFieldValue("${processed.deep.value}", data)
 	assert.NoError(t, err)
 	assert.Equal(t, "foo", val)
 
 	_, err = router.getFieldValue("${event.nonexistent}", data)
 	assert.Error(t, err)
-	
+
 	_, err = router.getFieldValue("event.symbol", data)
 	assert.Error(t, err)
 }
