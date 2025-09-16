@@ -1,0 +1,62 @@
+{
+  "title": "Bridge Monitoring",
+  "tags": ["bridge"],
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Events Processed",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "bridge_events_processed_total",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 0}
+    },
+    {
+      "id": 2,
+      "title": "Events Failed",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "bridge_events_failed_total",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 0}
+    },
+    {
+      "id": 3,
+      "title": "Active Workers",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "bridge_active_workers",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 0}
+    },
+    {
+      "id": 4,
+      "title": "Processing Rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "rate(bridge_events_processed_total[5m])",
+          "refId": "A"
+        }
+      ],
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 0}
+    }
+  ],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "version": 1,
+  "uid": "bridge-simple"
+}

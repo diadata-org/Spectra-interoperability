@@ -3,7 +3,7 @@ package metrics
 import (
 	"fmt"
 	"sync"
-	
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
@@ -11,43 +11,50 @@ import (
 // Metrics holds all Prometheus metrics for the bridge service
 type Metrics struct {
 	// API request metrics
-	HTTPRequestsTotal         *prometheus.CounterVec
-	HTTPRequestDuration       *prometheus.HistogramVec
-	HTTPResponseSizeBytes     *prometheus.HistogramVec
-	
+	HTTPRequestsTotal     *prometheus.CounterVec
+	HTTPRequestDuration   *prometheus.HistogramVec
+	HTTPResponseSizeBytes *prometheus.HistogramVec
+
 	// Failover metrics
-	FailoverRequestsTotal     *prometheus.CounterVec
-	FailoverProcessingTime    *prometheus.HistogramVec
-	FailoverSuccess           *prometheus.CounterVec
-	FailoverErrors            *prometheus.CounterVec
-	
+	FailoverRequestsTotal  *prometheus.CounterVec
+	FailoverProcessingTime *prometheus.HistogramVec
+	FailoverSuccess        *prometheus.CounterVec
+	FailoverErrors         *prometheus.CounterVec
+
 	// Transaction metrics
-	TransactionsSubmitted     *prometheus.CounterVec
-	TransactionConfirmations  *prometheus.CounterVec
-	TransactionFailures       *prometheus.CounterVec
-	TransactionGasUsed        *prometheus.HistogramVec
-	TransactionFees           *prometheus.HistogramVec
-	
+	TransactionsSubmitted    *prometheus.CounterVec
+	TransactionConfirmations *prometheus.CounterVec
+	TransactionFailures      *prometheus.CounterVec
+	TransactionGasUsed       *prometheus.HistogramVec
+	TransactionFees          *prometheus.HistogramVec
+
 	// Timeline metrics for Grafana dashboard
 	TimelinePhaseDuration       *prometheus.HistogramVec
 	BridgeProcessingDuration    *prometheus.HistogramVec
 	TransactionConfirmationTime *prometheus.HistogramVec
-	TotalDeliveryTime          *prometheus.HistogramVec
-	
+	TotalDeliveryTime           *prometheus.HistogramVec
+
+	BlockchainDetectionLatency *prometheus.HistogramVec // Block creation → Detection
+	QueueTime                  *prometheus.HistogramVec // Detection → Processing (Phase 2 - Phase 1)
+	ProcessingDuration         *prometheus.HistogramVec // Processing duration
+	EventsDetected             *prometheus.CounterVec   // Events detected total
+	EventsProcessed            *prometheus.CounterVec   // Events processed total
+	ActiveWorkers              prometheus.Gauge         // Currently active workers
+
 	// Intent processing metrics
-	IntentValidations         *prometheus.CounterVec
-	IntentValidationErrors    *prometheus.CounterVec
-	IntentProcessingTime      *prometheus.HistogramVec
-	
+	IntentValidations      *prometheus.CounterVec
+	IntentValidationErrors *prometheus.CounterVec
+	IntentProcessingTime   *prometheus.HistogramVec
+
 	// Chain connection metrics
-	ChainConnectionStatus     *prometheus.GaugeVec
-	ChainRPCLatency          *prometheus.HistogramVec
-	ChainRPCErrors           *prometheus.CounterVec
-	
+	ChainConnectionStatus *prometheus.GaugeVec
+	ChainRPCLatency       *prometheus.HistogramVec
+	ChainRPCErrors        *prometheus.CounterVec
+
 	// Database metrics
-	DBOperations             *prometheus.CounterVec
-	DBOperationTime          *prometheus.HistogramVec
-	DBConnectionStatus       prometheus.Gauge
+	DBOperations       *prometheus.CounterVec
+	DBOperationTime    *prometheus.HistogramVec
+	DBConnectionStatus prometheus.Gauge
 }
 
 var (
@@ -59,131 +66,160 @@ var (
 func NewMetrics() *Metrics {
 	metricsOnce.Do(func() {
 		metricsInstance = &Metrics{
-		// API request metrics
-		HTTPRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_http_requests_total",
-			Help: "Total number of HTTP requests",
-		}, []string{"method", "endpoint", "status"}),
-		HTTPRequestDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_http_request_duration_seconds",
-			Help:    "HTTP request duration in seconds",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"method", "endpoint"}),
-		HTTPResponseSizeBytes: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_http_response_size_bytes",
-			Help:    "HTTP response size in bytes",
-			Buckets: prometheus.ExponentialBuckets(100, 10, 8),
-		}, []string{"method", "endpoint"}),
-		
-		// Failover metrics
-		FailoverRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_failover_requests_total",
-			Help: "Total number of failover requests received",
-		}, []string{"source_chain", "destination_chain"}),
-		FailoverProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_failover_processing_duration_seconds",
-			Help:    "Time taken to process failover request",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"source_chain", "destination_chain"}),
-		FailoverSuccess: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_failover_success_total",
-			Help: "Total number of successful failover operations",
-		}, []string{"source_chain", "destination_chain"}),
-		FailoverErrors: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_failover_errors_total",
-			Help: "Total number of failover errors",
-		}, []string{"source_chain", "destination_chain", "error_type"}),
-		
-		// Transaction metrics
-		TransactionsSubmitted: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_transactions_submitted_total",
-			Help: "Total number of transactions submitted",
-		}, []string{"chain", "contract_type"}),
-		TransactionConfirmations: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_transaction_confirmations_total",
-			Help: "Total number of transaction confirmations",
-		}, []string{"chain", "contract_type"}),
-		TransactionFailures: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_transaction_failures_total",
-			Help: "Total number of transaction failures",
-		}, []string{"chain", "contract_type", "error_type"}),
-		TransactionGasUsed: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_transaction_gas_used",
-			Help:    "Gas used by transactions",
-			Buckets: prometheus.ExponentialBuckets(21000, 2, 10),
-		}, []string{"chain", "contract_type"}),
-		TransactionFees: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_transaction_fees_wei",
-			Help:    "Transaction fees in wei",
-			Buckets: prometheus.ExponentialBuckets(1e15, 10, 8),
-		}, []string{"chain", "contract_type"}),
-		
-		// Timeline metrics for Grafana dashboard
-		TimelinePhaseDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "oracle_bridge_timeline_phase_duration_seconds",
-			Help:    "Duration of each phase in the oracle intent lifecycle",
-			Buckets: []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600},
-		}, []string{"phase", "receiver_key"}),
-		BridgeProcessingDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_processing_duration_seconds",
-			Help:    "Time taken by the Bridge to process failover request",
-			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
-		}, []string{"chain", "destination_domain"}),
-		TransactionConfirmationTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "transaction_confirmation_duration_seconds",
-			Help:    "Time taken for transaction to be confirmed on-chain",
-			Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120},
-		}, []string{"chain", "destination_domain"}),
-		TotalDeliveryTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "hyperlane_total_delivery_time_seconds",
-			Help:    "Total time from message dispatch to final delivery",
-			Buckets: []float64{5, 10, 15, 30, 60, 120, 300, 600},
-		}, []string{"chain", "source_domain", "destination_domain", "delivery_method"}),
-		
-		// Intent processing metrics
-		IntentValidations: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_intent_validations_total",
-			Help: "Total number of intent validations",
-		}, []string{"result"}),
-		IntentValidationErrors: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_intent_validation_errors_total",
-			Help: "Total number of intent validation errors",
-		}, []string{"error_type"}),
-		IntentProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_intent_processing_duration_seconds",
-			Help:    "Time taken to process intents",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"intent_type"}),
-		
-		// Chain connection metrics
-		ChainConnectionStatus: promauto.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "bridge_chain_connection_status",
-			Help: "Chain connection status (1 = connected, 0 = disconnected)",
-		}, []string{"chain_id", "chain_name"}),
-		ChainRPCLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_chain_rpc_latency_seconds",
-			Help:    "RPC call latency by chain",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"chain_id", "method"}),
-		ChainRPCErrors: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_chain_rpc_errors_total",
-			Help: "Total number of RPC errors by chain",
-		}, []string{"chain_id", "error_type"}),
-		
-		// Database metrics
-		DBOperations: promauto.NewCounterVec(prometheus.CounterOpts{
-			Name: "bridge_db_operations_total",
-			Help: "Total number of database operations",
-		}, []string{"operation", "status"}),
-		DBOperationTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "bridge_db_operation_duration_seconds",
-			Help:    "Database operation duration",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"operation"}),
-		DBConnectionStatus: promauto.NewGauge(prometheus.GaugeOpts{
-			Name: "bridge_db_connection_status",
-			Help: "Database connection status (1 = connected, 0 = disconnected)",
-		}),
+			// API request metrics
+			HTTPRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_http_requests_total",
+				Help: "Total number of HTTP requests",
+			}, []string{"method", "endpoint", "status"}),
+			HTTPRequestDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_http_request_duration_seconds",
+				Help:    "HTTP request duration in seconds",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"method", "endpoint"}),
+			HTTPResponseSizeBytes: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_http_response_size_bytes",
+				Help:    "HTTP response size in bytes",
+				Buckets: prometheus.ExponentialBuckets(100, 10, 8),
+			}, []string{"method", "endpoint"}),
+
+			// Failover metrics
+			FailoverRequestsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_failover_requests_total",
+				Help: "Total number of failover requests received",
+			}, []string{"source_chain", "destination_chain"}),
+			FailoverProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_failover_processing_duration_seconds",
+				Help:    "Time taken to process failover request",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"source_chain", "destination_chain"}),
+			FailoverSuccess: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_failover_success_total",
+				Help: "Total number of successful failover operations",
+			}, []string{"source_chain", "destination_chain"}),
+			FailoverErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_failover_errors_total",
+				Help: "Total number of failover errors",
+			}, []string{"source_chain", "destination_chain", "error_type"}),
+
+			// Transaction metrics
+			TransactionsSubmitted: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_transactions_submitted_total",
+				Help: "Total number of transactions submitted",
+			}, []string{"chain", "contract_type"}),
+			TransactionConfirmations: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_transaction_confirmations_total",
+				Help: "Total number of transaction confirmations",
+			}, []string{"chain", "contract_type"}),
+			TransactionFailures: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_transaction_failures_total",
+				Help: "Total number of transaction failures",
+			}, []string{"chain", "contract_type", "error_type"}),
+			TransactionGasUsed: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_transaction_gas_used",
+				Help:    "Gas used by transactions",
+				Buckets: prometheus.ExponentialBuckets(21000, 2, 10),
+			}, []string{"chain", "contract_type"}),
+			TransactionFees: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_transaction_fees_wei",
+				Help:    "Transaction fees in wei",
+				Buckets: prometheus.ExponentialBuckets(1e15, 10, 8),
+			}, []string{"chain", "contract_type"}),
+
+			// Timeline metrics for Grafana dashboard
+			TimelinePhaseDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "oracle_bridge_timeline_phase_duration_seconds",
+				Help:    "Duration of each phase in the oracle intent lifecycle",
+				Buckets: []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120, 300, 600},
+			}, []string{"phase", "receiver_key"}),
+			BridgeProcessingDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_processing_duration_seconds",
+				Help:    "Time taken by the Bridge to process failover request",
+				Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+			}, []string{"chain", "destination_domain"}),
+			TransactionConfirmationTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "transaction_confirmation_duration_seconds",
+				Help:    "Time taken for transaction to be confirmed on-chain",
+				Buckets: []float64{0.5, 1, 2, 5, 10, 30, 60, 120},
+			}, []string{"chain", "destination_domain"}),
+			TotalDeliveryTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "hyperlane_total_delivery_time_seconds",
+				Help:    "Total time from message dispatch to final delivery",
+				Buckets: []float64{5, 10, 15, 30, 60, 120, 300, 600},
+			}, []string{"chain", "source_domain", "destination_domain", "delivery_method"}),
+
+			// Event workflow timing metrics
+			BlockchainDetectionLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "dia_bridge_blockchain_detection_latency_seconds",
+				Help:    "Time from blockchain event creation to bridge detection",
+				Buckets: []float64{0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0},
+			}, []string{"event_type", "contract_address"}),
+			QueueTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "dia_bridge_queue_time_seconds",
+				Help:    "Time from event detection to processing start (Phase 2 - Phase 1)",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0},
+			}, []string{"event_type", "worker_id"}),
+			ProcessingDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "dia_bridge_processing_duration_seconds",
+				Help:    "Time taken to process an event",
+				Buckets: []float64{0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0},
+			}, []string{"event_type", "worker_id"}),
+			EventsDetected: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "dia_bridge_events_detected_total",
+				Help: "Total number of events detected",
+			}, []string{"event_type", "contract_address"}),
+			EventsProcessed: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "dia_bridge_events_processed_total",
+				Help: "Total number of events processed",
+			}, []string{"event_type", "status"}),
+			ActiveWorkers: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "dia_bridge_active_workers",
+				Help: "Number of currently active event workers",
+			}),
+
+			// Intent processing metrics
+			IntentValidations: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_intent_validations_total",
+				Help: "Total number of intent validations",
+			}, []string{"result"}),
+			IntentValidationErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_intent_validation_errors_total",
+				Help: "Total number of intent validation errors",
+			}, []string{"error_type"}),
+			IntentProcessingTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_intent_processing_duration_seconds",
+				Help:    "Time taken to process intents",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"intent_type"}),
+
+			// Chain connection metrics
+			ChainConnectionStatus: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_chain_connection_status",
+				Help: "Chain connection status (1 = connected, 0 = disconnected)",
+			}, []string{"chain_id", "chain_name"}),
+			ChainRPCLatency: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_chain_rpc_latency_seconds",
+				Help:    "RPC call latency by chain",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"chain_id", "method"}),
+			ChainRPCErrors: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_chain_rpc_errors_total",
+				Help: "Total number of RPC errors by chain",
+			}, []string{"chain_id", "error_type"}),
+
+			// Database metrics
+			DBOperations: promauto.NewCounterVec(prometheus.CounterOpts{
+				Name: "bridge_db_operations_total",
+				Help: "Total number of database operations",
+			}, []string{"operation", "status"}),
+			DBOperationTime: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_db_operation_duration_seconds",
+				Help:    "Database operation duration",
+				Buckets: prometheus.DefBuckets,
+			}, []string{"operation"}),
+			DBConnectionStatus: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "bridge_db_connection_status",
+				Help: "Database connection status (1 = connected, 0 = disconnected)",
+			}),
 		}
 	})
 	return metricsInstance
@@ -204,7 +240,7 @@ func (m *Metrics) RecordFailoverRequest(sourceChain, destChain string) {
 // RecordFailoverProcessing records failover processing metrics
 func (m *Metrics) RecordFailoverProcessing(sourceChain, destChain string, duration float64, success bool, errorType string) {
 	m.FailoverProcessingTime.WithLabelValues(sourceChain, destChain).Observe(duration)
-	
+
 	if success {
 		m.FailoverSuccess.WithLabelValues(sourceChain, destChain).Inc()
 	} else {
@@ -297,4 +333,34 @@ func (m *Metrics) UpdateDBConnectionStatus(connected bool) {
 		value = 1.0
 	}
 	m.DBConnectionStatus.Set(value)
+}
+
+// RecordBlockchainDetectionLatency records the time from block creation to event detection
+func (m *Metrics) RecordBlockchainDetectionLatency(eventType, contractAddress string, latencySeconds float64) {
+	m.BlockchainDetectionLatency.WithLabelValues(eventType, contractAddress).Observe(latencySeconds)
+}
+
+// RecordQueueTime records the time from detection to processing start (Phase 2 - Phase 1)
+func (m *Metrics) RecordQueueTime(eventType, workerID string, queueTimeSeconds float64) {
+	m.QueueTime.WithLabelValues(eventType, workerID).Observe(queueTimeSeconds)
+}
+
+// RecordProcessingDuration records the time taken to process an event
+func (m *Metrics) RecordProcessingDuration(eventType, workerID string, durationSeconds float64) {
+	m.ProcessingDuration.WithLabelValues(eventType, workerID).Observe(durationSeconds)
+}
+
+// RecordEventDetected increments the events detected counter
+func (m *Metrics) RecordEventDetected(eventType, contractAddress string) {
+	m.EventsDetected.WithLabelValues(eventType, contractAddress).Inc()
+}
+
+// RecordEventProcessed increments the events processed counter
+func (m *Metrics) RecordEventProcessed(eventType, status string) {
+	m.EventsProcessed.WithLabelValues(eventType, status).Inc()
+}
+
+// SetActiveWorkers sets the current number of active workers
+func (m *Metrics) SetActiveWorkers(count float64) {
+	m.ActiveWorkers.Set(count)
 }

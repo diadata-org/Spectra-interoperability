@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
@@ -680,6 +681,7 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 		return nil, fmt.Errorf("unknown event signature: %s", eventSig.Hex())
 	}
 
+	detectionTime := time.Now()
 	event := &bridgeTypes.EventData{
 		EventName:       eventName,
 		ContractAddress: log.Address,
@@ -687,7 +689,12 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 		TxHash:          log.TxHash,
 		LogIndex:        log.Index,
 		Raw:             log,
+		DetectedAt:      detectionTime,
 	}
+
+	// Record event detection metrics
+	metricsInstance := metrics.NewMetrics()
+	metricsInstance.RecordEventDetected(eventName, log.Address.Hex())
 
 	// Parse event data based on event type
 	switch eventName {

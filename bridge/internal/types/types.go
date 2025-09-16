@@ -304,6 +304,7 @@ type EventData struct {
 	IsGapFill       bool           `json:"is_gap_fill"`
 	IsBackwardScan  bool           `json:"is_backward_scan"`
 	Priority        int            `json:"priority"`
+	DetectedAt      time.Time      `json:"detected_at"`
 }
 
 // WorkerStats represents worker pool statistics

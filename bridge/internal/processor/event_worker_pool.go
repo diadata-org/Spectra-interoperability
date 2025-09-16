@@ -2,11 +2,13 @@ package processor
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
@@ -227,35 +229,55 @@ func (ew *EventWorker) start(ctx context.Context) {
 // processEvent processes a single event
 func (ew *EventWorker) processEvent(ctx context.Context, event *types.EventData) {
 	startTime := time.Now()
-	
+
 	// Update active workers count
 	atomic.AddInt32(&ew.pool.stats.ActiveWorkers, 1)
 	defer atomic.AddInt32(&ew.pool.stats.ActiveWorkers, -1)
-	
+
 	// Update queue length
 	atomic.AddInt32(&ew.pool.stats.QueueLength, -1)
-	
+
 	// Set processing timeout
 	processCtx, cancel := context.WithTimeout(ctx, ew.pool.config.ProcessingTimeout)
 	defer cancel()
-	
-	logger.Debugf("Event worker %d processing event: %s", ew.id, event.TxHash.Hex())
-	
+
+	// Calculate latency from detection to processing start (Phase 2 - Phase 1)
+	detectionLatency := startTime.Sub(event.DetectedAt)
+	logger.Debugf("Event worker %d processing event: %s (detected %v ago)",
+		ew.id, event.TxHash.Hex(), detectionLatency)
+
+	// Record queue time metrics (Phase 2 - Phase 1)
+	metricsInstance := metrics.NewMetrics()
+	workerID := fmt.Sprintf("worker_%d", ew.id)
+	metricsInstance.RecordQueueTime(event.EventName, workerID, detectionLatency.Seconds())
+
+	// Update active workers gauge
+	metricsInstance.SetActiveWorkers(float64(ew.pool.stats.ActiveWorkers))
+
 	// Process the event
 	if err := ew.pool.processor.ProcessEvent(processCtx, event); err != nil {
-		logger.Errorf("Event worker %d failed to process event %s: %v", 
+		logger.Errorf("Event worker %d failed to process event %s: %v",
 			ew.id, event.TxHash.Hex(), err)
-		
+
 		atomic.AddUint64(&ew.eventsFailed, 1)
 		atomic.AddUint64(&ew.pool.stats.EventsFailed, 1)
+
+		// Record failed processing
+		metricsInstance.RecordEventProcessed(event.EventName, "failed")
 	} else {
-		logger.Debugf("Event worker %d completed event: %s (took %v)", 
-			ew.id, event.TxHash.Hex(), time.Since(startTime))
-		
+		processingTime := time.Since(startTime)
+		totalLatency := time.Since(event.DetectedAt)
+		logger.Debugf("Event worker %d completed event: %s (processing: %v, total: %v)",
+			ew.id, event.TxHash.Hex(), processingTime, totalLatency)
+
 		atomic.AddUint64(&ew.eventsProcessed, 1)
 		atomic.AddUint64(&ew.pool.stats.EventsProcessed, 1)
+
+		// Record successful processing metrics
+		metricsInstance.RecordProcessingDuration(event.EventName, workerID, processingTime.Seconds())
+		metricsInstance.RecordEventProcessed(event.EventName, "success")
 	}
-	
+
 	// Update timing statistics
 	processingTime := time.Since(startTime)
 	atomic.AddUint64(&ew.totalTime, uint64(processingTime))

@@ -16,30 +16,31 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/diadata.org/Spectra-interoperability/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/bridge/internal/metrics"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/bridge/internal/types"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // EventMonitor monitors blockchain events via WebSocket
 type EventMonitor struct {
-	config           *config.EventMonitorConfig
-	sourceConfig     *config.SourceConfig
-	httpClient       *ethclient.Client
-	wsClient         *ethclient.Client
-	rpcClient        *rpc.Client
-	contractABIs     map[string]abi.ABI
-	eventSignatures  map[string]common.Hash
-	eventChan        chan<- *bridgeTypes.EventData
-	errorChan        chan<- error
-	
-	mu               sync.RWMutex
-	connected        bool
-	lastBlockNumber  uint64
-	reconnectCount   int
-	subscription     ethereum.Subscription
-	
-	stopChan         chan struct{}
-	stoppedChan      chan struct{}
+	config          *config.EventMonitorConfig
+	sourceConfig    *config.SourceConfig
+	httpClient      *ethclient.Client
+	wsClient        *ethclient.Client
+	rpcClient       *rpc.Client
+	contractABIs    map[string]abi.ABI
+	eventSignatures map[string]common.Hash
+	eventChan       chan<- *bridgeTypes.EventData
+	errorChan       chan<- error
+
+	mu              sync.RWMutex
+	connected       bool
+	lastBlockNumber uint64
+	reconnectCount  int
+	subscription    ethereum.Subscription
+
+	stopChan    chan struct{}
+	stoppedChan chan struct{}
 }
 
 // NewEventMonitor creates a new event monitor
@@ -100,9 +101,9 @@ func (em *EventMonitor) Start(ctx context.Context) error {
 // Stop gracefully stops the event monitor
 func (em *EventMonitor) Stop() error {
 	logger.Info("Stopping event monitor")
-	
+
 	close(em.stopChan)
-	
+
 	// Wait for monitor to stop with timeout
 	select {
 	case <-em.stoppedChan:
@@ -185,17 +186,17 @@ func (em *EventMonitor) subscribeToEvents(ctx context.Context) error {
 		case <-ctx.Done():
 			sub.Unsubscribe()
 			return ctx.Err()
-			
+
 		case <-em.stopChan:
 			sub.Unsubscribe()
 			return nil
-			
+
 		case err := <-sub.Err():
 			em.mu.Lock()
 			em.connected = false
 			em.mu.Unlock()
 			return fmt.Errorf("subscription error: %w", err)
-			
+
 		case log := <-logs:
 			if err := em.processLog(log); err != nil {
 				logger.Errorf("Failed to process log: %v", err)
@@ -226,6 +227,21 @@ func (em *EventMonitor) processLog(log types.Log) error {
 		return fmt.Errorf("failed to parse event data: %w", err)
 	}
 
+	eventData.DetectedAt = time.Now()
+
+	// Record event detection metrics
+	metricsInstance := metrics.NewMetrics()
+	metricsInstance.RecordEventDetected(eventName, log.Address.Hex())
+
+	// Calculate blockchain detection latency if block timestamp is available
+	if eventData.Timestamp != nil && eventData.Timestamp.Uint64() > 0 {
+		blockTime := time.Unix(int64(eventData.Timestamp.Uint64()), 0)
+		detectionLatency := eventData.DetectedAt.Sub(blockTime)
+		if detectionLatency > 0 {
+			metricsInstance.RecordBlockchainDetectionLatency(eventName, log.Address.Hex(), detectionLatency.Seconds())
+		}
+	}
+
 	// Apply event filters
 	if !em.shouldProcessEvent(eventData) {
 		logger.Debugf("Event filtered out: %s", eventName)
@@ -235,7 +251,7 @@ func (em *EventMonitor) processLog(log types.Log) error {
 	// Send to event channel
 	select {
 	case em.eventChan <- eventData:
-		logger.Infof("Event detected: %s, symbol: %s, block: %d", 
+		logger.Infof("Event detected: %s, symbol: %s, block: %d",
 			eventName, eventData.Symbol, log.BlockNumber)
 	default:
 		logger.Warn("Event channel full, dropping event")
@@ -260,7 +276,7 @@ func (em *EventMonitor) parseEventData(eventName string, eventConfig map[string]
 
 	// Parse indexed and non-indexed data
 	eventMap := make(map[string]interface{})
-	
+
 	// Parse indexed parameters
 	indexedArgs := make([]abi.Argument, 0)
 	for _, input := range event.Inputs {
@@ -268,7 +284,7 @@ func (em *EventMonitor) parseEventData(eventName string, eventConfig map[string]
 			indexedArgs = append(indexedArgs, input)
 		}
 	}
-	
+
 	if len(indexedArgs) > 0 && len(log.Topics) > 1 {
 		err := abi.ParseTopicsIntoMap(eventMap, indexedArgs, log.Topics[1:])
 		if err != nil {
@@ -299,19 +315,19 @@ func (em *EventMonitor) parseEventData(eventName string, eventConfig map[string]
 	if intentHash, ok := getFieldValue(eventMap, "intentHash", "hash"); ok {
 		eventData.IntentHash = intentHash.([32]byte)
 	}
-	
+
 	if symbol, ok := getFieldValue(eventMap, "symbol", ""); ok {
 		eventData.Symbol = symbol.(string)
 	}
-	
+
 	if price, ok := getFieldValue(eventMap, "price", ""); ok {
 		eventData.Price = price.(*big.Int)
 	}
-	
+
 	if timestamp, ok := getFieldValue(eventMap, "timestamp", ""); ok {
 		eventData.Timestamp = timestamp.(*big.Int)
 	}
-	
+
 	if signer, ok := getFieldValue(eventMap, "signer", ""); ok {
 		eventData.Signer = signer.(common.Address)
 	}
@@ -359,7 +375,7 @@ func (em *EventMonitor) checkConnection() {
 		// Verify connection with a simple call
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		if _, err := em.wsClient.BlockNumber(ctx); err != nil {
 			logger.Warnf("WebSocket health check failed: %v", err)
 			em.mu.Lock()
@@ -445,7 +461,7 @@ func connectWebSocket(wsURL string) (*ethclient.Client, *rpc.Client, error) {
 	}
 
 	wsClient := ethclient.NewClient(rpcClient)
-	
+
 	// Test connection
 	if _, err := wsClient.BlockNumber(ctx); err != nil {
 		rpcClient.Close()
@@ -467,16 +483,16 @@ func calculateEventSignature(eventABI string) common.Hash {
 	start := strings.Index(eventABI, "event ") + 6
 	end := strings.Index(eventABI[start:], "(") + start
 	eventName := eventABI[start:end]
-	
+
 	// Extract parameters
 	paramsStart := strings.Index(eventABI, "(")
 	paramsEnd := strings.LastIndex(eventABI, ")")
-	params := eventABI[paramsStart:paramsEnd+1]
-	
+	params := eventABI[paramsStart : paramsEnd+1]
+
 	// Remove parameter names, keep only types
 	// This is a simplified version - in production, use proper ABI parsing
 	signature := eventName + params
-	
+
 	return common.BytesToHash(common.Hex2Bytes(common.Bytes2Hex([]byte(signature))[:8]))
 }
 
