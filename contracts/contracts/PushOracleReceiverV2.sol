@@ -23,10 +23,9 @@ import { OracleIntentUtils } from "./libs/OracleIntentUtils.sol";
  * ## Direct Interaction:
  * External services can directly call handleIntentUpdate or handleBatchIntentUpdates
  * with properly formatted and signed OracleIntent structures. The contract will verify:
- * 1. The intent has not expired
- * 2. The signer is authorized
- * 3. The intent has not been processed before
- * 4. The signature is valid
+ * 1. The signer is authorized
+ * 2. The intent has not been processed before
+ * 3. The signature is valid
  *
  * ## Funding Mechanism:
  * - The contract should hold enough balance to cover transaction fees for updates.
@@ -69,7 +68,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     bytes32 public domainSeparator;
 
     /// @notice Validation status for intent checks used to avoid logic duplication
-    enum ValidationStatus { Ok, Expired, UnauthorizedSigner, AlreadyProcessed, InvalidSignature }
+    enum ValidationStatus { Ok, UnauthorizedSigner, AlreadyProcessed, InvalidSignature }
 
     /// @notice Error thrown when an ISM is not set (zero address) is used.
     error InvalidISMAddress();
@@ -140,7 +139,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         }
     }
     
-
     /**
      * @notice Handles intent-based messages from the mailbox (internal)
      * @param _data The encoded intent data
@@ -183,6 +181,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
 
         // Ensure the new timestamp is more recent (freshness validation)
         if (updates[key].timestamp >= timestamp) {
+            emit ReceivedStaleMessage(key, timestamp, value, updates[key].timestamp);
             return; // Ignore outdated data
         }
 
@@ -200,17 +199,12 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @notice Calculates and transfers the protocol fee
      */
     function _transferProtocolFee() internal {
-        // Calculate the transaction fee based on gas used and gas price with overflow protection
-        uint256 gasPrice = tx.gasprice;
+        // Use the ProtocolFeeHook's quoteDispatch to calculate the fee
+        uint256 fee = ProtocolFeeHook(payable(paymentHook)).quoteDispatch("", "");
         
-        uint256 gasUsed = ProtocolFeeHook(payable(paymentHook)).gasUsedPerTx();
-        
-        uint256 fee = gasUsed * gasPrice;
-        
-        // Check contract balance and adjust fee if necessary
         uint256 contractBalance = address(this).balance;
         if (fee > contractBalance) {
-            fee = contractBalance; // Pay what we can afford
+            revert InsufficientGasForPayment(); 
         }
         
         // Only transfer if we have something to transfer
@@ -231,8 +225,7 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     function handleIntentUpdate(
         OracleIntentUtils.OracleIntent calldata intent
     ) external payable override validateAddress(paymentHook) nonReentrant {
-        // Process single intent with revert-on-failure behavior
-        _processIntent(intent, true);
+        _processIntent(intent);
         
         // Calculate and transfer the protocol fee
         _transferProtocolFee();
@@ -254,16 +247,13 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         // Process each intent
         for (uint256 i = 0; i < intents.length; ) {
             OracleIntentUtils.OracleIntent calldata intent = intents[i];
-            if (_processIntent(intent, false)) {
+            if (_processIntent(intent)) {
                 ++updatedCount;
             }
             unchecked { ++i; }
         }
         
-        // Only charge fee if at least one update was processed
-        if (updatedCount > 0) {
-            _transferProtocolFee();
-        }
+        _transferProtocolFee();
     }
 
     /**
@@ -355,19 +345,22 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
     }
 
     /**
-     * @notice Withdraws stuck funds to the specified address
+     * @notice Withdraws specific amount of stuck funds to the specified address
      * @dev restricted to onlyOwner
      * @param receiver The address to receive the funds.
+     * @param amount The amount to withdraw (must be <= balance)
      */
     function retrieveLostTokens(
-        address receiver
+        address receiver,
+        uint256 amount
     ) external override onlyOwner validateAddress(receiver) nonReentrant {
         uint256 balance = address(this).balance;
-        if (balance <= 0) revert NoBalanceToWithdraw();
+        if (balance == 0) revert NoBalanceToWithdraw();
+        if (amount > balance) revert InsufficientBalance();  
 
-        emit TokensRecovered(receiver, balance);
-        
-        (bool success, ) = payable(receiver).call{ value: balance }("");
+        emit TokensRecovered(receiver, amount);
+
+        (bool success, ) = payable(receiver).call{ value: amount }("");
         if (!success) revert AmountTransferFailed();
     }
     
@@ -398,22 +391,17 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         return processedIntents[_intentHash];
     }
     
-    
-    
     /**
      * @notice Unified validation for memory intents
      * @param intent The OracleIntent to validate
      * @return intentHash The calculated intent hash
      */
     function _validateIntentCommonFromMemory(OracleIntentUtils.OracleIntent memory intent) internal view returns (bytes32 intentHash) {
-         
-        
         // Verify signer is authorized
         if (!authorizedSigners[intent.signer]) revert UnauthorizedSigner();
         
         // Calculate intent hash
         intentHash =  OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
-
         
         // Check if already processed
         if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
@@ -424,8 +412,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         return intentHash;
     }
 
-
-    
     /**
      * @notice Unified oracle data update function
      * @param symbol The oracle symbol to update
@@ -495,17 +481,29 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
      * @notice Processes a single intent for batch operations
      * @param intent The OracleIntent to process
      * @return updated Whether the intent was processed and data updated
-     * @param revertOnFailure Whether to revert on failure or just return false
      */
-    function _processIntent(OracleIntentUtils.OracleIntent calldata intent, bool revertOnFailure) internal returns (bool updated) {
+    function _processIntent(OracleIntentUtils.OracleIntent calldata intent) internal returns (bool updated) {
         (ValidationStatus status, bytes32 intentHash) = _validateIntentStatus(intent);
         if (status != ValidationStatus.Ok) {
-            if (revertOnFailure) {
-                if (status == ValidationStatus.Expired) revert IntentExpired();
-                if (status == ValidationStatus.UnauthorizedSigner) revert UnauthorizedSigner();
-                if (status == ValidationStatus.AlreadyProcessed) revert IntentAlreadyProcessed();
-                revert InvalidSignature();
-            }
+            
+                // Emit rejection event for batch processing transparency
+                bytes32 hashForEvent = intentHash;
+                if (hashForEvent == bytes32(0)) {
+                    // Calculate hash for event even if validation failed
+                    hashForEvent = OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
+                }
+                
+                RejectionReason reason;
+                if (status == ValidationStatus.UnauthorizedSigner) {
+                    reason = RejectionReason.UnauthorizedSigner;
+                } else if (status == ValidationStatus.AlreadyProcessed) {
+                    reason = RejectionReason.AlreadyProcessed;
+                } else {
+                    reason = RejectionReason.InvalidSignature;
+                }
+                
+                emit IntentRejected(hashForEvent, intent.symbol, intent.signer, reason);
+            
             return false;
         }
 
@@ -514,17 +512,6 @@ contract PushOracleReceiverV2 is IPushOracleReceiverV2, Ownable, ReentrancyGuard
         return _updateOracleDataUnified(intent.symbol, intent.price, intent.timestamp, intentHash, intent.signer);
     }
     
-    /**
-     * @notice Performs the actual data update for an intent (unified wrapper)
-     * @param intent The OracleIntent containing the data
-     * @param intentHash The hash of the intent for events
-     * @return updated Whether the data was actually updated
-     */
-    
-    
-
-   
-
    /**
     * @notice Validates the status of an OracleIntent
     * @param intent The OracleIntent structure to validate

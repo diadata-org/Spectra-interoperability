@@ -34,7 +34,6 @@ contract OracleTriggerV2Test is Test {
     uint256 constant SOURCE_CHAIN_ID = 100640;
     string constant TEST_SYMBOL = "BTC";
     uint256 constant TEST_PRICE = 50000e18;
-    uint256 constant TEST_TIMESTAMP = 1710000000;
 
     function setUp() public {
         // Setup V2-specific addresses
@@ -46,14 +45,13 @@ contract OracleTriggerV2Test is Test {
         oracleTriggerV2 = new OracleTriggerV2();
         
         // Deploy intent registry
-        intentRegistry = new OracleIntentRegistry();
+        intentRegistry = new OracleIntentRegistry("OIA Oracle Intent", "1");
         
         // Setup V2-specific configuration
         vm.prank(owner);
         oracleTriggerV2.updateIntentRegistryContract(address(intentRegistry));
         
-        vm.prank(owner);
-        oracleTriggerV2.setDomainSeparator(DOMAIN_NAME, DOMAIN_VERSION, SOURCE_CHAIN_ID);
+        
         
         // Authorize oracle signer
         intentRegistry.setSignerAuthorization(oracleSigner, true);
@@ -125,16 +123,17 @@ contract OracleTriggerV2Test is Test {
         uint256 contractBalanceBefore = address(oracleTriggerV2).balance;
 
         vm.prank(owner);
-        oracleTriggerV2.retrieveLostTokens(recipient);
+        oracleTriggerV2.retrieveLostTokens(recipient, contractBalanceBefore);
 
         assertEq(recipient.balance, recipientBalanceBefore + contractBalanceBefore);
         assertEq(address(oracleTriggerV2).balance, 0);
     }
 
     function testRetrieveLostTokensUnauthorized() public {
+        vm.deal(address(oracleTriggerV2), 0.5 ether);
         vm.prank(newOwner);
         vm.expectRevert();
-        oracleTriggerV2.retrieveLostTokens(recipient);
+        oracleTriggerV2.retrieveLostTokens(recipient, 0.5 ether);
     }
 
     function testCannotAddDuplicateChain() public {
@@ -171,7 +170,7 @@ contract OracleTriggerV2Test is Test {
     }
     
     function testUpdateIntentRegistryContract() public {
-        OracleIntentRegistry newRegistry = new OracleIntentRegistry();
+        OracleIntentRegistry newRegistry = new OracleIntentRegistry("OIA Oracle Intent", "1");
         
         vm.prank(owner);
         oracleTriggerV2.updateIntentRegistryContract(address(newRegistry));
@@ -180,7 +179,7 @@ contract OracleTriggerV2Test is Test {
     }
     
     function testCannotUpdateIntentRegistryWithoutOwner() public {
-        OracleIntentRegistry newRegistry = new OracleIntentRegistry();
+        OracleIntentRegistry newRegistry = new OracleIntentRegistry("OIA Oracle Intent", "1");
         
         vm.prank(newOwner);
         vm.expectRevert();
@@ -191,41 +190,6 @@ contract OracleTriggerV2Test is Test {
         vm.prank(owner);
         vm.expectRevert(IOracleTriggerV2.InvalidAddress.selector);
         oracleTriggerV2.updateIntentRegistryContract(address(0));
-    }
-    
-    function testDomainSeparatorConfiguration() public view {
-        bytes32 expectedDomain = OracleIntentUtils.createDomainSeparator(
-            DOMAIN_NAME,
-            DOMAIN_VERSION,
-            SOURCE_CHAIN_ID,
-            address(oracleTriggerV2)
-        );
-        
-        assertEq(oracleTriggerV2.domainSeparator(), expectedDomain);
-    }
-    
-    function testSetDomainSeparator() public {
-        string memory newDomainName = "New Domain";
-        string memory newDomainVersion = "2.0";
-        uint256 newChainId = 42;
-        
-        vm.expectEmit(true, false, false, true, address(oracleTriggerV2));
-        emit IOracleTriggerV2.DomainSeparatorUpdated(
-            OracleIntentUtils.createDomainSeparator(newDomainName, newDomainVersion, newChainId, address(oracleTriggerV2)),
-            newDomainName,
-            newDomainVersion,
-            newChainId,
-            address(oracleTriggerV2)
-        );
-        
-        vm.prank(owner);
-        oracleTriggerV2.setDomainSeparator(newDomainName, newDomainVersion, newChainId);
-    }
-    
-    function testCannotSetDomainSeparatorWithoutOwner() public {
-        vm.prank(newOwner);
-        vm.expectRevert();
-        oracleTriggerV2.setDomainSeparator("Test", "1.0", 1);
     }
     
 
@@ -401,7 +365,7 @@ contract OracleTriggerV2Test is Test {
         
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.AmountTransferFailed.selector));
-        oracleTriggerV2.retrieveLostTokens(address(rejector));
+        oracleTriggerV2.retrieveLostTokens(address(rejector), 1 ether);
     }
     
     function testRetrieveLostTokensNoBalance() public {
@@ -411,7 +375,16 @@ contract OracleTriggerV2Test is Test {
         
         vm.prank(owner);
         vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.NoBalanceToWithdraw.selector));
-        oracleTriggerV2.retrieveLostTokens(recipient);
+        oracleTriggerV2.retrieveLostTokens(recipient, 1 ether);
+    }
+    
+    function testRetrieveLostTokensInsufficientBalance() public {
+        // Test when requested amount exceeds contract balance
+        vm.deal(address(oracleTriggerV2), 0.5 ether);
+        
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(IOracleTriggerV2.InsufficientBalance.selector));
+        oracleTriggerV2.retrieveLostTokens(recipient, 1 ether); // Request more than available
     }
     
     function testValidateAddressZeroAddressChecks() public {
@@ -502,7 +475,7 @@ contract OracleTriggerV2Test is Test {
             expiry: block.timestamp + 3600,
             symbol: "BTC",
             price: TEST_PRICE + 1000e18,
-            timestamp: TEST_TIMESTAMP - 1000, // Older timestamp
+            timestamp: block.timestamp, // Current timestamp
             source: "DIA",
             signature: new bytes(65),
             signer: address(0)
@@ -583,7 +556,7 @@ contract OracleTriggerV2Test is Test {
             expiry: block.timestamp + 3600,
             symbol: symbol,
             price: TEST_PRICE,
-            timestamp: TEST_TIMESTAMP,
+            timestamp: block.timestamp,
             source: "DIA",
             signature: new bytes(65),
             signer: address(0)
@@ -614,7 +587,7 @@ contract OracleTriggerV2Test is Test {
 
 // Mock contracts for testing edge cases
 contract MockInvalidIntentRegistry {
-    uint256 public returnType = 0; // 0=empty symbol, 1=zero price, 2=zero timestamp, 3=invalid signer, 4=empty signature
+    uint256 public returnType = 0; // 0=empty symbol, 1=zero price, 2=zero timestamp, 3=invalid signer, 4=empty signature, 5=future timestamp
     
     function setReturnType(uint256 _type) external {
         returnType = _type;
@@ -628,6 +601,14 @@ contract MockInvalidIntentRegistry {
         return bytes32(uint256(1)); // Non-zero hash
     }
     
+    function getLatestIntentByType(string calldata, string calldata) external view returns (OracleIntentUtils.OracleIntent memory) {
+        return this.getIntent(bytes32(uint256(1))); // Reuse the getIntent logic
+    }
+    
+    function getDomainSeparator() external pure returns (bytes32) {
+        return keccak256("MockDomainSeparator"); // Mock domain separator
+    }
+    
     function getIntent(bytes32) external view returns (OracleIntentUtils.OracleIntent memory) {
         if (returnType == 0) {
             // Empty symbol
@@ -639,7 +620,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "", // Empty symbol to trigger error
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(1)
@@ -654,7 +635,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 0, // Zero price to trigger error
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(1)
@@ -684,7 +665,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(0) // Invalid signer to trigger error
@@ -699,9 +680,24 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: "", // Empty signature to trigger error
+                signer: address(1)
+            });
+        } else if (returnType == 5) {
+            // Future timestamp, should be rejected by registry
+            return OracleIntentUtils.OracleIntent({
+                intentType: "OracleUpdate",
+                version: "1.0.0", 
+                chainId: 100640,
+                nonce: 1,
+                expiry: block.timestamp + 3600,
+                symbol: "BTC",
+                price: 50000e18,
+                timestamp: block.timestamp + 1000, // Future timestamp to trigger error
+                source: "DIA",
+                signature: hex"1234",
                 signer: address(1)
             });
         } else {
@@ -714,7 +710,7 @@ contract MockInvalidIntentRegistry {
                 expiry: block.timestamp + 3600,
                 symbol: "BTC",
                 price: 50000e18,
-                timestamp: 1710000000,
+                timestamp: block.timestamp,
                 source: "DIA",
                 signature: hex"1234",
                 signer: address(1)
@@ -729,30 +725,3 @@ contract RejectingReceiver {
     }
 }
 
-// Test contract that extends OracleTriggerV2 to allow forcing zero domain separator
-contract TestOracleTriggerV2WithMockDomain is OracleTriggerV2 {
-    
-    function initializeAsOwner(address _owner) external {
-        _grantRole(DEFAULT_ADMIN_ROLE, _owner);
-        _grantRole(OWNER_ROLE, _owner);
-    }
-    
-    // Function that forces the domain separator check to trigger with bytes32(0)
-    function setDomainSeparatorForceZero() external onlyRole(OWNER_ROLE) {
-        bytes32 newDomainSeparator = bytes32(0); // Force zero value
-        
-        // This is the exact same check as in the original contract
-        if (newDomainSeparator == bytes32(0)) {
-            revert DomainSeparatorZero();
-        }
-
-        domainSeparator = newDomainSeparator;
-        emit DomainSeparatorUpdated(
-            domainSeparator,
-            "forced",
-            "zero",
-            0,
-            address(this)
-        );
-    }
-}

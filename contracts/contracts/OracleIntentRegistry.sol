@@ -16,11 +16,13 @@ contract OracleIntentRegistry {
     // Custom errors for gas-efficient reverts
     error NotOwner();
     error NotAuthorized();
-    error SignerNotAuthorized();
+    error SignerNotAuthorized(address signer);
     error IntentAlreadyProcessed();
     error InvalidSignature();
     error NoIntentForSymbol();
     error IntentNotFound();
+    error IntentExpired();
+    error InvalidTimestamp(uint256 timestamp, uint256 blockTimestamp);
     error ZeroAddress();
     
     // Note: Batch uses OracleIntentUtils.OracleIntent directly to avoid duplication
@@ -38,8 +40,20 @@ contract OracleIntentRegistry {
     /// @notice Mapping to track processed intents to prevent replay
     mapping(bytes32 => bool) public processedIntents;
     
-    ///@notice EIP-712 domain separator
-    bytes32 private immutable domainSeparator;
+    /// @notice EIP-712 domain separator
+    bytes32 private immutable CACHED_DOMAIN_SEPARATOR;
+
+    /// @notice Cached chain ID in case of fork
+    uint256 private immutable CACHED_CHAIN_ID;
+
+    ///@notice Cached contract address in case of fork
+    address private immutable CACHED_SELF_ADDRESS;
+ 
+    /// @notice EIP-712 domain name
+    string private  _name;
+
+    /// @notice EIP-712 domain version
+    string private  _version;
     
     /** 
         * @notice Event when a new intent is registered
@@ -71,6 +85,32 @@ contract OracleIntentRegistry {
      */
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
+    /**
+     * @notice Enumeration of possible intent rejection reasons
+     * @dev Used in IntentRejected event for gas efficiency and type safety
+     */
+    enum RejectionReason {
+        Expired,              
+        InvalidTimestamp,     
+        UnauthorizedSigner,  
+        AlreadyProcessed,     
+        InvalidSignature 
+    }
+
+    /**
+     * @notice Event when an intent is rejected during processing
+     * @param intentHash The hash of the rejected intent
+     * @param symbol The symbol of the intent
+     * @param signer The signer of the intent
+     * @param reason The reason for rejection (enum value for gas efficiency)
+     */
+    event IntentRejected(
+        bytes32 indexed intentHash, 
+        string indexed symbol, 
+        address indexed signer, 
+        RejectionReason reason
+    );
+
     /// @notice Contract owner
     address public owner;
     
@@ -81,18 +121,51 @@ contract OracleIntentRegistry {
     }
  
     /// @notice Contract  constructor
-    constructor() {
+    /// @param domainName The EIP-712 domain name
+    /// @param domainVersion The EIP-712 domain version
+      constructor(string memory domainName, string memory domainVersion) {
         owner = msg.sender;
         authorizedSigners[msg.sender] = true;
-        
+        _name = domainName;
+        _version = domainVersion;
+        CACHED_CHAIN_ID = block.chainid;
+        CACHED_SELF_ADDRESS = address(this);
+
         // Create the EIP-712 domain separator using shared library
-        domainSeparator = OracleIntentUtils.createDomainSeparator(
-            "DIA Oracle Intent",
-            "1",
+        CACHED_DOMAIN_SEPARATOR = OracleIntentUtils.createDomainSeparator(
+            domainName,
+            domainVersion,
             block.chainid,
             address(this)
         );
     }
+
+    /**
+     @notice Gets the EIP-712 domain separator, optimized for gas
+     @return domain separator for the current chain.
+     */
+    function domainSeparator() internal view returns (bytes32) {
+        if (address(this) == CACHED_SELF_ADDRESS && block.chainid == CACHED_CHAIN_ID) {
+            return CACHED_DOMAIN_SEPARATOR;
+        } else {
+            return _buildDomainSeparator();
+        }
+    }
+
+    /**
+    @notice Builds the domain separator if chain ID has changed
+    @return calculate domain separator
+     */
+    function _buildDomainSeparator() private view returns (bytes32) {
+       return  OracleIntentUtils.createDomainSeparator(
+            _name,
+            _version,
+            block.chainid,
+            address(this)
+        );
+    }
+
+
     
     /**
      * @dev Registers a new oracle intent with EIP-712 signature
@@ -122,9 +195,19 @@ contract OracleIntentRegistry {
         bytes calldata signature,
         address signer
     ) external {
-        
+
+        // Check if the intent has expired
+        if (block.timestamp > expiry) {
+            revert IntentExpired();
+        }
+
+        // Validate timestamp is not in the future to prevent DOS attacks
+        if (timestamp > block.timestamp) {
+            revert InvalidTimestamp(timestamp, block.timestamp);
+        }
+
         // Verify the signer is authorized
-        if (!authorizedSigners[signer]) revert SignerNotAuthorized();
+        if (!authorizedSigners[signer]) revert SignerNotAuthorized(signer);
         
         // Create intent struct using shared library
         OracleIntentUtils.OracleIntent memory intent = OracleIntentUtils.OracleIntent({
@@ -141,7 +224,7 @@ contract OracleIntentRegistry {
             signer: signer
         });
         
-        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, domainSeparator);
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(intent, domainSeparator());
         
         // Check if this intent has already been processed
         if (processedIntents[intentHash]) revert IntentAlreadyProcessed();
@@ -154,7 +237,7 @@ contract OracleIntentRegistry {
         processedIntents[intentHash] = true;
         intents[intentHash] = intent;
         
-      
+       
         
         // Update latest intent by type and symbol (new functionality)
         bytes32 compositeKey = getCompositeKey(intentType, symbol);
@@ -175,53 +258,80 @@ contract OracleIntentRegistry {
         if (intentsData.length == 0) revert IntentNotFound();
         
         uint256 successCount = 0;
+        bytes32 domainSep = domainSeparator();
         
         for (uint256 i = 0; i < intentsData.length; i++) {
-            OracleIntentUtils.OracleIntent calldata data = intentsData[i];
-            bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, domainSeparator);
-            
-            if (block.timestamp > data.expiry) {
-                continue;
+            if (_processIntent(intentsData[i], domainSep)) {
+                ++successCount;
             }
-            if (!authorizedSigners[data.signer]) {
-                continue;
-            }
-            if (processedIntents[intentHash]) {
-                continue;
-            }
-            if (OracleIntentUtils.recoverSigner(intentHash, data.signature) != data.signer) {
-                continue;
-            }
-            
-            processedIntents[intentHash] = true;
-            intents[intentHash] = OracleIntentUtils.OracleIntent({
-                intentType: data.intentType,
-                version: data.version,
-                chainId: data.chainId,
-                nonce: data.nonce,
-                expiry: data.expiry,
-                symbol: data.symbol,
-                price: data.price,
-                timestamp: data.timestamp,
-                source: data.source,
-                signature: data.signature,
-                signer: data.signer
-            });
-            
-            
-            // Update latest intent by type and symbol 
-            bytes32 compositeKey = getCompositeKey(data.intentType, data.symbol);
-            bytes32 currentLatestByTypeHash = latestIntentByTypeAndSymbol[compositeKey];
-            if (currentLatestByTypeHash == bytes32(0) || intents[currentLatestByTypeHash].timestamp < data.timestamp) {
-                latestIntentByTypeAndSymbol[compositeKey] = intentHash;
-            }
-            
-            emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
-            ++successCount;
         }
         
-        // Emit batch event
         emit BatchIntentsRegistered(successCount);
+    }
+
+    /**
+     * @notice Internal function to process a single intent
+     * @dev Processes a single intent, returns true if successful
+     * @param data The intent data to process
+     * @param domainSep The cached domain separator
+     * @return success Whether the intent was successfully processed
+     */
+    function _processIntent(
+        OracleIntentUtils.OracleIntent calldata data,
+        bytes32 domainSep
+    ) private returns (bool success) {
+        bytes32 intentHash = OracleIntentUtils.calculateIntentHash(data, domainSep);
+
+        if (block.timestamp > data.expiry) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.Expired);
+            return false;
+        }
+        
+        if (data.timestamp > block.timestamp) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.InvalidTimestamp);
+            return false;
+        }
+        
+        if (!authorizedSigners[data.signer]) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.UnauthorizedSigner);
+            return false;
+        }
+        
+        if (processedIntents[intentHash]) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.AlreadyProcessed);
+            return false;
+        }
+        
+        address recoveredSigner = OracleIntentUtils.recoverSigner(intentHash, data.signature);
+        if (recoveredSigner != data.signer) {
+            emit IntentRejected(intentHash, data.symbol, data.signer, RejectionReason.InvalidSignature);
+            return false;
+        }
+         
+        _storeAndUpdateIntentCalldata(intentHash, data);
+        return true;
+    }
+
+    /**
+     * @notice Internal function to store intent and update latest mapping
+     * @dev Stores the intent and updates the latest intent by type and symbol mapping
+     * @param intentHash The hash of the intent
+     * @param data The intent data to store
+     */
+    function _storeAndUpdateIntentCalldata(
+        bytes32 intentHash,
+        OracleIntentUtils.OracleIntent calldata data
+    ) private {
+        processedIntents[intentHash] = true;
+        intents[intentHash] = data;
+        
+        bytes32 compositeKey = getCompositeKey(data.intentType, data.symbol);
+        bytes32 currentLatestByTypeHash = latestIntentByTypeAndSymbol[compositeKey];
+        if (currentLatestByTypeHash == bytes32(0) || intents[currentLatestByTypeHash].timestamp < data.timestamp) {
+            latestIntentByTypeAndSymbol[compositeKey] = intentHash;
+        }
+        
+        emit IntentRegistered(intentHash, data.symbol, data.price, data.timestamp, data.signer);
     }
     
 
@@ -244,6 +354,7 @@ contract OracleIntentRegistry {
      * @notice Only the contract owner can authorize or deauthorize signers
      */
     function setSignerAuthorization(address signer, bool status) external onlyOwner {
+        if (signer == address(0)) revert ZeroAddress();
         authorizedSigners[signer] = status;
         emit SignerAuthorized(signer, status);
     }
@@ -267,7 +378,7 @@ contract OracleIntentRegistry {
      * @return The domain separator used for EIP-712 signatures
      */
     function getDomainSeparator() external view returns (bytes32) {
-        return domainSeparator;
+        return domainSeparator();
     }
     
     /**
@@ -286,6 +397,7 @@ contract OracleIntentRegistry {
      * @param intentType The type of intent to query
      * @param symbol The symbol to query
      * @return intentHash The hash of the latest intent, or bytes32(0) if none exists
+     * @dev WARNING: This function does not validate signer authorization. Use getLatestIntentByType for security-critical applications.
      */
     function getLatestIntentHashByType(string calldata intentType, string calldata symbol) 
         external view returns (bytes32 intentHash) {
@@ -298,6 +410,7 @@ contract OracleIntentRegistry {
      * @param intentType The type of intent to query
      * @param symbol The symbol to query
      * @return intent The latest intent details
+     * @dev Reverts if the latest intent is from an unauthorized signer
      */
     function getLatestIntentByType(string calldata intentType, string calldata symbol) 
         external view returns (OracleIntentUtils.OracleIntent memory intent) {
@@ -306,6 +419,10 @@ contract OracleIntentRegistry {
         
         if (intentHash == bytes32(0)) revert NoIntentForSymbol();
         if (intents[intentHash].timestamp == 0) revert IntentNotFound();
+        
+        // Validate that the signer is still authorized
+        address intentSigner = intents[intentHash].signer;
+        if (!authorizedSigners[intentSigner]) revert SignerNotAuthorized(intentSigner);
         
         return intents[intentHash];
     }

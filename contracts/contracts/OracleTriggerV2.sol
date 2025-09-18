@@ -30,15 +30,13 @@ contract OracleTriggerV2 is
     /// @notice Role identifier for contract owners.
     bytes32 public constant OWNER_ROLE = keccak256("OWNER_ROLE");
 
-    /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestReceipent.
+    /// @notice Role identifier for Dispatch function callers, i.e Feeder Service and OracleRequestRecipient.
     bytes32 public constant DISPATCHER_ROLE = keccak256("DISPATCHER_ROLE");
 
     
     /// @notice Address of the OracleIntentRegistry contract.
     address public intentRegistryContract;
     
-    /// @notice EIP-712 domain separator for signature validation
-    bytes32 public domainSeparator;
 
     /// @notice Ensures that the provided address is not a zero address.
     modifier validateAddress(address _address) {
@@ -119,37 +117,7 @@ contract OracleTriggerV2 is
         emit IntentRegistryContractUpdated(newRegistry);
     }
     
-    /// @notice Sets the EIP-712 domain separator for signature validation
-    /// @param domainName The domain name for EIP-712
-    /// @param domainVersion The domain version for EIP-712  
-    /// @param sourceChainId The source chain ID for the domain
-    /// @dev CRITICAL: This domain separator must match exactly with PushOracleReceiverV2's immutable domain separator
-    /// @dev for signature validation to work correctly across the system
-    function setDomainSeparator(
-        string calldata domainName,
-        string calldata domainVersion,
-        uint256 sourceChainId
-    ) external onlyRole(OWNER_ROLE) {
-        bytes32 newDomainSeparator = OracleIntentUtils.createDomainSeparator(
-            domainName,
-            domainVersion,
-            sourceChainId,
-            address(this)
-        );
-        
-        if (newDomainSeparator == bytes32(0)) {
-            revert DomainSeparatorZero();
-        }
 
-        domainSeparator = newDomainSeparator;
-        emit DomainSeparatorUpdated(
-            domainSeparator,
-            domainName,
-            domainVersion,
-            sourceChainId,
-            address(this)
-        );
-    }
 
     /** @dev Fetches the latest intent from the registry for the given symbol
      * @param _intentType The type of intent to fetch (e.g., "OracleUpdate")
@@ -166,10 +134,12 @@ contract OracleTriggerV2 is
         
         IOracleIntentRegistry registryContract = IOracleIntentRegistry(registry);
 
-        intentHash = registryContract.getLatestIntentHashByType(_intentType, _key);
-        if (intentHash == bytes32(0)) revert RegistryUnavailable(_intentType, _key);
-
-        intent = registryContract.getIntent(intentHash);
+        try registryContract.getLatestIntentByType(_intentType, _key) returns (OracleIntentUtils.OracleIntent memory _intent) {
+            intent = _intent;
+            intentHash = OracleIntentUtils.calculateIntentHash(intent, registryContract.getDomainSeparator());
+        } catch {
+            revert RegistryUnavailable(_intentType, _key);
+        }
         
         // Validate basic intent data
         if (bytes(intent.symbol).length == 0) revert IntentDataInvalid(_key, "Empty symbol");
@@ -280,16 +250,19 @@ contract OracleTriggerV2 is
 
     /// @notice Retrieves lost tokens
     /// @param receiver The address of the receiver
+    /// @param amount The amount to withdraw (must be <= balance)
     function retrieveLostTokens(
-        address receiver
+        address receiver,
+        uint256 amount
     ) external onlyRole(OWNER_ROLE) validateAddress(receiver) {
         uint256 balance = address(this).balance;
-        if (balance <= 0) revert NoBalanceToWithdraw();
+        if (balance == 0) revert NoBalanceToWithdraw();
+        if (amount > balance) revert InsufficientBalance();
 
-        (bool success, ) = payable(receiver).call{ value: balance }("");
+        (bool success, ) = payable(receiver).call{ value: amount }("");
         if (!success) revert AmountTransferFailed();
 
-        emit TokensRecovered(receiver, balance);
+        emit TokensRecovered(receiver, amount);
     }
 
    /**
