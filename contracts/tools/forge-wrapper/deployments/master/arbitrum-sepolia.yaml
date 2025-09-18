@@ -1,0 +1,16 @@
+current:
+  PushOracleReceiverV2:
+    alias: PushOracleReceiverV2
+    address: "0x426af01c0BecfDc148F96B865a803b33fC3D207e"
+    txHash: "0x4a779b7089ad17fbfbf7fd49725e07de1c979195a56b7489db5029377412db60"
+    deployedAt: 2025-09-18T13:42:47.872Z
+    artifact: contracts/PushOracleReceiverV2.sol:PushOracleReceiverV2
+    constructorArgs:
+      - DIA Oracle
+      - "1.0"
+      - "100640"
+      - "0x8A2782BE5Cc10285D1C704BBf376767d46541762"
+    deployer:
+      alias: h
+      address: "0x08C2E77E84e4ceC6F09e9E6ba5cE451c464d85D1"
+history: []

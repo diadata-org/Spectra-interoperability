@@ -1,0 +1,25 @@
+{
+  "name": "forge-wrapper",
+  "version": "0.1.0",
+  "description": "CLI wrapper around forge for Spectra deployments",
+  "private": true,
+  "bin": {
+    "forge-wrapper": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "prompts": "^2.4.2",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  }
+}

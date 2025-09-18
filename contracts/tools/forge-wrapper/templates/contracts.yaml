@@ -1,0 +1,13 @@
+templates:
+  OracleIntentRegistry:
+    artifact: contracts/OracleIntentRegistry.sol:OracleIntentRegistry
+    constructorSignature: constructor(string,string)
+    constructorArgs:
+      - "DIA Oracle"
+      - "1.0"
+  PushOracleReceiverV2:
+    artifact: contracts/PushOracleReceiverV2.sol:PushOracleReceiverV2
+    constructorSignature: constructor(string,string,uint256,address)
+    constructorArgs:
+      - "DIA Oracle"
+      - "1.0"

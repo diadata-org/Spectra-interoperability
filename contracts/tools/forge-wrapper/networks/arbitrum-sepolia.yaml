@@ -1,0 +1,8 @@
+name: arbitrum-sepolia
+chain_id: 421614
+rpc_url: https://arbitrum-sepolia-rpc.publicnode.com
+accounts:
+  deployer:
+    type: alias
+    name: deployer
+default_contracts: {}

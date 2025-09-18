@@ -1,0 +1,13 @@
+name: example
+chain_id: 1337
+rpc_url: http://localhost:8545
+accounts:
+  deployer:
+    type: alias
+    name: deployer
+  admin:
+    type: file
+    path: keys/master/admin.key
+default_contracts:
+  oracleIntentRegistry: contracts/contracts/OracleIntentRegistry.sol:OracleIntentRegistry
+  oracleTriggerV2: contracts/contracts/OracleTriggerV2.sol:OracleTriggerV2
