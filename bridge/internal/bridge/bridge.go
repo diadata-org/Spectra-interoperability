@@ -574,6 +574,29 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	logger.Infof("Successfully updated %s on chain %d, gas used: %d",
 		identifier, updateReq.DestinationChain.ChainID, receipt.GasUsed)
 
+	// Call router's OnRouted callback to update time tracking
+	if updateReq.RouterID != "" {
+		if router := b.routerRegistry.GetRouterByID(updateReq.RouterID); router != nil {
+			eventName := ""
+			var extractedData *config.ExtractedData
+
+			if updateReq.Event != nil {
+				eventName = updateReq.Event.EventName
+				// Reconstruct extracted data for the callback
+				extractedData = &config.ExtractedData{
+					Event: make(map[string]interface{}),
+				}
+				if updateReq.Intent != nil {
+					extractedData.Enrichment = map[string]interface{}{
+						"fullIntent": updateReq.Intent,
+					}
+				}
+			}
+
+			router.OnRouted(eventName, extractedData)
+		}
+	}
+
 	return nil
 }
 

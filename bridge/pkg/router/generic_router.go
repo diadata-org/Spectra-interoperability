@@ -25,8 +25,9 @@ type GenericRouter struct {
 	privateKey    *ecdsa.PrivateKey
 	address       common.Address
 
-	mu    sync.RWMutex
-	stats GenericRouterStats
+	mu                sync.RWMutex
+	stats             GenericRouterStats
+	destinationTimes  map[string]time.Time // Tracks last update time for each destination (key: "chainID-contract-symbol")
 }
 
 // GenericRouterStats tracks router statistics
@@ -45,8 +46,9 @@ func NewGenericRouter(cfg *config.RouterConfig) (*GenericRouter, error) {
 	}
 
 	router := &GenericRouter{
-		config:        cfg,
-		triggerEvents: triggerEvents,
+		config:           cfg,
+		triggerEvents:    triggerEvents,
+		destinationTimes: make(map[string]time.Time),
 	}
 
 	if cfg.PrivateKey != "" {
@@ -269,6 +271,15 @@ func (gr *GenericRouter) GetDestinations(data *config.ExtractedData) []config.Ro
 			}
 		}
 
+		// Check time threshold if configured
+		if dest.TimeThreshold.Duration() > 0 {
+			if !gr.checkTimeThreshold(dest, data) {
+				logger.Debugf("Time threshold not met for destination %s, skipping", dest.Contract)
+				continue
+			}
+			logger.Debugf("Time threshold met for destination %s, proceeding", dest.Contract)
+		}
+
 		destinations = append(destinations, dest)
 	}
 
@@ -278,6 +289,74 @@ func (gr *GenericRouter) GetDestinations(data *config.ExtractedData) []config.Ro
 // evaluateDestinationCondition evaluates a destination-specific condition
 func (gr *GenericRouter) evaluateDestinationCondition(condition string, data *config.ExtractedData) bool {
 	return strings.Contains(strings.ToLower(condition), "true") || condition == ""
+}
+
+// checkTimeThreshold checks if enough time has passed since the last update to this destination
+func (gr *GenericRouter) checkTimeThreshold(dest config.RouterDestination, data *config.ExtractedData) bool {
+	// Extract symbol from event data for tracking
+	symbol := gr.getSymbolFromData(data)
+
+	// Create unique key for this destination + symbol
+	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
+
+	gr.mu.RLock()
+	lastUpdate, exists := gr.destinationTimes[destKey]
+	gr.mu.RUnlock()
+
+	if !exists {
+		// First time sending to this destination, allow it
+		return true
+	}
+
+	// Check if enough time has passed
+	timeSinceLastUpdate := time.Since(lastUpdate)
+	thresholdMet := timeSinceLastUpdate >= dest.TimeThreshold.Duration()
+
+	if thresholdMet {
+		logger.Debugf("Time threshold met for destination %s: %v >= %v",
+			destKey, timeSinceLastUpdate, dest.TimeThreshold.Duration())
+	} else {
+		logger.Debugf("Time threshold not met for destination %s: %v < %v",
+			destKey, timeSinceLastUpdate, dest.TimeThreshold.Duration())
+	}
+
+	return thresholdMet
+}
+
+// getSymbolFromData extracts symbol from event or enrichment data
+func (gr *GenericRouter) getSymbolFromData(data *config.ExtractedData) string {
+	// Try to get symbol from event data first
+	if symbol, ok := data.Event["symbol"].(string); ok && symbol != "" {
+		return symbol
+	}
+
+	// Try to get symbol from enrichment data
+	if data.Enrichment != nil {
+		if symbol, ok := data.Enrichment["symbol"].(string); ok && symbol != "" {
+			return symbol
+		}
+
+		// Try nested structure (e.g., fullIntent.symbol)
+		if fullIntent, ok := data.Enrichment["fullIntent"].(map[string]interface{}); ok {
+			if symbol, ok := fullIntent["symbol"].(string); ok && symbol != "" {
+				return symbol
+			}
+		}
+	}
+
+	// Fallback to "unknown" if no symbol found
+	return "unknown"
+}
+
+// UpdateDestinationTime updates the last update time for a destination
+func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, symbol string) {
+	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
+
+	gr.mu.Lock()
+	gr.destinationTimes[destKey] = time.Now()
+	gr.mu.Unlock()
+
+	logger.Debugf("Updated destination time for %s", destKey)
 }
 
 // GetPrivateKey returns the router's private key
@@ -320,4 +399,12 @@ func (gr *GenericRouter) ProcessingConfig() *config.ProcessingConfig {
 // OnRouted is called after an event is successfully routed
 func (gr *GenericRouter) OnRouted(eventName string, data *config.ExtractedData) {
 	logger.Debugf("Router %s successfully routed event %s", gr.config.ID, eventName)
+
+	// Update destination times for all destinations that were used
+	symbol := gr.getSymbolFromData(data)
+	destinations := gr.GetDestinations(data)
+
+	for _, dest := range destinations {
+		gr.UpdateDestinationTime(dest, symbol)
+	}
 }

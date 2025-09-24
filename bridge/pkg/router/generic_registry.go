@@ -77,6 +77,20 @@ func (gr *GenericRegistry) GetActiveRouters() []*GenericRouter {
 	return active
 }
 
+// GetRouterByID returns a router by its ID
+func (gr *GenericRegistry) GetRouterByID(routerID string) GenericRouterInterface {
+	gr.mu.RLock()
+	defer gr.mu.RUnlock()
+
+	for _, router := range gr.routers {
+		if router.ID() == routerID {
+			return router
+		}
+	}
+
+	return nil
+}
+
 // GetRoutersForEvent returns routers that handle a specific event
 func (gr *GenericRegistry) GetRoutersForEvent(eventName string) []*GenericRouter {
 	gr.mu.RLock()

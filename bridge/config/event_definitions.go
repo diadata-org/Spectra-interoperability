@@ -63,10 +63,11 @@ type Transformation struct {
 
 // RouterDestination represents where to route the event
 type RouterDestination struct {
-	ChainID   int64                   `json:"chain_id"`
-	Contract  string                  `json:"contract"`
-	Method    DestinationMethodConfig `json:"method"`
-	Condition string                  `json:"condition"`
+	ChainID       int64                   `json:"chain_id"`
+	Contract      string                  `json:"contract"`
+	Method        DestinationMethodConfig `json:"method"`
+	Condition     string                  `json:"condition"`
+	TimeThreshold Duration                `json:"time_threshold,omitempty"` // Minimum time between updates for this destination
 }
 
 // DestinationMethodConfig defines a contract method call for generic routing
