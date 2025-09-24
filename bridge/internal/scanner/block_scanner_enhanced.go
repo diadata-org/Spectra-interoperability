@@ -21,6 +21,62 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
+type EventCache struct {
+	sigToName map[common.Hash]string
+	sigToDef  map[common.Hash]*config.EventDefinition
+	mu        sync.RWMutex
+}
+
+func newEventCache(definitions map[string]*config.EventDefinition) *EventCache {
+	cache := &EventCache{
+		sigToName: make(map[common.Hash]string),
+		sigToDef:  make(map[common.Hash]*config.EventDefinition),
+	}
+
+	for eventName, eventDef := range definitions {
+		sig := cache.calculateSignature(eventDef.ABI)
+		if sig != (common.Hash{}) {
+			if _, exists := cache.sigToName[sig]; !exists {
+				cache.sigToName[sig] = eventName
+				cache.sigToDef[sig] = eventDef
+			}
+		}
+	}
+
+	return cache
+}
+
+func (c *EventCache) findEvent(eventSig common.Hash) (string, *config.EventDefinition) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if eventName, exists := c.sigToName[eventSig]; exists {
+		return eventName, c.sigToDef[eventSig]
+	}
+	return "", nil
+}
+
+func (c *EventCache) calculateSignature(eventABI string) common.Hash {
+	var event struct {
+		Name   string `json:"name"`
+		Inputs []struct {
+			Type string `json:"type"`
+		} `json:"inputs"`
+	}
+
+	if err := json.Unmarshal([]byte(eventABI), &event); err != nil {
+		return common.Hash{}
+	}
+
+	var types []string
+	for _, input := range event.Inputs {
+		types = append(types, input.Type)
+	}
+	sigStr := fmt.Sprintf("%s(%s)", event.Name, strings.Join(types, ","))
+
+	return crypto.Keccak256Hash([]byte(sigStr))
+}
+
 // EnhancedBlockScanner implements both forward and backward scanning
 type EnhancedBlockScanner struct {
 	config           *config.BlockScannerConfig
@@ -33,6 +89,7 @@ type EnhancedBlockScanner struct {
 
 	contractAddresses []common.Address
 	eventSignatures   []common.Hash
+	eventCache        *EventCache
 
 	mu            sync.RWMutex
 	scanning      bool
@@ -83,6 +140,7 @@ func NewEnhancedBlockScanner(
 		errorChan:        errorChan,
 		stopChan:         make(chan struct{}),
 		stoppedChan:      make(chan struct{}),
+		eventCache:       newEventCache(eventDefinitions),
 	}
 
 	// Extract contract addresses and event signatures
@@ -707,44 +765,8 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 	}
 }
 
-// findEventDefinition finds the event definition that matches the given signature
 func (bs *EnhancedBlockScanner) findEventDefinition(eventSig common.Hash) (string, *config.EventDefinition) {
-	for eventName, eventDef := range bs.eventDefinitions {
-		// Calculate event signature from ABI
-		if calculatedSig := bs.calculateEventSignature(eventDef.ABI); calculatedSig == eventSig {
-			return eventName, eventDef
-		}
-	}
-	return "", nil
-}
-
-// calculateEventSignature calculates the keccak256 hash of the event signature
-func (bs *EnhancedBlockScanner) calculateEventSignature(eventABI string) common.Hash {
-	// Parse the event ABI to get the signature
-	var event struct {
-		Name   string `json:"name"`
-		Type   string `json:"type"`
-		Inputs []struct {
-			Name    string `json:"name"`
-			Type    string `json:"type"`
-			Indexed bool   `json:"indexed"`
-		} `json:"inputs"`
-	}
-
-	if err := json.Unmarshal([]byte(eventABI), &event); err != nil {
-		logger.Warnf("Failed to parse ABI: %v", err)
-		return common.Hash{}
-	}
-
-	// Build event signature string
-	var types []string
-	for _, input := range event.Inputs {
-		types = append(types, input.Type)
-	}
-	sigStr := fmt.Sprintf("%s(%s)", event.Name, strings.Join(types, ","))
-
-	// Calculate signature hash
-	return crypto.Keccak256Hash([]byte(sigStr))
+	return bs.eventCache.findEvent(eventSig)
 }
 
 // parseIntentRegisteredEvent parses an IntentRegistered event
