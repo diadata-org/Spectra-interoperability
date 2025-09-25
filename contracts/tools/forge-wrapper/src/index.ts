@@ -9,6 +9,8 @@ import { runInteractiveMenu } from "./menu";
 import { registerNetworksCommand } from "./commands/networks";
 import { registerDeploymentsCommand } from "./commands/deployments";
 import { registerVerifyCommand } from "./commands/verify";
+import { registerConfigureCommand } from "./commands/configure";
+import { registerIntentCommands } from "./commands/intents";
 import { getProjectRoot } from "./utils/paths";
 import path from "path";
 import { readFileSync } from "fs";
@@ -35,6 +37,8 @@ async function main(): Promise<void> {
   registerNetworksCommand(program);
   registerDeploymentsCommand(program);
   registerVerifyCommand(program);
+  registerConfigureCommand(program);
+  registerIntentCommands(program);
 
   program.configureOutput({
     outputError: (str) => {

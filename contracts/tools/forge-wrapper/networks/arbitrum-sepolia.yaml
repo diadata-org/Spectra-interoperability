@@ -6,3 +6,7 @@ accounts:
     type: alias
     name: deployer
 default_contracts: {}
+verification:
+  verifier: blockscout
+  verifier_url: https://arbitrum-sepolia.blockscout.com/api/
+  explorer_url: https://arbitrum-sepolia.blockscout.com/address/{address}

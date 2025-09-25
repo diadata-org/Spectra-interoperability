@@ -12,6 +12,7 @@ import {
   ensureCustomerDirs,
 } from "./utils/paths";
 import { pathExists, readTextFile, readYamlFile } from "./utils/fs";
+import { readStoredPrivateKey } from "./services/keys";
 
 function expandEnvTemplates(value: string): string {
   return value.replace(/\$\{([^}]+)\}/g, (_, name: string) => {
@@ -69,7 +70,17 @@ export async function resolveAccountPrivateKey(
   const accounts = network.accounts ?? {};
   const account = accounts[accountName];
   if (!account) {
-    return undefined;
+    try {
+      const priv = await readStoredPrivateKey(customer, accountName);
+      return normalizePrivateKey(priv);
+    } catch (error) {
+      try {
+        const priv = await readStoredPrivateKey("master", accountName);
+        return normalizePrivateKey(priv);
+      } catch (masterError) {
+        return undefined;
+      }
+    }
   }
 
   return resolveAccountSecret(account, customer);
@@ -94,23 +105,34 @@ async function resolveAccountSecret(account: AccountConfig, customer: string): P
     }
     case "alias": {
       const customerDir = getKeysDir(customer);
-      const candidate = path.join(customerDir, `${account.name}.key`);
-      if (await pathExists(candidate)) {
-        const value = await readTextFile(candidate);
-        if (!value) {
-          throw new Error(`Key alias ${account.name} for customer ${customer} is empty`);
+      try {
+        const priv = await readStoredPrivateKey(customer, account.name);
+        return normalizePrivateKey(priv);
+      } catch (error) {
+        // fallback to legacy .key file if present
+        const candidate = path.join(customerDir, `${account.name}.key`);
+        if (await pathExists(candidate)) {
+          const value = await readTextFile(candidate);
+          if (!value) {
+            throw new Error(`Key alias ${account.name} for customer ${customer} is empty`);
+          }
+          return normalizePrivateKey(value);
         }
-        return normalizePrivateKey(value);
       }
 
       const masterDir = getKeysDir("master");
-      const fallback = path.join(masterDir, `${account.name}.key`);
-      if (await pathExists(fallback)) {
-        const value = await readTextFile(fallback);
-        if (!value) {
-          throw new Error(`Key alias ${account.name} in master store is empty`);
+      try {
+        const priv = await readStoredPrivateKey("master", account.name);
+        return normalizePrivateKey(priv);
+      } catch (error) {
+        const fallback = path.join(masterDir, `${account.name}.key`);
+        if (await pathExists(fallback)) {
+          const value = await readTextFile(fallback);
+          if (!value) {
+            throw new Error(`Key alias ${account.name} in master store is empty`);
+          }
+          return normalizePrivateKey(value);
         }
-        return normalizePrivateKey(value);
       }
 
       throw new Error(

@@ -51,7 +51,19 @@ export async function getDeployment(
   alias: string
 ): Promise<DeploymentRecord | undefined> {
   const file = await loadDeployments(customer, network);
-  return file.current[alias];
+  let deployment = file.current[alias];
+
+  // If not found and customer is not master, try master as fallback
+  if (!deployment && customer !== "master") {
+    try {
+      const masterFile = await loadDeployments("master", network);
+      deployment = masterFile.current[alias];
+    } catch (error) {
+      // Ignore master deployment lookup errors
+    }
+  }
+
+  return deployment;
 }
 
 export function formatDeploymentRecord(record: DeploymentRecord): string {
