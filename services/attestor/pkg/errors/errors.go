@@ -8,34 +8,34 @@ import (
 var (
 	// ErrOracleConnection indicates a connection error to the oracle
 	ErrOracleConnection = errors.New("oracle connection failed")
-	
+
 	// ErrOracleValueNotFound indicates the requested value was not found
 	ErrOracleValueNotFound = errors.New("oracle value not found")
-	
+
 	// ErrOracleStaleData indicates the oracle data is too old
 	ErrOracleStaleData = errors.New("oracle data is stale")
-	
+
 	// ErrInvalidSymbol indicates an invalid symbol format
 	ErrInvalidSymbol = errors.New("invalid symbol format")
-	
+
 	// ErrSigningFailed indicates a failure in signing operation
 	ErrSigningFailed = errors.New("signing operation failed")
-	
+
 	// ErrInvalidSignature indicates an invalid signature
 	ErrInvalidSignature = errors.New("invalid signature")
-	
+
 	// ErrRegistryConnection indicates a connection error to the registry
 	ErrRegistryConnection = errors.New("registry connection failed")
-	
+
 	// ErrPublishFailed indicates a failure to publish intent
 	ErrPublishFailed = errors.New("failed to publish intent")
-	
+
 	// ErrInvalidConfiguration indicates invalid configuration
 	ErrInvalidConfiguration = errors.New("invalid configuration")
-	
+
 	// ErrInsufficientBalance indicates insufficient balance for transaction
 	ErrInsufficientBalance = errors.New("insufficient balance")
-	
+
 	// ErrTransactionFailed indicates a transaction failure
 	ErrTransactionFailed = errors.New("transaction failed")
 )
@@ -142,4 +142,3 @@ func NewValidationError(field string, value interface{}, message string) error {
 		Message: message,
 	}
 }
-

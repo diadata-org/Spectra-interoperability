@@ -28,7 +28,6 @@ func (m *mockOracleReader) GetValue(ctx context.Context, symbol string) (*big.In
 	return nil, nil, errors.New("value not found")
 }
 
-
 type mockRegistryClient struct {
 	publishErr error
 	txHash     string
@@ -48,7 +47,6 @@ func (m *mockRegistryClient) PublishBatchIntents(ctx context.Context, signedInte
 	return m.txHash, nil
 }
 
-
 type mockIntentSigner struct {
 	signErr   error
 	signature []byte
@@ -67,7 +65,6 @@ func (m *mockIntentSigner) SignBatchIntent(ctx context.Context, values []interfa
 	}
 	return m.signature, nil
 }
-
 
 type mockMetricsCollector struct {
 	intentsCreated   map[string]int
@@ -97,7 +94,8 @@ func (m *mockMetricsCollector) RecordIntentPublished(symbol string, success bool
 	m.intentsPublished[key]++
 }
 
-func (m *mockMetricsCollector) RecordProcessingDuration(symbol string, mode string, duration time.Duration) {}
+func (m *mockMetricsCollector) RecordProcessingDuration(symbol string, mode string, duration time.Duration) {
+}
 func (m *mockMetricsCollector) RecordOracleFetchDuration(symbol string, duration time.Duration) {}
 
 // Tests
@@ -108,9 +106,9 @@ func TestNewAttestorService(t *testing.T) {
 	registry := &mockRegistryClient{}
 	signer := &mockIntentSigner{}
 	metrics := newMockMetricsCollector()
-	
+
 	service := NewAttestorService(cfg, oracle, registry, signer, metrics)
-	
+
 	if service == nil {
 		t.Fatal("Expected service to be created")
 	}
@@ -142,7 +140,7 @@ func TestAttestorService_StartStop(t *testing.T) {
 			BatchMode:   false,
 		},
 	}
-	
+
 	oracle := &mockOracleReader{
 		values: map[string]*interfaces.OracleValue{
 			"BTC/USD": {
@@ -154,41 +152,41 @@ func TestAttestorService_StartStop(t *testing.T) {
 	registry := &mockRegistryClient{txHash: "0xabc123"}
 	signer := &mockIntentSigner{signature: []byte("signature")}
 	metrics := newMockMetricsCollector()
-	
+
 	service := NewAttestorService(cfg, oracle, registry, signer, metrics)
-	
+
 	// Start service
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	go func() {
 		if err := service.Start(ctx); err != nil {
 			t.Errorf("Failed to start service: %v", err)
 		}
 	}()
-	
+
 	// Wait for service to start
 	time.Sleep(50 * time.Millisecond)
-	
+
 	if !service.IsRunning() {
 		t.Error("Expected service to be running")
 	}
-	
+
 	// Try starting again (should fail)
 	err := service.Start(ctx)
 	if err == nil {
 		t.Error("Expected error when starting already running service")
 	}
-	
+
 	// Stop service
 	if err := service.Stop(); err != nil {
 		t.Errorf("Failed to stop service: %v", err)
 	}
-	
+
 	if service.IsRunning() {
 		t.Error("Expected service to not be running after stop")
 	}
-	
+
 	// Try stopping again (should fail)
 	if err := service.Stop(); err == nil {
 		t.Error("Expected error when stopping already stopped service")
@@ -197,11 +195,11 @@ func TestAttestorService_StartStop(t *testing.T) {
 
 func TestAttestorService_ProcessSingleAttestation(t *testing.T) {
 	tests := []struct {
-		name           string
-		oracleErr      error
-		signerErr      error
-		registryErr    error
-		expectSuccess  bool
+		name          string
+		oracleErr     error
+		signerErr     error
+		registryErr   error
+		expectSuccess bool
 	}{
 		{
 			name:          "successful attestation",
@@ -223,7 +221,7 @@ func TestAttestorService_ProcessSingleAttestation(t *testing.T) {
 			expectSuccess: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.Config{
@@ -231,7 +229,7 @@ func TestAttestorService_ProcessSingleAttestation(t *testing.T) {
 					Symbols: []string{"BTC/USD"},
 				},
 			}
-			
+
 			oracle := &mockOracleReader{
 				values: map[string]*interfaces.OracleValue{
 					"BTC/USD": {
@@ -250,12 +248,12 @@ func TestAttestorService_ProcessSingleAttestation(t *testing.T) {
 				signErr:   tt.signerErr,
 			}
 			metrics := newMockMetricsCollector()
-			
+
 			service := NewAttestorService(cfg, oracle, registry, signer, metrics)
-			
+
 			ctx := context.Background()
 			err := service.processSingleAttestation(ctx, "BTC/USD")
-			
+
 			if tt.expectSuccess {
 				if err != nil {
 					t.Errorf("Expected success but got error: %v", err)
@@ -282,7 +280,7 @@ func TestAttestorService_ProcessBatchAttestation(t *testing.T) {
 			BatchMode: true,
 		},
 	}
-	
+
 	oracle := &mockOracleReader{
 		values: map[string]*interfaces.OracleValue{
 			"BTC/USD": {
@@ -298,16 +296,16 @@ func TestAttestorService_ProcessBatchAttestation(t *testing.T) {
 	registry := &mockRegistryClient{txHash: "0xabc123"}
 	signer := &mockIntentSigner{signature: []byte("batch_signature")}
 	metrics := newMockMetricsCollector()
-	
+
 	service := NewAttestorService(cfg, oracle, registry, signer, metrics)
-	
+
 	ctx := context.Background()
 	err := service.processBatchAttestation(ctx)
-	
+
 	if err != nil {
 		t.Errorf("Expected success but got error: %v", err)
 	}
-	
+
 	// Check metrics
 	if metrics.intentsCreated["BTC/USD"] != 1 {
 		t.Error("Expected BTC/USD intent created metric to be recorded")
@@ -330,7 +328,7 @@ func TestAttestorService_ProcessBatchAttestation_NoValidData(t *testing.T) {
 			BatchMode: true,
 		},
 	}
-	
+
 	// Oracle returns errors for all symbols
 	oracle := &mockOracleReader{
 		err: errors.New("oracle unavailable"),
@@ -338,16 +336,16 @@ func TestAttestorService_ProcessBatchAttestation_NoValidData(t *testing.T) {
 	registry := &mockRegistryClient{txHash: "0xabc123"}
 	signer := &mockIntentSigner{signature: []byte("batch_signature")}
 	metrics := newMockMetricsCollector()
-	
+
 	service := NewAttestorService(cfg, oracle, registry, signer, metrics)
-	
+
 	ctx := context.Background()
 	err := service.processBatchAttestation(ctx)
-	
+
 	if err == nil {
 		t.Error("Expected error when no valid data collected")
 	}
-	
+
 	// Check that error metrics were recorded
 	if metrics.intentsCreated["BTC/USD_error"] != 1 {
 		t.Error("Expected BTC/USD error metric to be recorded")
@@ -365,31 +363,31 @@ func TestAttestorService_Health(t *testing.T) {
 			PollingTime: 5 * time.Minute,
 		},
 	}
-	
+
 	service := NewAttestorService(cfg, nil, nil, nil, nil)
-	
+
 	health := service.Health()
-	
+
 	running, ok := health["running"].(bool)
 	if !ok || running {
 		t.Error("Expected running to be false")
 	}
-	
+
 	configHealth, ok := health["config"].(map[string]interface{})
 	if !ok {
 		t.Fatal("Expected config in health check")
 	}
-	
+
 	symbols, ok := configHealth["symbols"].([]string)
 	if !ok || len(symbols) != 2 {
 		t.Error("Expected symbols in health check")
 	}
-	
+
 	batchMode, ok := configHealth["batch_mode"].(bool)
 	if !ok || !batchMode {
 		t.Error("Expected batch_mode to be true")
 	}
-	
+
 	pollingTime, ok := configHealth["polling_time"].(string)
 	if !ok || pollingTime != "5m0s" {
 		t.Error("Expected correct polling_time")

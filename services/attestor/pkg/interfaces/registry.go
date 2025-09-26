@@ -12,4 +12,3 @@ type RegistryClient interface {
 	// PublishBatchIntents publishes multiple signed intents in a single transaction
 	PublishBatchIntents(ctx context.Context, signedIntents []byte) (string, error)
 }
-

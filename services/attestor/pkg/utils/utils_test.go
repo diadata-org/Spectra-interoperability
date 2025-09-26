@@ -23,7 +23,6 @@ func TestGetEnv(t *testing.T) {
 	}
 }
 
-
 // TestCreateEnvTemplate tests the CreateEnvTemplate function
 func TestCreateEnvTemplate(t *testing.T) {
 	// Create a temporary directory for testing

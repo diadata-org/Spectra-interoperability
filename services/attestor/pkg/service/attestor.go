@@ -7,22 +7,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // AttestorService is the main service for attestation
 type AttestorService struct {
-	config    *config.Config
-	oracle    interfaces.OracleReader
-	registry  interfaces.RegistryClient
-	signer    interfaces.IntentSigner
-	metrics   interfaces.MetricsCollector
-	
-	mu        sync.RWMutex
-	running   bool
+	config   *config.Config
+	oracle   interfaces.OracleReader
+	registry interfaces.RegistryClient
+	signer   interfaces.IntentSigner
+	metrics  interfaces.MetricsCollector
+
+	mu         sync.RWMutex
+	running    bool
 	cancelFunc context.CancelFunc
 }
 
@@ -50,14 +50,14 @@ func (s *AttestorService) Start(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("service already running")
 	}
-	
+
 	serviceCtx, cancel := context.WithCancel(ctx)
 	s.cancelFunc = cancel
 	s.running = true
 	s.mu.Unlock()
-	
+
 	logger.Info("Starting attestor service")
-	
+
 	// Process initial attestations
 	if s.config.Attestor.BatchMode {
 		if err := s.processBatchAttestation(serviceCtx); err != nil {
@@ -70,11 +70,11 @@ func (s *AttestorService) Start(ctx context.Context) error {
 			}
 		}
 	}
-	
+
 	// Start periodic attestation
 	ticker := time.NewTicker(s.config.Attestor.PollingTime)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-serviceCtx.Done():
@@ -100,15 +100,15 @@ func (s *AttestorService) Start(ctx context.Context) error {
 func (s *AttestorService) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	if !s.running {
 		return fmt.Errorf("service not running")
 	}
-	
+
 	if s.cancelFunc != nil {
 		s.cancelFunc()
 	}
-	
+
 	s.running = false
 	return nil
 }
@@ -126,28 +126,28 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 	defer func() {
 		s.metrics.RecordProcessingDuration(symbol, "single", time.Since(start))
 	}()
-	
+
 	logger.WithField("symbol", symbol).Debug("Processing single attestation")
-	
+
 	// Fetch oracle value
 	fetchStart := time.Now()
 	price, timestamp, err := s.oracle.GetValue(ctx, symbol)
 	s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
-	
+
 	if err != nil {
 		s.metrics.RecordIntentCreated(symbol, false)
 		return errors.NewOracleError(symbol, "failed to fetch value", err)
 	}
-	
+
 	// Default volume
 	volume := big.NewInt(1)
-	
+
 	logger.WithFields(map[string]interface{}{
 		"symbol":    symbol,
 		"price":     price.String(),
 		"timestamp": timestamp.String(),
 	}).Debug("Retrieved oracle value")
-	
+
 	// Sign intent
 	signedIntent, err := s.signer.SignIntent(ctx, price, volume, symbol)
 	if err != nil {
@@ -155,7 +155,7 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 		return errors.NewSignerError("sign intent", symbol, err)
 	}
 	s.metrics.RecordIntentCreated(symbol, true)
-	
+
 	// Publish intent
 	txHash, err := s.registry.PublishIntent(ctx, signedIntent)
 	if err != nil {
@@ -163,13 +163,13 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 		return errors.NewRegistryError("publish", "", err)
 	}
 	s.metrics.RecordIntentPublished(symbol, true)
-	
+
 	logger.WithFields(map[string]interface{}{
 		"symbol":   symbol,
 		"tx_hash":  txHash,
 		"duration": time.Since(start).String(),
 	}).Info("Successfully published intent")
-	
+
 	return nil
 }
 
@@ -179,31 +179,31 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 	defer func() {
 		s.metrics.RecordProcessingDuration("batch", "batch", time.Since(start))
 	}()
-	
+
 	logger.WithField("symbol_count", len(s.config.Attestor.Symbols)).Info("Processing batch attestation")
-	
+
 	// Collect symbol data
 	symbolData := make([]interfaces.SymbolData, 0, len(s.config.Attestor.Symbols))
-	
+
 	for _, symbol := range s.config.Attestor.Symbols {
 		fetchStart := time.Now()
 		price, timestamp, err := s.oracle.GetValue(ctx, symbol)
 		s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
-		
+
 		if err != nil {
 			logger.WithError(err).WithField("symbol", symbol).Error("Failed to fetch oracle value")
 			s.metrics.RecordIntentCreated(symbol, false)
 			continue
 		}
-		
+
 		volume := big.NewInt(1)
-		
+
 		logger.WithFields(map[string]interface{}{
 			"symbol":    symbol,
 			"price":     price.String(),
 			"timestamp": timestamp.String(),
 		}).Debug("Retrieved oracle value")
-		
+
 		symbolData = append(symbolData, interfaces.SymbolData{
 			Symbol: symbol,
 			Price:  price,
@@ -211,11 +211,11 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 		})
 		s.metrics.RecordIntentCreated(symbol, true)
 	}
-	
+
 	if len(symbolData) == 0 {
 		return fmt.Errorf("no valid symbol data collected")
 	}
-	
+
 	// Sign batch intent
 	signedIntent, err := s.signer.SignBatchIntent(ctx, symbolData)
 	if err != nil {
@@ -224,7 +224,7 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 		}
 		return errors.NewSignerError("sign batch intent", fmt.Sprintf("%d symbols", len(symbolData)), err)
 	}
-	
+
 	// Publish batch intent
 	txHash, err := s.registry.PublishBatchIntents(ctx, signedIntent)
 	if err != nil {
@@ -233,17 +233,17 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 		}
 		return errors.NewRegistryError("publish batch", "", err)
 	}
-	
+
 	for _, data := range symbolData {
 		s.metrics.RecordIntentPublished(data.Symbol, true)
 	}
-	
+
 	logger.WithFields(map[string]interface{}{
 		"symbol_count": len(symbolData),
 		"tx_hash":      txHash,
 		"duration":     time.Since(start).String(),
 	}).Info("Successfully published batch intent")
-	
+
 	return nil
 }
 
@@ -251,7 +251,7 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 func (s *AttestorService) Health() map[string]interface{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	return map[string]interface{}{
 		"running": s.running,
 		"config": map[string]interface{}{

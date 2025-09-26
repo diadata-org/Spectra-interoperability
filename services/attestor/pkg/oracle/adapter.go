@@ -26,19 +26,18 @@ func (a *ClientAdapter) GetValue(ctx context.Context, symbol string) (*big.Int, 
 	if err != nil {
 		return nil, nil, errors.NewOracleError(symbol, "failed to get value", err)
 	}
-	
+
 	// Validate the returned values
 	if price == nil || price.Sign() <= 0 {
 		return nil, nil, errors.NewOracleError(symbol, "invalid price", nil)
 	}
-	
+
 	if timestamp == nil || timestamp.Sign() <= 0 {
 		return nil, nil, errors.NewOracleError(symbol, "invalid timestamp", nil)
 	}
-	
+
 	return price, timestamp, nil
 }
-
 
 // GetClient returns the underlying client (for legacy compatibility)
 func (a *ClientAdapter) GetClient() *client.OracleClient {

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/service"
 )
 
@@ -23,7 +23,7 @@ type Server struct {
 // NewServer creates a new API server
 func NewServer(cfg *config.Config, attestor *service.AttestorService) *Server {
 	mux := http.NewServeMux()
-	
+
 	server := &Server{
 		config:   cfg,
 		attestor: attestor,
@@ -36,7 +36,7 @@ func NewServer(cfg *config.Config, attestor *service.AttestorService) *Server {
 			IdleTimeout:  120 * time.Second,
 		},
 	}
-	
+
 	server.setupRoutes()
 	return server
 }
@@ -51,25 +51,25 @@ func (s *Server) setupRoutes() {
 // Start starts the API server
 func (s *Server) Start() error {
 	logger.WithField("port", s.config.API.Port).Info("Starting API server")
-	
+
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("API server error: %w", err)
 	}
-	
+
 	return nil
 }
 
 // Stop gracefully stops the API server
 func (s *Server) Stop() error {
 	logger.Info("Stopping API server")
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	
+
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("failed to shutdown API server: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -79,12 +79,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	response := map[string]interface{}{
 		"status": "healthy",
 		"time":   time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -95,7 +95,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	// Check if attestor service is running
 	if !s.attestor.IsRunning() {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -105,12 +105,12 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	
+
 	response := map[string]interface{}{
 		"status": "ready",
 		"time":   time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -121,9 +121,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	
+
 	health := s.attestor.Health()
-	
+
 	response := map[string]interface{}{
 		"status":   "operational",
 		"time":     time.Now().UTC().Format(time.RFC3339),
@@ -134,7 +134,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 			"log_level":    s.config.Logging.Level,
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }

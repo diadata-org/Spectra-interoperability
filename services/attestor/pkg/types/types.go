@@ -26,4 +26,3 @@ type SignedIntent struct {
 	Signature string       `json:"signature"`
 	Signer    string       `json:"signer"`
 }
-

@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-
 func TestClientAdapter_GetValue(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -101,4 +100,3 @@ func TestClientAdapter_GetValue(t *testing.T) {
 		})
 	}
 }
-

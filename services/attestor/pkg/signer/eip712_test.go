@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 func TestNewEIP712Signer(t *testing.T) {
@@ -55,7 +55,7 @@ func TestNewEIP712Signer(t *testing.T) {
 func TestEIP712Signer_SignIntent(t *testing.T) {
 	// Skip this test as it requires config initialization and network access
 	t.Skip("Skipping test that requires full config and network access")
-	
+
 	// Create a test signer
 	signer, err := NewEIP712Signer("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	if err != nil {
@@ -151,7 +151,7 @@ func TestEIP712Signer_SignIntent(t *testing.T) {
 func TestEIP712Signer_SignBatchIntent(t *testing.T) {
 	// Skip this test as it requires config initialization and network access
 	t.Skip("Skipping test that requires full config and network access")
-	
+
 	// Create a test signer
 	signer, err := NewEIP712Signer("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	if err != nil {
@@ -226,8 +226,6 @@ func TestEIP712Signer_SignBatchIntent(t *testing.T) {
 		})
 	}
 }
-
-
 
 // TestSignMessageAndVerifySigner tests the complete signing flow and verifies the signer
 func TestSignMessageAndVerifySigner(t *testing.T) {
@@ -315,8 +313,8 @@ func TestSignMessageAndVerifySigner(t *testing.T) {
 // TestGetAddressDerivedFromPrivateKey tests that we can derive the correct address
 func TestGetAddressDerivedFromPrivateKey(t *testing.T) {
 	tests := []struct {
-		name           string
-		privateKey     string
+		name       string
+		privateKey string
 	}{
 		{
 			name:       "test key 1",

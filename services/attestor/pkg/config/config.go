@@ -10,8 +10,8 @@ import (
 
 type Config struct {
 	RPC struct {
-		URL          string `mapstructure:"url"`
-		RegistryURL  string `mapstructure:"registry_url"`
+		URL         string `mapstructure:"url"`
+		RegistryURL string `mapstructure:"registry_url"`
 	} `mapstructure:"rpc"`
 
 	Oracle struct {
@@ -23,10 +23,10 @@ type Config struct {
 	} `mapstructure:"registry"`
 
 	Attestor struct {
-		PrivateKey   string        `mapstructure:"private_key"`
-		Symbols      []string      `mapstructure:"symbols"`
-		PollingTime  time.Duration `mapstructure:"polling_time"`
-		BatchMode    bool          `mapstructure:"batch_mode"`
+		PrivateKey  string        `mapstructure:"private_key"`
+		Symbols     []string      `mapstructure:"symbols"`
+		PollingTime time.Duration `mapstructure:"polling_time"`
+		BatchMode   bool          `mapstructure:"batch_mode"`
 	} `mapstructure:"attestor"`
 
 	Logging struct {
@@ -127,4 +127,3 @@ func Get() *Config {
 	}
 	return cfg
 }
-

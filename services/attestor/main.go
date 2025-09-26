@@ -8,11 +8,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/api"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/client"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/oracle"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/registry"

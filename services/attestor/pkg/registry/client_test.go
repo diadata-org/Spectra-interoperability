@@ -80,7 +80,7 @@ func TestClient_PublishIntent(t *testing.T) {
 			// Test JSON parsing
 			var testData map[string]interface{}
 			err := json.Unmarshal(tt.signedIntent, &testData)
-			
+
 			if tt.wantErr && err == nil {
 				t.Error("Expected JSON parsing error but got none")
 			}
@@ -134,7 +134,7 @@ func TestClient_PublishBatchIntents(t *testing.T) {
 			// Test JSON parsing
 			var testData map[string]interface{}
 			err := json.Unmarshal(tt.signedIntent, &testData)
-			
+
 			if tt.wantErr && err == nil {
 				t.Error("Expected JSON parsing error but got none")
 			}
@@ -144,4 +144,3 @@ func TestClient_PublishBatchIntents(t *testing.T) {
 		})
 	}
 }
-

@@ -111,5 +111,3 @@ func (s *EIP712Signer) SignBatchIntent(ctx context.Context, values []interfaces.
 
 	return []byte(batchIntentJSON), nil
 }
-
-

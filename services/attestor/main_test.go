@@ -24,4 +24,3 @@ func TestEnvironmentVariableHelper(t *testing.T) {
 		t.Errorf("Expected value 'test_value', got %s", value)
 	}
 }
-

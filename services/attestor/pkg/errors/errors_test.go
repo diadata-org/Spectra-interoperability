@@ -110,30 +110,29 @@ func TestSignerError(t *testing.T) {
 func TestValidationError(t *testing.T) {
 	err := NewValidationError("symbol", "BTCUSD", "missing slash separator")
 	want := "validation error for symbol (value: BTCUSD): missing slash separator"
-	
+
 	if err.Error() != want {
 		t.Errorf("ValidationError.Error() = %v, want %v", err.Error(), want)
 	}
 }
 
-
 func TestErrorUnwrap(t *testing.T) {
 	baseErr := errors.New("base error")
-	
+
 	t.Run("oracle error unwrap", func(t *testing.T) {
 		err := &OracleError{Symbol: "BTC/USD", Reason: "test", Wrapped: baseErr}
 		if !errors.Is(err, baseErr) {
 			t.Errorf("Expected error to wrap base error")
 		}
 	})
-	
+
 	t.Run("registry error unwrap", func(t *testing.T) {
 		err := &RegistryError{Operation: "test", Wrapped: baseErr}
 		if !errors.Is(err, baseErr) {
 			t.Errorf("Expected error to wrap base error")
 		}
 	})
-	
+
 	t.Run("signer error unwrap", func(t *testing.T) {
 		err := &SignerError{Operation: "test", Wrapped: baseErr}
 		if !errors.Is(err, baseErr) {

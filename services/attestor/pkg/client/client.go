@@ -95,7 +95,6 @@ func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big
 	// Create the contract address
 	contractAddress := common.HexToAddress(oc.oracleAddr)
 
-
 	// Pack the input data
 	data, err := oc.oracleABI.Pack("getValue", symbol)
 	if err != nil {
@@ -114,7 +113,6 @@ func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big
 	if err != nil {
 		return nil, nil, fmt.Errorf("contract call failed: %v", err)
 	}
-
 
 	// Decode the hex result
 	resultBytes, err := hexutil.Decode(result)
@@ -142,7 +140,6 @@ func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big
 	if !ok {
 		return nil, nil, fmt.Errorf("failed to convert timestamp to big.Int")
 	}
-
 
 	return price, timestamp, nil
 }
