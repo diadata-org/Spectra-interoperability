@@ -1,0 +1,35 @@
+# Attestor Service Configuration for Lumina (Lasernet)
+
+# RPC Configuration
+rpc:
+  url: https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz
+  registry_url: https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz
+
+# Oracle Configuration
+oracle:
+  address: "0x0087342f5f4c7AB23a37c045c3EF710749527c88"
+
+# Registry Configuration (deployed on Lasernet)
+registry:
+  address: "0xC1ca83b5df6ce7e21Fb462C86f0C90E182d6db5d"
+
+# Attestor Configuration
+attestor:
+  # private_key should be set via ATTESTOR_ATTESTOR_PRIVATE_KEY environment variable
+  symbols:
+    - BTC/USD
+    - ETH/USD
+  polling_time: 5s
+  batch_mode: false
+
+# Logging Configuration
+logging:
+  level: info
+
+# Metrics Configuration
+metrics:
+  port: 8080
+
+# API Server Configuration
+api:
+  port: 8081
