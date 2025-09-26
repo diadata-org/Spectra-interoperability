@@ -25,6 +25,11 @@ export const CONTRACT_PRESETS: ContractPreset[] = [
     artifact: "contracts/ProtocolFeeHook.sol:ProtocolFeeHook",
     description: "Post-dispatch protocol fee hook",
   },
+  {
+    alias: "Ism",
+    artifact: "contracts/Ism.sol:Ism",
+    description: "Interchain security module for sender allow-lists",
+  },
 ];
 
 export function getPreset(alias: string): ContractPreset | undefined {

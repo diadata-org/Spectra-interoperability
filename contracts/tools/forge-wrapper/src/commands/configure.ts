@@ -260,6 +260,76 @@ export async function configurePushOracleSetMailbox(
   });
 }
 
+export async function configureIsmAddSender(
+  base: ConfigureTransactionOptions,
+  params: { originDomain: number; sender: string }
+): Promise<void> {
+  const record = await getDeployment(base.customer, base.network, base.alias);
+  if (!record) {
+    throw new Error(
+      `No deployment found for alias '${base.alias}' on network '${base.network}'`
+    );
+  }
+  requireContract(record, ["Ism"]);
+
+  const originDomain = Number(params.originDomain);
+  if (!Number.isInteger(originDomain) || originDomain < 0 || originDomain > 0xffffffff) {
+    throw new Error("originDomain must be a uint32 value");
+  }
+  const sender = assertAddress(params.sender, "sender");
+
+  await executeContractSend({
+    ...base,
+    signature: "addSenderShouldBe(uint32,address)",
+    params: [String(originDomain), sender],
+  });
+}
+
+export async function configureIsmRemoveSender(
+  base: ConfigureTransactionOptions,
+  params: { originDomain: number; sender: string }
+): Promise<void> {
+  const record = await getDeployment(base.customer, base.network, base.alias);
+  if (!record) {
+    throw new Error(
+      `No deployment found for alias '${base.alias}' on network '${base.network}'`
+    );
+  }
+  requireContract(record, ["Ism"]);
+
+  const originDomain = Number(params.originDomain);
+  if (!Number.isInteger(originDomain) || originDomain < 0 || originDomain > 0xffffffff) {
+    throw new Error("originDomain must be a uint32 value");
+  }
+  const sender = assertAddress(params.sender, "sender");
+
+  await executeContractSend({
+    ...base,
+    signature: "removeSenderShouldBe(uint32,address)",
+    params: [String(originDomain), sender],
+  });
+}
+
+export async function configureIsmSetMailbox(
+  base: ConfigureTransactionOptions,
+  params: { mailbox: string }
+): Promise<void> {
+  const record = await getDeployment(base.customer, base.network, base.alias);
+  if (!record) {
+    throw new Error(
+      `No deployment found for alias '${base.alias}' on network '${base.network}'`
+    );
+  }
+  requireContract(record, ["Ism"]);
+
+  const mailbox = assertAddress(params.mailbox, "mailbox");
+  await executeContractSend({
+    ...base,
+    signature: "setTrustedMailBox(address)",
+    params: [mailbox],
+  });
+}
+
 interface AbiInput {
   name?: string;
   type: string;
@@ -477,6 +547,108 @@ export function registerConfigureCommand(program: Command): void {
       }
       const customer = cmdOptions.customer ?? getDefaultCustomer();
       await configurePushOracleSetMailbox(
+        {
+          network,
+          customer,
+          alias,
+          account: cmdOptions.account ?? "admin",
+          rpcUrl: cmdOptions.rpcUrl,
+          dryRun: Boolean(cmdOptions.dryRun),
+        },
+        {
+          mailbox: String(cmdOptions.mailbox),
+        }
+      );
+    });
+
+  configure
+    .command("ism-add-sender <alias>")
+    .description("Allow a sender for an origin domain on an Ism deployment")
+    .requiredOption(
+      "--origin-domain <id>",
+      "Origin domain identifier",
+      (value: string) => parseInt(value, 10)
+    )
+    .requiredOption("--sender <address>", "Sender contract address")
+    .option("-n, --network <network>", "Network name")
+    .option("-c, --customer <customer>", "Customer namespace")
+    .option("--account <account>", "Account alias", "admin")
+    .option("--rpc-url <url>", "Override RPC URL")
+    .option("--dry-run", "Print cast command without executing")
+    .action(async (alias: string, cmdOptions) => {
+      const network = cmdOptions.network ?? getDefaultNetwork();
+      if (!network) {
+        throw new Error("Network is required (use --network or FORGE_WRAPPER_NETWORK)");
+      }
+      const customer = cmdOptions.customer ?? getDefaultCustomer();
+      await configureIsmAddSender(
+        {
+          network,
+          customer,
+          alias,
+          account: cmdOptions.account ?? "admin",
+          rpcUrl: cmdOptions.rpcUrl,
+          dryRun: Boolean(cmdOptions.dryRun),
+        },
+        {
+          originDomain: cmdOptions.originDomain,
+          sender: String(cmdOptions.sender),
+        }
+      );
+    });
+
+  configure
+    .command("ism-remove-sender <alias>")
+    .description("Remove an allowed sender for an origin domain on an Ism deployment")
+    .requiredOption(
+      "--origin-domain <id>",
+      "Origin domain identifier",
+      (value: string) => parseInt(value, 10)
+    )
+    .requiredOption("--sender <address>", "Sender contract address")
+    .option("-n, --network <network>", "Network name")
+    .option("-c, --customer <customer>", "Customer namespace")
+    .option("--account <account>", "Account alias", "admin")
+    .option("--rpc-url <url>", "Override RPC URL")
+    .option("--dry-run", "Print cast command without executing")
+    .action(async (alias: string, cmdOptions) => {
+      const network = cmdOptions.network ?? getDefaultNetwork();
+      if (!network) {
+        throw new Error("Network is required (use --network or FORGE_WRAPPER_NETWORK)");
+      }
+      const customer = cmdOptions.customer ?? getDefaultCustomer();
+      await configureIsmRemoveSender(
+        {
+          network,
+          customer,
+          alias,
+          account: cmdOptions.account ?? "admin",
+          rpcUrl: cmdOptions.rpcUrl,
+          dryRun: Boolean(cmdOptions.dryRun),
+        },
+        {
+          originDomain: cmdOptions.originDomain,
+          sender: String(cmdOptions.sender),
+        }
+      );
+    });
+
+  configure
+    .command("ism-set-mailbox <alias>")
+    .description("Set the trusted mailbox on an Ism deployment")
+    .requiredOption("--mailbox <address>", "Mailbox contract address")
+    .option("-n, --network <network>", "Network name")
+    .option("-c, --customer <customer>", "Customer namespace")
+    .option("--account <account>", "Account alias", "admin")
+    .option("--rpc-url <url>", "Override RPC URL")
+    .option("--dry-run", "Print cast command without executing")
+    .action(async (alias: string, cmdOptions) => {
+      const network = cmdOptions.network ?? getDefaultNetwork();
+      if (!network) {
+        throw new Error("Network is required (use --network or FORGE_WRAPPER_NETWORK)");
+      }
+      const customer = cmdOptions.customer ?? getDefaultCustomer();
+      await configureIsmSetMailbox(
         {
           network,
           customer,
