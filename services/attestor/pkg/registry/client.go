@@ -7,7 +7,6 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -89,19 +88,6 @@ func (c *Client) PublishBatchIntents(ctx context.Context, signedIntents []byte) 
 	return txHash, nil
 }
 
-// GetIntentByHash retrieves an intent by its hash
-func (c *Client) GetIntentByHash(ctx context.Context, intentHash string) (*interfaces.Intent, error) {
-	// This would require implementing contract calls to retrieve intent data
-	// For now, return not implemented
-	return nil, fmt.Errorf("GetIntentByHash not implemented")
-}
-
-// GetLatestIntent retrieves the latest intent for a symbol
-func (c *Client) GetLatestIntent(ctx context.Context, symbol string) (*interfaces.Intent, error) {
-	// This would require implementing contract calls to retrieve latest intent
-	// For now, return not implemented
-	return nil, fmt.Errorf("GetLatestIntent not implemented")
-}
 
 // Close closes the Ethereum client connection
 func (c *Client) Close() {

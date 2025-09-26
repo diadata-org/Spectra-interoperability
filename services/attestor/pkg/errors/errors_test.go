@@ -116,62 +116,6 @@ func TestValidationError(t *testing.T) {
 	}
 }
 
-func TestIsRetryable(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "nil error",
-			err:  nil,
-			want: false,
-		},
-		{
-			name: "oracle connection error",
-			err:  ErrOracleConnection,
-			want: true,
-		},
-		{
-			name: "registry connection error",
-			err:  ErrRegistryConnection,
-			want: true,
-		},
-		{
-			name: "transaction failed error",
-			err:  ErrTransactionFailed,
-			want: true,
-		},
-		{
-			name: "non-retryable error",
-			err:  ErrInvalidSymbol,
-			want: false,
-		},
-		{
-			name: "wrapped oracle connection error",
-			err:  NewOracleError("BTC/USD", "fetch failed", ErrOracleConnection),
-			want: true,
-		},
-		{
-			name: "wrapped non-retryable error",
-			err:  NewOracleError("BTC/USD", "invalid data", ErrInvalidSymbol),
-			want: false,
-		},
-		{
-			name: "wrapped registry connection error",
-			err:  NewRegistryError("publish", "", ErrRegistryConnection),
-			want: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := IsRetryable(tt.err); got != tt.want {
-				t.Errorf("IsRetryable() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
 
 func TestErrorUnwrap(t *testing.T) {
 	baseErr := errors.New("base error")

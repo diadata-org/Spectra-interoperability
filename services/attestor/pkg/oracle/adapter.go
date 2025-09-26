@@ -6,7 +6,6 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/client"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
 )
 
 // ClientAdapter adapts the existing OracleClient to implement the OracleReader interface
@@ -40,33 +39,6 @@ func (a *ClientAdapter) GetValue(ctx context.Context, symbol string) (*big.Int, 
 	return price, timestamp, nil
 }
 
-// GetMultipleValues implements the OracleReader interface
-func (a *ClientAdapter) GetMultipleValues(ctx context.Context, symbols []string) (map[string]interfaces.OracleValue, error) {
-	results := make(map[string]interfaces.OracleValue)
-	
-	// For now, we fetch values sequentially
-	// This could be optimized with concurrent fetches
-	for _, symbol := range symbols {
-		price, timestamp, err := a.GetValue(ctx, symbol)
-		if err != nil {
-			// Log the error but continue with other symbols
-			continue
-		}
-		
-		results[symbol] = interfaces.OracleValue{
-			Symbol:    symbol,
-			Price:     price,
-			Timestamp: timestamp,
-			Volume:    big.NewInt(1), // Default volume
-		}
-	}
-	
-	if len(results) == 0 {
-		return nil, errors.ErrOracleValueNotFound
-	}
-	
-	return results, nil
-}
 
 // GetClient returns the underlying client (for legacy compatibility)
 func (a *ClientAdapter) GetClient() *client.OracleClient {

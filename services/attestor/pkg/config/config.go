@@ -128,6 +128,3 @@ func Get() *Config {
 	return cfg
 }
 
-func GetViper() *viper.Viper {
-	return viper.GetViper()
-}

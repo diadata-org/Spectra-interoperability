@@ -3,21 +3,15 @@ package signer
 import (
 	"context"
 	"crypto/ecdsa"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
 
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/types"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	gethmath "github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
 // EIP712Signer implements the IntentSigner interface using EIP-712
@@ -118,133 +112,4 @@ func (s *EIP712Signer) SignBatchIntent(ctx context.Context, values []interfaces.
 	return []byte(batchIntentJSON), nil
 }
 
-// GetAddress returns the signer's address
-func (s *EIP712Signer) GetAddress() string {
-	return s.address.Hex()
-}
 
-// VerifySignature verifies an intent signature
-func (s *EIP712Signer) VerifySignature(ctx context.Context, signedIntent []byte) (bool, error) {
-	var intentPayload types.SignedIntent
-	if err := json.Unmarshal(signedIntent, &intentPayload); err != nil {
-		return false, errors.NewSignerError("parse signed intent", "", err)
-	}
-
-	if intentPayload.Signature == "" {
-		return false, errors.NewSignerError("verify", "missing signature", nil)
-	}
-	if intentPayload.Signer == "" {
-		return false, errors.NewSignerError("verify", "missing signer", nil)
-	}
-
-	if !strings.EqualFold(intentPayload.Signer, s.address.Hex()) {
-		return false, nil
-	}
-
-	chainID := intentPayload.Intent.ChainId
-	if chainID == nil || chainID.Sign() <= 0 {
-		return false, errors.NewSignerError("verify", "invalid chainId", nil)
-	}
-	if intentPayload.Intent.Nonce == nil {
-		return false, errors.NewSignerError("verify", "missing nonce", nil)
-	}
-	if intentPayload.Intent.Expiry == nil {
-		return false, errors.NewSignerError("verify", "missing expiry", nil)
-	}
-	if intentPayload.Intent.Price == nil {
-		return false, errors.NewSignerError("verify", "missing price", nil)
-	}
-	if intentPayload.Intent.Timestamp == nil {
-		return false, errors.NewSignerError("verify", "missing timestamp", nil)
-	}
-
-	cfg := config.Get()
-	contractAddr := cfg.Registry.Address
-	if contractAddr == "" {
-		contractAddr = "0x0000000000000000000000000000000000000000"
-	}
-
-	signatureBytes, err := hexutil.Decode(intentPayload.Signature)
-	if err != nil {
-		return false, errors.NewSignerError("verify", "decode signature", err)
-	}
-	if len(signatureBytes) != crypto.SignatureLength {
-		return false, errors.NewSignerError("verify", "invalid signature length", nil)
-	}
-
-	// Normalize recovery ID to 0/1 as required by go-ethereum crypto primitives
-	if signatureBytes[crypto.RecoveryIDOffset] == 27 || signatureBytes[crypto.RecoveryIDOffset] == 28 {
-		signatureBytes[crypto.RecoveryIDOffset] -= 27
-	}
-	if signatureBytes[crypto.RecoveryIDOffset] != 0 && signatureBytes[crypto.RecoveryIDOffset] != 1 {
-		return false, errors.NewSignerError("verify", "unsupported recovery id", nil)
-	}
-
-	chainIDCopy := gethmath.HexOrDecimal256(*chainID)
-	domain := apitypes.TypedDataDomain{
-		Name:              "DIA Oracle Intent",
-		Version:           "1",
-		ChainId:           &chainIDCopy,
-		VerifyingContract: contractAddr,
-		Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
-	}
-
-	typedData := apitypes.TypedData{
-		Types: apitypes.Types{
-			"EIP712Domain": []apitypes.Type{
-				{Name: "name", Type: "string"},
-				{Name: "version", Type: "string"},
-				{Name: "chainId", Type: "uint256"},
-				{Name: "verifyingContract", Type: "address"},
-				{Name: "salt", Type: "bytes32"},
-			},
-			"OracleIntent": []apitypes.Type{
-				{Name: "intentType", Type: "string"},
-				{Name: "version", Type: "string"},
-				{Name: "chainId", Type: "uint256"},
-				{Name: "nonce", Type: "uint256"},
-				{Name: "expiry", Type: "uint256"},
-				{Name: "symbol", Type: "string"},
-				{Name: "price", Type: "uint256"},
-				{Name: "timestamp", Type: "uint256"},
-				{Name: "source", Type: "string"},
-			},
-		},
-		PrimaryType: "OracleIntent",
-		Domain:      domain,
-		Message: map[string]interface{}{
-			"intentType": intentPayload.Intent.IntentType,
-			"version":    intentPayload.Intent.Version,
-			"chainId":    intentPayload.Intent.ChainId,
-			"nonce":      intentPayload.Intent.Nonce,
-			"expiry":     intentPayload.Intent.Expiry,
-			"symbol":     intentPayload.Intent.Symbol,
-			"price":      intentPayload.Intent.Price,
-			"timestamp":  intentPayload.Intent.Timestamp,
-			"source":     intentPayload.Intent.Source,
-		},
-	}
-
-	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
-	if err != nil {
-		return false, errors.NewSignerError("verify", "hash domain", err)
-	}
-	typedDataHash, err := typedData.HashStruct(typedData.PrimaryType, typedData.Message)
-	if err != nil {
-		return false, errors.NewSignerError("verify", "hash typed data", err)
-	}
-	dataToSign := append([]byte{0x19, 0x01}, domainSeparator[:]...)
-	dataToSign = append(dataToSign, typedDataHash[:]...)
-	hash := crypto.Keccak256Hash(dataToSign)
-
-	pubKey, err := crypto.SigToPub(hash.Bytes(), signatureBytes)
-	if err != nil {
-		return false, errors.NewSignerError("verify", "recover signer", err)
-	}
-	recovered := crypto.PubkeyToAddress(*pubKey)
-	if !strings.EqualFold(recovered.Hex(), intentPayload.Signer) {
-		return false, nil
-	}
-
-	return true, nil
-}

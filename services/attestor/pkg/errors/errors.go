@@ -143,29 +143,3 @@ func NewValidationError(field string, value interface{}, message string) error {
 	}
 }
 
-// IsRetryable determines if an error is retryable
-func IsRetryable(err error) bool {
-	if err == nil {
-		return false
-	}
-	
-	// Check for specific retryable errors
-	if errors.Is(err, ErrOracleConnection) ||
-		errors.Is(err, ErrRegistryConnection) ||
-		errors.Is(err, ErrTransactionFailed) {
-		return true
-	}
-	
-	// Check for wrapped errors
-	var oracleErr *OracleError
-	if errors.As(err, &oracleErr) {
-		return errors.Is(oracleErr.Wrapped, ErrOracleConnection)
-	}
-	
-	var registryErr *RegistryError
-	if errors.As(err, &registryErr) {
-		return errors.Is(registryErr.Wrapped, ErrRegistryConnection)
-	}
-	
-	return false
-}

@@ -28,18 +28,6 @@ func (m *mockOracleReader) GetValue(ctx context.Context, symbol string) (*big.In
 	return nil, nil, errors.New("value not found")
 }
 
-func (m *mockOracleReader) GetMultipleValues(ctx context.Context, symbols []string) (map[string]interfaces.OracleValue, error) {
-	if m.err != nil {
-		return nil, m.err
-	}
-	result := make(map[string]interfaces.OracleValue)
-	for _, symbol := range symbols {
-		if val, ok := m.values[symbol]; ok {
-			result[symbol] = *val
-		}
-	}
-	return result, nil
-}
 
 type mockRegistryClient struct {
 	publishErr error
@@ -60,13 +48,6 @@ func (m *mockRegistryClient) PublishBatchIntents(ctx context.Context, signedInte
 	return m.txHash, nil
 }
 
-func (m *mockRegistryClient) GetIntentByHash(ctx context.Context, intentHash string) (*interfaces.Intent, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (m *mockRegistryClient) GetLatestIntent(ctx context.Context, symbol string) (*interfaces.Intent, error) {
-	return nil, errors.New("not implemented")
-}
 
 type mockIntentSigner struct {
 	signErr   error
@@ -87,13 +68,6 @@ func (m *mockIntentSigner) SignBatchIntent(ctx context.Context, values []interfa
 	return m.signature, nil
 }
 
-func (m *mockIntentSigner) GetAddress() string {
-	return "0x1234567890abcdef"
-}
-
-func (m *mockIntentSigner) VerifySignature(ctx context.Context, signedIntent []byte) (bool, error) {
-	return true, nil
-}
 
 type mockMetricsCollector struct {
 	intentsCreated   map[string]int

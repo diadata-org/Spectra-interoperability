@@ -1,11 +1,8 @@
 package registry
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestNewClient(t *testing.T) {
@@ -148,26 +145,3 @@ func TestClient_PublishBatchIntents(t *testing.T) {
 	}
 }
 
-func TestClient_NotImplementedMethods(t *testing.T) {
-	client := &Client{
-		privateKey:   "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-		registryAddr: common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
-		fromAddress:  common.HexToAddress("0xabcdef1234567890abcdef1234567890abcdef12"),
-	}
-
-	ctx := context.Background()
-
-	t.Run("GetIntentByHash", func(t *testing.T) {
-		_, err := client.GetIntentByHash(ctx, "0xhash")
-		if err == nil {
-			t.Error("Expected not implemented error")
-		}
-	})
-
-	t.Run("GetLatestIntent", func(t *testing.T) {
-		_, err := client.GetLatestIntent(ctx, "BTC/USD")
-		if err == nil {
-			t.Error("Expected not implemented error")
-		}
-	})
-}
