@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/types"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -408,6 +408,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
 	}
+	defer ethClient.Close()
 
 	// Parse private key
 	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
@@ -545,6 +546,7 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
 	}
+	defer ethClient.Close()
 
 	const registryABI = `[{"inputs":[{"internalType":"string","name":"intentType","type":"string"},{"internalType":"string","name":"version","type":"string"},{"internalType":"uint256","name":"chainId","type":"uint256"},{"internalType":"uint256","name":"nonce","type":"uint256"},{"internalType":"uint256","name":"expiry","type":"uint256"},{"internalType":"string","name":"symbol","type":"string"},{"internalType":"uint256","name":"price","type":"uint256"},{"internalType":"uint256","name":"timestamp","type":"uint256"},{"internalType":"string","name":"source","type":"string"},{"internalType":"bytes","name":"signature","type":"bytes"},{"internalType":"address","name":"signer","type":"address"}],"name":"registerIntent","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 

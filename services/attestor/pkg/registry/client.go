@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -28,8 +29,8 @@ func NewClient(privateKey string, rpcURL string, registryAddr string) (*Client, 
 		return nil, fmt.Errorf("failed to connect to Ethereum client: %w", err)
 	}
 
-	// Derive address from private key
-	privKey, err := crypto.HexToECDSA(privateKey)
+	cleanKey := strings.TrimPrefix(privateKey, "0x")
+	privKey, err := crypto.HexToECDSA(cleanKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
@@ -87,7 +88,6 @@ func (c *Client) PublishBatchIntents(ctx context.Context, signedIntents []byte) 
 
 	return txHash, nil
 }
-
 
 // Close closes the Ethereum client connection
 func (c *Client) Close() {
