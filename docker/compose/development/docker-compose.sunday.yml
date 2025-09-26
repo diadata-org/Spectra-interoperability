@@ -1,0 +1,130 @@
+version: '3.8'
+
+services:
+  attestor-sunday:
+    build:
+      context: .
+      dockerfile: ../../dockerfiles/attestor.Dockerfile
+    container_name: attestor-sunday-lasernet
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # API port
+      - "8081:8081"  # Metrics port
+    volumes:
+      - ../../../services/attestor/config-sunday.yaml:/app/config.yaml:ro
+      - ./SUNDAY_DEPLOYMENT_2025_08_31.md:/app/deployment-info.md:ro
+    environment:
+      - LOG_LEVEL=info
+      - ATTESTOR_ATTESTOR_PRIVATE_KEY=${ATTESTOR_PRIVATE_KEY}
+    networks:
+      - attestor-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.attestor-sunday.rule=Host(`attestor-sunday.local`)"
+      - "traefik.http.services.attestor-sunday.loadbalancer.server.port=8080"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-sunday
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - attestor-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-sunday
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - attestor-network
+    depends_on:
+      - prometheus
+
+  bridge-sunday:
+    build:
+      context: .
+      dockerfile: ../../dockerfiles/bridge.Dockerfile
+    container_name: bridge-sunday-lasernet
+    restart: unless-stopped
+    ports:
+      - "8084:8080"  # Bridge API port  
+      - "8082:8082"  # Bridge gRPC port
+      - "8083:8083"  # Bridge Metrics port
+    volumes:
+      - ../../../services/bridge/config-sunday.json:/app/config.json:ro
+      - ./SUNDAY_DEPLOYMENT_2025_08_31.md:/app/deployment-info.md:ro
+    environment:
+      - LOG_LEVEL=info
+      - CONFIG_PATH=/app/config.json
+      - BRIDGE_PRIVATE_KEY=${BRIDGE_PRIVATE_KEY}
+    command: ["./bridge", "-config", "/app/config.json", "-log-level", "debug"]
+    networks:
+      - attestor-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bridge-sunday.rule=Host(`bridge-sunday.local`)"
+      - "traefik.http.services.bridge-sunday.loadbalancer.server.port=8082"
+
+  postgres:
+    image: postgres:15
+    container_name: postgres-sunday
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=oracle_bridge
+      - POSTGRES_USER=bridge
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - attestor-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bridge -d oracle_bridge"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  attestor-network:
+    driver: bridge
+
+volumes:
+  grafana-data:
+  postgres-data:
