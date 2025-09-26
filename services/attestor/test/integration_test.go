@@ -11,7 +11,6 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/client"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/metrics"
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/oracle"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/registry"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/service"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/signer"
@@ -80,8 +79,6 @@ func TestAttestorServiceIntegration(t *testing.T) {
 		t.Fatalf("Failed to create oracle client: %v", err)
 	}
 
-	oracleAdapter := oracle.NewClientAdapter(oracleClient)
-
 	registryClient, err := registry.NewClient(
 		cfg.Attestor.PrivateKey,
 		cfg.RPC.RegistryURL,
@@ -101,7 +98,7 @@ func TestAttestorServiceIntegration(t *testing.T) {
 	// Create service
 	attestorService := service.NewAttestorService(
 		cfg,
-		oracleAdapter,
+		oracleClient,
 		registryClient,
 		eip712Signer,
 		metricsCollector,
@@ -204,8 +201,6 @@ func TestBatchModeIntegration(t *testing.T) {
 		t.Fatalf("Failed to create oracle client: %v", err)
 	}
 
-	oracleAdapter := oracle.NewClientAdapter(oracleClient)
-
 	registryClient, err := registry.NewClient(
 		cfg.Attestor.PrivateKey,
 		cfg.RPC.RegistryURL,
@@ -225,7 +220,7 @@ func TestBatchModeIntegration(t *testing.T) {
 	// Create service
 	attestorService := service.NewAttestorService(
 		cfg,
-		oracleAdapter,
+		oracleClient,
 		registryClient,
 		eip712Signer,
 		metricsCollector,

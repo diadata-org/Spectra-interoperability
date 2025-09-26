@@ -36,6 +36,14 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	expiry := big.NewInt(now + 3600)
 
 	cfg := config.Get()
+	intentType := cfg.Attestor.IntentType
+	if intentType == "" {
+		intentType = "OracleUpdate"
+	}
+	intentVersion := cfg.Attestor.IntentVersion
+	if intentVersion == "" {
+		intentVersion = "1.0"
+	}
 	ethClient, err := ethclient.Dial(cfg.RPC.URL)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
@@ -69,8 +77,8 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	signerAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	intent := types.OracleIntent{
-		IntentType: "OracleUpdate",
-		Version:    "1.0",
+		IntentType: intentType,
+		Version:    intentVersion,
 		ChainId:    chainID,
 		Nonce:      nonce,
 		Expiry:     expiry,
@@ -83,7 +91,7 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	chainIDHex := gethmath.HexOrDecimal256(*chainID)
 	domain := apitypes.TypedDataDomain{
 		Name:              "DIA Oracle",
-		Version:           "1.0",
+		Version:           intentVersion,
 		ChainId:           &chainIDHex,
 		VerifyingContract: contractAddress.Hex(),
 		Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -221,6 +229,14 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	expiry := big.NewInt(now + 3600)
 
 	cfg := config.Get()
+	intentType := cfg.Attestor.IntentType
+	if intentType == "" {
+		intentType = "OracleUpdate"
+	}
+	intentVersion := cfg.Attestor.IntentVersion
+	if intentVersion == "" {
+		intentVersion = "1.0"
+	}
 	ethClient, err := ethclient.Dial(cfg.RPC.URL)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
@@ -257,8 +273,8 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 
 	for i, data := range symbolsData {
 		intent := types.OracleIntent{
-			IntentType: "OracleUpdate",
-			Version:    "1.0",
+			IntentType: intentType,
+			Version:    intentVersion,
 			ChainId:    chainID,
 			Nonce:      nonce,
 			Expiry:     expiry,
@@ -271,7 +287,7 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 		chainIDHex := gethmath.HexOrDecimal256(*chainID)
 		domain := apitypes.TypedDataDomain{
 			Name:              "DIA Oracle Intent",
-			Version:           "1",
+			Version:           intentVersion,
 			ChainId:           &chainIDHex,
 			VerifyingContract: contractAddress.Hex(),
 			Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
@@ -422,13 +438,6 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
-	// Get the sender's nonce
-	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
-	nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
-	if err != nil {
-		return "", fmt.Errorf("failed to get nonce: %v", err)
-	}
-
 	// Get gas price
 	gasPrice, err := ethClient.SuggestGasPrice(ctx)
 	if err != nil {
@@ -500,29 +509,44 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 	}
 
 	gasLimit := uint64(3000000 + (intentCount * 200000))
+	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	tx := ethTypes.NewTransaction(
-		nonce,
-		common.HexToAddress(registryContract),
-		big.NewInt(0),
-		gasLimit,
-		gasPrice,
-		data,
-	)
+	var lastErr error
+	const maxNonceAttempts = 5
+	for attempt := 0; attempt < maxNonceAttempts; attempt++ {
+		nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
+		if err != nil {
+			return "", fmt.Errorf("failed to get nonce: %v", err)
+		}
 
-	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to sign transaction: %v", err)
+		tx := ethTypes.NewTransaction(
+			nonce,
+			common.HexToAddress(registryContract),
+			big.NewInt(0),
+			gasLimit,
+			gasPrice,
+			data,
+		)
+
+		signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign transaction: %v", err)
+		}
+
+		if err := ethClient.SendTransaction(ctx, signedTx); err != nil {
+			lastErr = err
+			if isNonceTooLowErr(err) {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			return "", fmt.Errorf("failed to send transaction: %v", err)
+		}
+
+		logger.WithField("duration", time.Since(startTime).String()).Info("Batch transaction completed")
+		return signedTx.Hash().Hex(), nil
 	}
 
-	err = ethClient.SendTransaction(ctx, signedTx)
-	if err != nil {
-		return "", fmt.Errorf("failed to send transaction: %v", err)
-	}
-
-	logger.WithField("duration", time.Since(startTime).String()).Info("Batch transaction completed")
-
-	return signedTx.Hash().Hex(), nil
+	return "", fmt.Errorf("failed to send transaction after %d attempts: %v", maxNonceAttempts, lastErr)
 }
 
 func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON string) (string, error) {
@@ -595,34 +619,51 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 	}
 
 	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
-	nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
-	if err != nil {
-		return "", fmt.Errorf("failed to get nonce: %v", err)
-	}
-
 	gasPrice, err := ethClient.SuggestGasPrice(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get gas price: %v", err)
 	}
 
-	tx := ethTypes.NewTransaction(
-		nonce,
-		common.HexToAddress(registryContract),
-		big.NewInt(0),
-		3000000,
-		gasPrice,
-		data,
-	)
+	var lastErr error
+	const maxNonceAttempts = 5
+	for attempt := 0; attempt < maxNonceAttempts; attempt++ {
+		nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
+		if err != nil {
+			return "", fmt.Errorf("failed to get nonce: %v", err)
+		}
 
-	signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
-	if err != nil {
-		return "", fmt.Errorf("failed to sign transaction: %v", err)
+		tx := ethTypes.NewTransaction(
+			nonce,
+			common.HexToAddress(registryContract),
+			big.NewInt(0),
+			3000000,
+			gasPrice,
+			data,
+		)
+
+		signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
+		if err != nil {
+			return "", fmt.Errorf("failed to sign transaction: %v", err)
+		}
+
+		if err := ethClient.SendTransaction(ctx, signedTx); err != nil {
+			lastErr = err
+			if isNonceTooLowErr(err) {
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			return "", fmt.Errorf("failed to send transaction: %v", err)
+		}
+
+		return signedTx.Hash().Hex(), nil
 	}
 
-	err = ethClient.SendTransaction(ctx, signedTx)
-	if err != nil {
-		return "", fmt.Errorf("failed to send transaction: %v", err)
-	}
+	return "", fmt.Errorf("failed to send transaction after %d attempts: %v", maxNonceAttempts, lastErr)
+}
 
-	return signedTx.Hash().Hex(), nil
+func isNonceTooLowErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "nonce too low")
 }

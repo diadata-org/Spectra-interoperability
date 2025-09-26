@@ -23,10 +23,12 @@ type Config struct {
 	} `mapstructure:"registry"`
 
 	Attestor struct {
-		PrivateKey  string        `mapstructure:"private_key"`
-		Symbols     []string      `mapstructure:"symbols"`
-		PollingTime time.Duration `mapstructure:"polling_time"`
-		BatchMode   bool          `mapstructure:"batch_mode"`
+		PrivateKey    string        `mapstructure:"private_key"`
+		Symbols       []string      `mapstructure:"symbols"`
+		PollingTime   time.Duration `mapstructure:"polling_time"`
+		BatchMode     bool          `mapstructure:"batch_mode"`
+		IntentType    string        `mapstructure:"intent_type"`
+		IntentVersion string        `mapstructure:"intent_version"`
 	} `mapstructure:"attestor"`
 
 	Logging struct {
@@ -70,6 +72,8 @@ func Init(configPath string) (*Config, error) {
 	v.SetDefault("attestor.symbols", []string{"BTC/USD", "ETH/USD"})
 	v.SetDefault("attestor.polling_time", "300ms")
 	v.SetDefault("attestor.batch_mode", true)
+	v.SetDefault("attestor.intent_type", "OracleUpdate")
+	v.SetDefault("attestor.intent_version", "1.0")
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("metrics.port", 8080)
 	v.SetDefault("api.port", 8081)
@@ -81,6 +85,8 @@ func Init(configPath string) (*Config, error) {
 	v.BindEnv("attestor.private_key", "PRIVATE_KEY")
 	v.BindEnv("attestor.symbols", "SYMBOLS")
 	v.BindEnv("attestor.polling_time", "POLLING_TIME")
+	v.BindEnv("attestor.intent_type", "INTENT_TYPE")
+	v.BindEnv("attestor.intent_version", "INTENT_VERSION")
 	v.BindEnv("logging.level", "LOG_LEVEL")
 	v.BindEnv("metrics.port", "METRICS_PORT")
 

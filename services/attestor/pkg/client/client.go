@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -90,8 +91,24 @@ func NewOracleClient(rpcURL, oracleAddrStr, signedAddrStr, privateKeyStr string)
 	}, nil
 }
 
-// GetOracleValue fetches the latest value from the oracle
-func (oc *OracleClient) GetOracleValue(ctx context.Context, symbol string) (*big.Int, *big.Int, error) {
+func (oc *OracleClient) GetValue(ctx context.Context, symbol string) (*big.Int, *big.Int, error) {
+	price, timestamp, err := oc.fetchOracleValue(ctx, symbol)
+	if err != nil {
+		return nil, nil, errors.NewOracleError(symbol, "failed to get value", err)
+	}
+
+	if price == nil || price.Sign() <= 0 {
+		return nil, nil, errors.NewOracleError(symbol, "invalid price", nil)
+	}
+
+	if timestamp == nil || timestamp.Sign() <= 0 {
+		return nil, nil, errors.NewOracleError(symbol, "invalid timestamp", nil)
+	}
+
+	return price, timestamp, nil
+}
+
+func (oc *OracleClient) fetchOracleValue(ctx context.Context, symbol string) (*big.Int, *big.Int, error) {
 	// Create the contract address
 	contractAddress := common.HexToAddress(oc.oracleAddr)
 

@@ -21,6 +21,8 @@ attestor:
     - ETH/USD
   polling_time: 5s
   batch_mode: false
+  intent_type: OracleUpdate
+  intent_version: "1.0"
 
 # Logging Configuration
 logging:

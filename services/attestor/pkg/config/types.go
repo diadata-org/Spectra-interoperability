@@ -4,10 +4,12 @@ import "time"
 
 // AttestorConfig holds attestor-specific configuration
 type AttestorConfig struct {
-	PrivateKey  string        `mapstructure:"private_key"`
-	Symbols     []string      `mapstructure:"symbols"`
-	PollingTime time.Duration `mapstructure:"polling_time"`
-	BatchMode   bool          `mapstructure:"batch_mode"`
+	PrivateKey    string        `mapstructure:"private_key"`
+	Symbols       []string      `mapstructure:"symbols"`
+	PollingTime   time.Duration `mapstructure:"polling_time"`
+	BatchMode     bool          `mapstructure:"batch_mode"`
+	IntentType    string        `mapstructure:"intent_type"`
+	IntentVersion string        `mapstructure:"intent_version"`
 }
 
 // OracleConfig holds oracle configuration

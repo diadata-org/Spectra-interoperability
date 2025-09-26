@@ -14,7 +14,6 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/metrics"
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/oracle"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/registry"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/service"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/signer"
@@ -118,7 +117,7 @@ func main() {
 
 // dependencies holds all the service dependencies
 type dependencies struct {
-	oracle   *oracle.ClientAdapter
+	oracle   interfaces.OracleReader
 	registry *registry.Client
 	signer   *signer.EIP712Signer
 	metrics  interfaces.MetricsCollector
@@ -136,9 +135,6 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oracle client: %w", err)
 	}
-
-	// Create oracle adapter
-	oracleAdapter := oracle.NewClientAdapter(oracleClient)
 
 	// Create registry client
 	registryClient, err := registry.NewClient(
@@ -160,7 +156,7 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	metricsCollector := metrics.NewPrometheusCollector()
 
 	return &dependencies{
-		oracle:   oracleAdapter,
+		oracle:   oracleClient,
 		registry: registryClient,
 		signer:   eip712Signer,
 		metrics:  metricsCollector,
