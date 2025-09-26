@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/config"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/attestor/pkg/types"
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -31,7 +31,6 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	now := time.Now().Unix()
 	nowBig := big.NewInt(now)
 
-
 	nonceVal := time.Now().UnixNano()
 	nonce := big.NewInt(nonceVal)
 	expiry := big.NewInt(now + 3600)
@@ -41,18 +40,21 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
 	}
+	defer ethClient.Close()
 
 	chainID, err := ethClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
-	rpcChainId := chainID.Uint64()
-
-	contractAddr := cfg.Registry.Address
+	contractAddr := strings.TrimSpace(cfg.Registry.Address)
 	if contractAddr == "" {
-		contractAddr = "0x0000000000000000000000000000000000000000"
+		return "", fmt.Errorf("registry address not configured")
 	}
+	if !common.IsHexAddress(contractAddr) {
+		return "", fmt.Errorf("invalid registry address: %s", contractAddr)
+	}
+	contractAddress := common.HexToAddress(contractAddr)
 
 	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
 	if err != nil {
@@ -78,14 +80,14 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 		Source:     "DIA Oracle",
 	}
 
+	chainIDHex := gethmath.HexOrDecimal256(*chainID)
 	domain := apitypes.TypedDataDomain{
-		Name:              "DIA Oracle Intent",
-		Version:           "1",
-		ChainId:           gethmath.NewHexOrDecimal256(int64(rpcChainId)),
-		VerifyingContract: contractAddr,
+		Name:              "DIA Oracle",
+		Version:           "1.0",
+		ChainId:           &chainIDHex,
+		VerifyingContract: contractAddress.Hex(),
 		Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
 	}
-
 
 	typedData := apitypes.TypedData{
 		Types: apitypes.Types{
@@ -136,7 +138,6 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	dataToSign := append([]byte{0x19, 0x01}, domainSeparator[:]...)
 	dataToSign = append(dataToSign, typedDataHash[:]...)
 	hash := crypto.Keccak256Hash(dataToSign)
-
 
 	signature, err := crypto.Sign(hash.Bytes(), privKey)
 	if err != nil {
@@ -215,7 +216,6 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 		symbols[i] = data.Symbol
 	}
 
-
 	nonceVal := time.Now().UnixNano()
 	nonce := big.NewInt(nonceVal)
 	expiry := big.NewInt(now + 3600)
@@ -225,18 +225,21 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
 	}
+	defer ethClient.Close()
 
 	chainID, err := ethClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
-	rpcChainId := chainID.Uint64()
-
-	contractAddr := cfg.Registry.Address
+	contractAddr := strings.TrimSpace(cfg.Registry.Address)
 	if contractAddr == "" {
-		contractAddr = "0x0000000000000000000000000000000000000000"
+		return "", fmt.Errorf("registry address not configured")
 	}
+	if !common.IsHexAddress(contractAddr) {
+		return "", fmt.Errorf("invalid registry address: %s", contractAddr)
+	}
+	contractAddress := common.HexToAddress(contractAddr)
 
 	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
 	if err != nil {
@@ -265,11 +268,12 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 			Source:     "DIA Oracle",
 		}
 
+		chainIDHex := gethmath.HexOrDecimal256(*chainID)
 		domain := apitypes.TypedDataDomain{
 			Name:              "DIA Oracle Intent",
 			Version:           "1",
-			ChainId:           gethmath.NewHexOrDecimal256(int64(rpcChainId)),
-			VerifyingContract: contractAddr,
+			ChainId:           &chainIDHex,
+			VerifyingContract: contractAddress.Hex(),
 			Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
 		}
 
@@ -322,7 +326,6 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 		dataToSign := append([]byte{0x19, 0x01}, domainSeparator[:]...)
 		dataToSign = append(dataToSign, typedDataHash[:]...)
 		hash := crypto.Keccak256Hash(dataToSign)
-
 
 		signature, err := crypto.Sign(hash.Bytes(), privKey)
 		if err != nil {
@@ -382,7 +385,6 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 	if registryContract == "" {
 		return "", fmt.Errorf("registry address not configured")
 	}
-
 
 	// Parse the batch intent
 	var batchIntent struct {
@@ -530,7 +532,6 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 	if registryContract == "" {
 		return "", fmt.Errorf("registry address not configured")
 	}
-
 
 	// Parse the signed intent
 	var signedIntent types.SignedIntent
