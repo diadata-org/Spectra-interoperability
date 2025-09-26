@@ -717,7 +717,7 @@ const file_proto_bridge_proto_rawDesc = "" +
 	"\rBridgeService\x12D\n" +
 	"\x0fTriggerFailover\x12\x17.bridge.FailoverRequest\x1a\x18.bridge.FailoverResponse\x12B\n" +
 	"\x11GetFailoverStatus\x12\x15.bridge.StatusRequest\x1a\x16.bridge.StatusResponse\x12<\n" +
-	"\vHealthCheck\x12\x15.bridge.HealthRequest\x1a\x16.bridge.HealthResponseB>Z<github.com/diadata.org/Spectra-interoperability/bridge/protob\x06proto3"
+	"\vHealthCheck\x12\x15.bridge.HealthRequest\x1a\x16.bridge.HealthResponseB>Z<github.com/diadata.org/Spectra-interoperability/services/bridge/protob\x06proto3"
 
 var (
 	file_proto_bridge_proto_rawDescOnce sync.Once
