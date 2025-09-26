@@ -3,6 +3,8 @@
 # RPC Configuration
 rpc:
   url: https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz
+  urls:
+    - https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz
   registry_url: https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz
 
 # Oracle Configuration

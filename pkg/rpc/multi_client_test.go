@@ -111,14 +111,14 @@ func (m *MockEthClient) SubscribeFilterLogs(ctx context.Context, q ethereum.Filt
 
 // JSON-RPC request and response structures for mock server
 type jsonRPCRequest struct {
-	ID     interface{} `json:"id"`
-	Method string      `json:"method"`
+	ID     interface{}   `json:"id"`
+	Method string        `json:"method"`
 	Params []interface{} `json:"params"`
 }
 
 type jsonRPCResponse struct {
-	ID     interface{} `json:"id"`
-	Result interface{} `json:"result,omitempty"`
+	ID     interface{}   `json:"id"`
+	Result interface{}   `json:"result,omitempty"`
 	Error  *jsonRPCError `json:"error,omitempty"`
 }
 
@@ -200,62 +200,62 @@ func TestNewMultiClient_Success(t *testing.T) {
 		assert.Nil(t, mc)
 		assert.Contains(t, err.Error(), "no RPC URLs provided")
 	})
-	
+
 	t.Run("SingleWorkingRPC", func(t *testing.T) {
 		// Create a mock HTTP server that responds to JSON-RPC calls
 		server := createMockEthereumServer(t)
 		defer server.Close()
-		
+
 		mc, err := NewMultiClient([]string{server.URL})
 		assert.NoError(t, err)
 		assert.NotNil(t, mc)
 		assert.Equal(t, server.URL, mc.GetCurrentRPCURL())
-		
+
 		// Test that the client can make calls
 		ctx := context.Background()
 		chainID, err := mc.ChainID(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, int64(1337), chainID.Int64()) // Mock chain ID
-		
+
 		mc.Close()
 	})
-	
+
 	t.Run("MultipleWorkingRPCs", func(t *testing.T) {
 		// Create multiple mock servers
 		server1 := createMockEthereumServer(t)
 		server2 := createMockEthereumServer(t)
 		defer server1.Close()
 		defer server2.Close()
-		
+
 		mc, err := NewMultiClient([]string{server1.URL, server2.URL})
 		assert.NoError(t, err)
 		assert.NotNil(t, mc)
-		
+
 		// Should connect to first working server
 		assert.Equal(t, server1.URL, mc.GetCurrentRPCURL())
-		
+
 		mc.Close()
 	})
-	
+
 	t.Run("PartiallyWorkingRPCs", func(t *testing.T) {
 		// Create one working server
 		workingServer := createMockEthereumServer(t)
 		defer workingServer.Close()
-		
+
 		// Mix working and non-working URLs
 		urls := []string{
-			"http://invalid-url-12345", // This will fail
-			workingServer.URL,          // This should work
+			"http://invalid-url-12345",   // This will fail
+			workingServer.URL,            // This should work
 			"http://another-invalid-url", // This will fail
 		}
-		
+
 		mc, err := NewMultiClient(urls)
 		assert.NoError(t, err)
 		assert.NotNil(t, mc)
-		
+
 		// Should connect to the working server
 		assert.Equal(t, workingServer.URL, mc.GetCurrentRPCURL())
-		
+
 		mc.Close()
 	})
 }
@@ -275,7 +275,7 @@ func TestNewMultiClient_ValidationEdgeCases(t *testing.T) {
 			errorText:   "no RPC URLs provided",
 		},
 		{
-			name:        "Nil slice", 
+			name:        "Nil slice",
 			urls:        nil,
 			expectError: true,
 			errorText:   "no RPC URLs provided",
@@ -293,11 +293,11 @@ func TestNewMultiClient_ValidationEdgeCases(t *testing.T) {
 			errorText:   "failed to connect to any RPC URL",
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			mc, err := NewMultiClient(tc.urls)
-			
+
 			if tc.expectError {
 				assert.Error(t, err)
 				assert.Nil(t, mc)
@@ -319,11 +319,11 @@ func TestMultiClient_FailoverLogic(t *testing.T) {
 			clients:      make([]*ethclient.Client, 3),
 			currentIndex: 0,
 		}
-		
+
 		// Test failover logic without actual connections
 		originalIndex := mc.currentIndex
 		assert.Equal(t, 0, originalIndex)
-		
+
 		// Simulate having clients (would be nil in real failover scenario)
 		// This tests the index calculation logic
 		expectedNextIndex := (originalIndex + 1) % len(mc.urls)
@@ -414,11 +414,11 @@ func TestMultiClient_NetworkErrorDetection(t *testing.T) {
 			isNetwork: false,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := isNetworkError(tc.err)
-			assert.Equal(t, tc.isNetwork, result, 
+			assert.Equal(t, tc.isNetwork, result,
 				"Expected isNetworkError(%v) = %v, got %v", tc.err, tc.isNetwork, result)
 		})
 	}
@@ -481,7 +481,7 @@ func TestMultiClient_StringHelpers(t *testing.T) {
 			expected: false,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			result := contains(tc.s, tc.substr)
@@ -498,29 +498,29 @@ func TestMultiClient_GetMethods(t *testing.T) {
 		clients:      make([]*ethclient.Client, 3),
 		currentIndex: 1,
 	}
-	
+
 	t.Run("GetCurrentRPCURL", func(t *testing.T) {
 		url := mc.GetCurrentRPCURL()
 		assert.Equal(t, "http://rpc2", url)
-		
+
 		// Test invalid index
 		mc.currentIndex = -1
 		url = mc.GetCurrentRPCURL()
 		assert.Equal(t, "", url)
-		
+
 		mc.currentIndex = 10
 		url = mc.GetCurrentRPCURL()
 		assert.Equal(t, "", url)
 	})
-	
+
 	t.Run("GetHealthStatus", func(t *testing.T) {
 		// All clients are nil initially
 		status := mc.GetHealthStatus()
 		assert.Len(t, status, 3)
 		assert.False(t, status["http://rpc1"])
-		assert.False(t, status["http://rpc2"]) 
+		assert.False(t, status["http://rpc2"])
 		assert.False(t, status["http://rpc3"])
-		
+
 		// Simulate one client being connected (this would be a real ethclient in practice)
 		// For testing, we just check the map structure is correct
 		assert.Contains(t, status, "http://rpc1")
@@ -535,12 +535,12 @@ func TestMultiClient_Close(t *testing.T) {
 		urls:    []string{"http://rpc1", "http://rpc2"},
 		clients: make([]*ethclient.Client, 2),
 	}
-	
+
 	// Test closing with nil clients (should not panic)
 	assert.NotPanics(t, func() {
 		mc.Close()
 	})
-	
+
 	// Verify all clients are nil after close
 	for i, client := range mc.clients {
 		assert.Nil(t, client, "Client %d should be nil after Close()", i)
@@ -555,11 +555,11 @@ func TestMultiClient_ConcurrentAccess(t *testing.T) {
 		currentIndex: 0,
 		mu:           sync.RWMutex{},
 	}
-	
+
 	// Test concurrent access to GetCurrentRPCURL
 	var wg sync.WaitGroup
 	results := make(chan string, 10)
-	
+
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
@@ -568,10 +568,10 @@ func TestMultiClient_ConcurrentAccess(t *testing.T) {
 			results <- url
 		}()
 	}
-	
+
 	wg.Wait()
 	close(results)
-	
+
 	// All results should be the same
 	expected := "http://rpc1"
 	for url := range results {
@@ -585,9 +585,9 @@ func TestMultiClient_HealthCheckConfiguration(t *testing.T) {
 	mc := &MultiClient{
 		healthInterval: 30 * time.Second,
 	}
-	
+
 	assert.Equal(t, 30*time.Second, mc.healthInterval)
-	
+
 	// Test that health check interval is configurable
 	customInterval := 10 * time.Second
 	mc.healthInterval = customInterval
@@ -604,7 +604,7 @@ func BenchmarkMultiClient_NetworkErrorDetection(b *testing.B) {
 		errors.New("broken pipe"),
 		errors.New("invalid method parameters"), // non-network error
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, err := range testErrors {
@@ -625,7 +625,7 @@ func BenchmarkMultiClient_StringContains(b *testing.B) {
 		{"write tcp: broken pipe", "pipe"},
 		{"TLS handshake timeout occurred", "timeout"},
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, tc := range testCases {
@@ -642,7 +642,7 @@ func TestMultiClient_EdgeCaseBehavior(t *testing.T) {
 		assert.Nil(t, mc)
 		assert.Equal(t, "no RPC URLs provided", err.Error())
 	})
-	
+
 	t.Run("SingleElementSlice", func(t *testing.T) {
 		// This would require a mock server or skip in unit tests
 		// Testing the logic path exists
@@ -659,23 +659,23 @@ func TestMultiClient_ConfigurationOptions(t *testing.T) {
 	t.Run("MultipleURLs", func(t *testing.T) {
 		urls := []string{
 			"http://localhost:8545",
-			"http://localhost:8546", 
+			"http://localhost:8546",
 			"http://localhost:8547",
 		}
-		
+
 		mc, err := NewMultiClient(urls)
 		// Expected to fail since servers aren't running, but logic should handle multiple URLs
 		assert.Error(t, err)
 		assert.Nil(t, mc)
 	})
-	
+
 	t.Run("DuplicateURLs", func(t *testing.T) {
 		urls := []string{
 			"http://localhost:8545",
 			"http://localhost:8545",
 			"http://localhost:8545",
 		}
-		
+
 		mc, err := NewMultiClient(urls)
 		// Should still work with duplicates (though not recommended)
 		assert.Error(t, err) // Expected since server not running
@@ -688,20 +688,20 @@ func TestMultiClient_IntegrationBehavior(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
 	}
-	
+
 	t.Run("WithTestServer", func(t *testing.T) {
 		// This would require setting up a test Ethereum node
 		// or using a mock HTTP server that responds to JSON-RPC calls
 		t.Skip("Integration test requires test server setup")
-		
+
 		// Example of how the test would work:
 		// server := httptest.NewServer(mockEthereumJSONRPCHandler())
 		// defer server.Close()
-		// 
+		//
 		// mc, err := NewMultiClient([]string{server.URL})
 		// assert.NoError(t, err)
 		// assert.NotNil(t, mc)
-		// 
+		//
 		// ctx := context.Background()
 		// chainID, err := mc.ChainID(ctx)
 		// assert.NoError(t, err)

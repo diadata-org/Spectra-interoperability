@@ -112,6 +112,13 @@ func main() {
 		logger.Errorf("Error stopping API server: %v", err)
 	}
 
+	if oracleClient, ok := deps.oracle.(*client.OracleClient); ok {
+		oracleClient.Close()
+	}
+	if deps.registry != nil {
+		deps.registry.Close()
+	}
+
 	logger.Info("Shutdown complete")
 }
 
@@ -127,7 +134,7 @@ type dependencies struct {
 func createDependencies(cfg *config.Config) (*dependencies, error) {
 	// Create oracle client
 	oracleClient, err := client.NewOracleClient(
-		cfg.RPC.URL,
+		cfg.RPC.URLs,
 		cfg.Oracle.Address,
 		"", // signed address not used in new architecture
 		cfg.Attestor.PrivateKey,
@@ -139,7 +146,6 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	// Create registry client
 	registryClient, err := registry.NewClient(
 		cfg.Attestor.PrivateKey,
-		cfg.RPC.RegistryURL,
 		cfg.Registry.Address,
 	)
 	if err != nil {

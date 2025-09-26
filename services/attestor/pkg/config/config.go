@@ -8,10 +8,24 @@ import (
 	"github.com/spf13/viper"
 )
 
+func parseCSV(input string) []string {
+	parts := strings.Split(input, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
 type Config struct {
 	RPC struct {
-		URL         string `mapstructure:"url"`
-		RegistryURL string `mapstructure:"registry_url"`
+		URL          string   `mapstructure:"url"`
+		URLs         []string `mapstructure:"urls"`
+		RegistryURL  string   `mapstructure:"registry_url"`
+		RegistryURLs []string `mapstructure:"registry_urls"`
 	} `mapstructure:"rpc"`
 
 	Oracle struct {
@@ -80,6 +94,8 @@ func Init(configPath string) (*Config, error) {
 
 	// Bind environment variables for backward compatibility
 	v.BindEnv("rpc.url", "RPC_URL")
+	v.BindEnv("rpc.urls", "RPC_URLS")
+	v.BindEnv("rpc.registry_urls", "RPC_REGISTRY_URLS")
 	v.BindEnv("oracle.address", "ORACLE_ADDRESS")
 	v.BindEnv("registry.address", "INTENT_REGISTRY_ADDRESS")
 	v.BindEnv("attestor.private_key", "PRIVATE_KEY")
@@ -122,6 +138,34 @@ func Init(configPath string) (*Config, error) {
 		if err == nil {
 			cfg.Attestor.PollingTime = duration
 		}
+	}
+
+	// Normalize RPC URLs configuration
+	if urlsEnv := v.GetString("RPC_URLS"); urlsEnv != "" {
+		cfg.RPC.URLs = parseCSV(urlsEnv)
+	}
+	if len(cfg.RPC.URLs) == 0 {
+		if cfg.RPC.URL != "" {
+			cfg.RPC.URLs = []string{strings.TrimSpace(cfg.RPC.URL)}
+		}
+	}
+	if len(cfg.RPC.URLs) == 0 {
+		cfg.RPC.URLs = []string{"https://testnet-rpc.diadata.org"}
+	}
+
+	if registryURLsEnv := v.GetString("RPC_REGISTRY_URLS"); registryURLsEnv != "" {
+		cfg.RPC.RegistryURLs = parseCSV(registryURLsEnv)
+	}
+	if len(cfg.RPC.RegistryURLs) == 0 {
+		if cfg.RPC.RegistryURL != "" {
+			cfg.RPC.RegistryURLs = []string{strings.TrimSpace(cfg.RPC.RegistryURL)}
+		}
+	}
+	if len(cfg.RPC.RegistryURLs) == 0 && len(cfg.RPC.URLs) > 0 {
+		cfg.RPC.RegistryURLs = append([]string(nil), cfg.RPC.URLs...)
+	}
+	if len(cfg.RPC.RegistryURLs) == 0 {
+		cfg.RPC.RegistryURLs = []string{"https://testnet-rpc.diadata.org"}
 	}
 
 	return cfg, nil

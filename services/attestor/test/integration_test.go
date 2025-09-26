@@ -24,11 +24,15 @@ func TestAttestorServiceIntegration(t *testing.T) {
 	// Load test configuration
 	cfg := &config.Config{
 		RPC: struct {
-			URL         string `mapstructure:"url"`
-			RegistryURL string `mapstructure:"registry_url"`
+			URL          string   `mapstructure:"url"`
+			URLs         []string `mapstructure:"urls"`
+			RegistryURL  string   `mapstructure:"registry_url"`
+			RegistryURLs []string `mapstructure:"registry_urls"`
 		}{
-			URL:         "https://testnet-rpc.diadata.org",
-			RegistryURL: "https://testnet-rpc.diadata.org",
+			URL:          "https://testnet-rpc.diadata.org",
+			URLs:         []string{"https://testnet-rpc.diadata.org"},
+			RegistryURL:  "https://testnet-rpc.diadata.org",
+			RegistryURLs: []string{"https://testnet-rpc.diadata.org"},
 		},
 		Oracle: struct {
 			Address string `mapstructure:"address"`
@@ -70,7 +74,7 @@ func TestAttestorServiceIntegration(t *testing.T) {
 
 	// Create dependencies
 	oracleClient, err := client.NewOracleClient(
-		cfg.RPC.URL,
+		cfg.RPC.URLs,
 		cfg.Oracle.Address,
 		"",
 		cfg.Attestor.PrivateKey,
@@ -81,7 +85,7 @@ func TestAttestorServiceIntegration(t *testing.T) {
 
 	registryClient, err := registry.NewClient(
 		cfg.Attestor.PrivateKey,
-		cfg.RPC.RegistryURL,
+		cfg.RPC.RegistryURLs,
 		cfg.Registry.Address,
 	)
 	if err != nil {
@@ -146,11 +150,15 @@ func TestBatchModeIntegration(t *testing.T) {
 	// Similar test but with batch mode enabled
 	cfg := &config.Config{
 		RPC: struct {
-			URL         string `mapstructure:"url"`
-			RegistryURL string `mapstructure:"registry_url"`
+			URL          string   `mapstructure:"url"`
+			URLs         []string `mapstructure:"urls"`
+			RegistryURL  string   `mapstructure:"registry_url"`
+			RegistryURLs []string `mapstructure:"registry_urls"`
 		}{
-			URL:         "https://testnet-rpc.diadata.org",
-			RegistryURL: "https://testnet-rpc.diadata.org",
+			URL:          "https://testnet-rpc.diadata.org",
+			URLs:         []string{"https://testnet-rpc.diadata.org"},
+			RegistryURL:  "https://testnet-rpc.diadata.org",
+			RegistryURLs: []string{"https://testnet-rpc.diadata.org"},
 		},
 		Oracle: struct {
 			Address string `mapstructure:"address"`
@@ -192,7 +200,7 @@ func TestBatchModeIntegration(t *testing.T) {
 
 	// Create dependencies
 	oracleClient, err := client.NewOracleClient(
-		cfg.RPC.URL,
+		cfg.RPC.URLs,
 		cfg.Oracle.Address,
 		"",
 		cfg.Attestor.PrivateKey,
@@ -203,7 +211,7 @@ func TestBatchModeIntegration(t *testing.T) {
 
 	registryClient, err := registry.NewClient(
 		cfg.Attestor.PrivateKey,
-		cfg.RPC.RegistryURL,
+		cfg.RPC.RegistryURLs,
 		cfg.Registry.Address,
 	)
 	if err != nil {

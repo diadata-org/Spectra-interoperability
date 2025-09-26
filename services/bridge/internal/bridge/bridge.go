@@ -17,6 +17,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/contracts"
@@ -27,8 +29,6 @@ import (
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/utils"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/rpc"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // Bridge represents the main bridge service

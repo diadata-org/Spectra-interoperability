@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/scanner"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/rpc"
 )
 
 // CreateBlockScanner creates the enhanced block scanner

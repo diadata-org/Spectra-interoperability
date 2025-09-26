@@ -11,24 +11,17 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // Client implements the RegistryClient interface
 type Client struct {
 	privateKey   string
-	ethClient    *ethclient.Client
 	registryAddr common.Address
 	fromAddress  common.Address
 }
 
 // NewClient creates a new registry client
-func NewClient(privateKey string, rpcURL string, registryAddr string) (*Client, error) {
-	ethClient, err := ethclient.Dial(rpcURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to Ethereum client: %w", err)
-	}
-
+func NewClient(privateKey string, registryAddr string) (*Client, error) {
 	cleanKey := strings.TrimPrefix(privateKey, "0x")
 	privKey, err := crypto.HexToECDSA(cleanKey)
 	if err != nil {
@@ -39,7 +32,6 @@ func NewClient(privateKey string, rpcURL string, registryAddr string) (*Client, 
 
 	return &Client{
 		privateKey:   privateKey,
-		ethClient:    ethClient,
 		registryAddr: common.HexToAddress(registryAddr),
 		fromAddress:  fromAddr,
 	}, nil
@@ -91,7 +83,4 @@ func (c *Client) PublishBatchIntents(ctx context.Context, signedIntents []byte) 
 
 // Close closes the Ethereum client connection
 func (c *Client) Close() {
-	if c.ethClient != nil {
-		c.ethClient.Close()
-	}
 }

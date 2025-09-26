@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	multirpc "github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/types"
 
@@ -19,7 +20,6 @@ import (
 	gethmath "github.com/ethereum/go-ethereum/common/math"
 	ethTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
@@ -44,13 +44,16 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	if intentVersion == "" {
 		intentVersion = "1.0"
 	}
-	ethClient, err := ethclient.Dial(cfg.RPC.URL)
+	multiClient, err := multirpc.NewMultiClient(cfg.RPC.URLs)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
 	}
-	defer ethClient.Close()
+	defer multiClient.Close()
+	if active := multiClient.ActiveURL(); active != "" {
+		logger.WithField("rpc_url", active).Debug("Connected to RPC endpoint for attest value")
+	}
 
-	chainID, err := ethClient.ChainID(ctx)
+	chainID, err := multiClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
@@ -219,11 +222,6 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	now := time.Now().Unix()
 	nowBig := big.NewInt(now)
 
-	symbols := make([]string, len(symbolsData))
-	for i, data := range symbolsData {
-		symbols[i] = data.Symbol
-	}
-
 	nonceVal := time.Now().UnixNano()
 	nonce := big.NewInt(nonceVal)
 	expiry := big.NewInt(now + 3600)
@@ -237,13 +235,16 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	if intentVersion == "" {
 		intentVersion = "1.0"
 	}
-	ethClient, err := ethclient.Dial(cfg.RPC.URL)
+	multiClient, err := multirpc.NewMultiClient(cfg.RPC.URLs)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to RPC: %v", err)
 	}
-	defer ethClient.Close()
+	defer multiClient.Close()
+	if active := multiClient.ActiveURL(); active != "" {
+		logger.WithField("rpc_url", active).Debug("Connected to RPC endpoint for batch attest")
+	}
 
-	chainID, err := ethClient.ChainID(ctx)
+	chainID, err := multiClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
@@ -395,7 +396,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 	startTime := time.Now()
 
 	cfg := config.Get()
-	registryRpcURL := cfg.RPC.RegistryURL
+	registryRPCs := cfg.RPC.RegistryURLs
 	registryContract := cfg.Registry.Address
 
 	if registryContract == "" {
@@ -419,27 +420,26 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 
 	logger.WithField("intent_count", intentCount).Info("Processing batch transaction")
 
-	// Connect to the registry chain
-	ethClient, err := ethclient.Dial(registryRpcURL)
+	registryClient, err := multirpc.NewMultiClient(registryRPCs)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
 	}
-	defer ethClient.Close()
+	defer registryClient.Close()
+	if active := registryClient.ActiveURL(); active != "" {
+		logger.WithField("rpc_url", active).Debug("Connected to registry RPC for batch publish")
+	}
 
-	// Parse private key
 	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
 	if err != nil {
 		return "", fmt.Errorf("failed to parse private key: %v", err)
 	}
 
-	// Get the chain ID
-	chainID, err := ethClient.ChainID(ctx)
+	chainID, err := registryClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
-	// Get gas price
-	gasPrice, err := ethClient.SuggestGasPrice(ctx)
+	gasPrice, err := registryClient.SuggestGasPrice(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get gas price: %v", err)
 	}
@@ -510,11 +510,12 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 
 	gasLimit := uint64(3000000 + (intentCount * 200000))
 	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
+	currentGasPrice := new(big.Int).Set(gasPrice)
 
 	var lastErr error
 	const maxNonceAttempts = 5
 	for attempt := 0; attempt < maxNonceAttempts; attempt++ {
-		nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
+		nonce, err := registryClient.PendingNonceAt(ctx, fromAddress)
 		if err != nil {
 			return "", fmt.Errorf("failed to get nonce: %v", err)
 		}
@@ -524,7 +525,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 			common.HexToAddress(registryContract),
 			big.NewInt(0),
 			gasLimit,
-			gasPrice,
+			currentGasPrice,
 			data,
 		)
 
@@ -533,12 +534,23 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 			return "", fmt.Errorf("failed to sign transaction: %v", err)
 		}
 
-		if err := ethClient.SendTransaction(ctx, signedTx); err != nil {
-			lastErr = err
-			if isNonceTooLowErr(err) {
+		if err := registryClient.SendTransaction(ctx, signedTx); err != nil {
+			retry, bumpGas, known := classifyTxError(err)
+			if known {
+				logger.WithField("info", "transaction already known").Debug("Batch transaction reported as already known")
+				logger.WithField("duration", time.Since(startTime).String()).Info("Batch transaction completed")
+				return signedTx.Hash().Hex(), nil
+			}
+
+			if retry {
+				lastErr = err
+				if bumpGas {
+					currentGasPrice = bumpGasPrice(currentGasPrice)
+				}
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
+
 			return "", fmt.Errorf("failed to send transaction: %v", err)
 		}
 
@@ -551,7 +563,7 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 
 func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON string) (string, error) {
 	cfg := config.Get()
-	registryRpcURL := cfg.RPC.RegistryURL
+	registryRPCs := cfg.RPC.RegistryURLs
 	registryContract := cfg.Registry.Address
 
 	if registryContract == "" {
@@ -565,12 +577,14 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 		return "", fmt.Errorf("failed to parse signed intent: %v", err)
 	}
 
-	// Connect to the registry chain
-	ethClient, err := ethclient.Dial(registryRpcURL)
+	registryClient, err := multirpc.NewMultiClient(registryRPCs)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
 	}
-	defer ethClient.Close()
+	defer registryClient.Close()
+	if active := registryClient.ActiveURL(); active != "" {
+		logger.WithField("rpc_url", active).Debug("Connected to registry RPC for publish")
+	}
 
 	const registryABI = `[{"inputs":[{"internalType":"string","name":"intentType","type":"string"},{"internalType":"string","name":"version","type":"string"},{"internalType":"uint256","name":"chainId","type":"uint256"},{"internalType":"uint256","name":"nonce","type":"uint256"},{"internalType":"uint256","name":"expiry","type":"uint256"},{"internalType":"string","name":"symbol","type":"string"},{"internalType":"uint256","name":"price","type":"uint256"},{"internalType":"uint256","name":"timestamp","type":"uint256"},{"internalType":"string","name":"source","type":"string"},{"internalType":"bytes","name":"signature","type":"bytes"},{"internalType":"address","name":"signer","type":"address"}],"name":"registerIntent","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 
@@ -613,21 +627,23 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 		return "", fmt.Errorf("failed to parse private key: %v", err)
 	}
 
-	chainID, err := ethClient.ChainID(ctx)
+	chainID, err := registryClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
 	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
-	gasPrice, err := ethClient.SuggestGasPrice(ctx)
+	gasPrice, err := registryClient.SuggestGasPrice(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get gas price: %v", err)
 	}
 
+	currentGasPrice := new(big.Int).Set(gasPrice)
+
 	var lastErr error
 	const maxNonceAttempts = 5
 	for attempt := 0; attempt < maxNonceAttempts; attempt++ {
-		nonce, err := ethClient.PendingNonceAt(ctx, fromAddress)
+		nonce, err := registryClient.PendingNonceAt(ctx, fromAddress)
 		if err != nil {
 			return "", fmt.Errorf("failed to get nonce: %v", err)
 		}
@@ -637,7 +653,7 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 			common.HexToAddress(registryContract),
 			big.NewInt(0),
 			3000000,
-			gasPrice,
+			currentGasPrice,
 			data,
 		)
 
@@ -646,12 +662,22 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 			return "", fmt.Errorf("failed to sign transaction: %v", err)
 		}
 
-		if err := ethClient.SendTransaction(ctx, signedTx); err != nil {
-			lastErr = err
-			if isNonceTooLowErr(err) {
+		if err := registryClient.SendTransaction(ctx, signedTx); err != nil {
+			retry, bumpGas, known := classifyTxError(err)
+			if known {
+				logger.WithField("info", "transaction already known").Debug("Transaction reported as already known")
+				return signedTx.Hash().Hex(), nil
+			}
+
+			if retry {
+				lastErr = err
+				if bumpGas {
+					currentGasPrice = bumpGasPrice(currentGasPrice)
+				}
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
+
 			return "", fmt.Errorf("failed to send transaction: %v", err)
 		}
 
@@ -661,9 +687,35 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 	return "", fmt.Errorf("failed to send transaction after %d attempts: %v", maxNonceAttempts, lastErr)
 }
 
-func isNonceTooLowErr(err error) bool {
+func classifyTxError(err error) (retry bool, bumpGas bool, alreadyKnown bool) {
 	if err == nil {
-		return false
+		return false, false, false
 	}
-	return strings.Contains(err.Error(), "nonce too low")
+
+	msg := strings.ToLower(err.Error())
+
+	if strings.Contains(msg, "already known") {
+		return false, false, true
+	}
+
+	if strings.Contains(msg, "replacement transaction underpriced") || strings.Contains(msg, "transaction underpriced") {
+		return true, true, false
+	}
+
+	if strings.Contains(msg, "nonce too low") {
+		return true, false, false
+	}
+
+	return false, false, false
+}
+
+func bumpGasPrice(current *big.Int) *big.Int {
+	bumped := new(big.Int).Mul(current, big.NewInt(110))
+	bumped.Div(bumped, big.NewInt(100))
+
+	if bumped.Cmp(current) <= 0 {
+		bumped = new(big.Int).Add(current, big.NewInt(1_000_000_000))
+	}
+
+	return bumped
 }

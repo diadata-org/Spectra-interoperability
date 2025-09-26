@@ -19,10 +19,10 @@ import (
 
 // MultiClient wraps multiple Ethereum clients with automatic failover
 type MultiClient struct {
-	urls          []string
-	clients       []*ethclient.Client
-	currentIndex  int
-	mu            sync.RWMutex
+	urls            []string
+	clients         []*ethclient.Client
+	currentIndex    int
+	mu              sync.RWMutex
 	lastHealthCheck time.Time
 	healthInterval  time.Duration
 }
@@ -50,12 +50,12 @@ func NewMultiClient(urls []string) (*MultiClient, error) {
 			continue
 		}
 		mc.clients[i] = client
-		
+
 		// Test the connection
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, err = client.ChainID(ctx)
 		cancel()
-		
+
 		if err != nil {
 			logger.Warnf("RPC %s failed health check: %v", url, err)
 			client.Close()
@@ -100,6 +100,18 @@ func (mc *MultiClient) getCurrentClient() (*ethclient.Client, error) {
 	return nil, errors.New("no active RPC client available")
 }
 
+// ActiveURL returns the currently selected RPC endpoint.
+func (mc *MultiClient) ActiveURL() string {
+	mc.mu.RLock()
+	defer mc.mu.RUnlock()
+
+	if mc.currentIndex >= 0 && mc.currentIndex < len(mc.urls) {
+		return mc.urls[mc.currentIndex]
+	}
+
+	return ""
+}
+
 // failover switches to the next available RPC
 func (mc *MultiClient) failover() error {
 	mc.mu.Lock()
@@ -111,7 +123,7 @@ func (mc *MultiClient) failover() error {
 	// Try next RPCs in order
 	for i := 0; i < len(mc.clients); i++ {
 		nextIndex := (originalIndex + i + 1) % len(mc.clients)
-		
+
 		// Skip if client is nil
 		if mc.clients[nextIndex] == nil {
 			// Try to reconnect
@@ -119,17 +131,17 @@ func (mc *MultiClient) failover() error {
 			if err != nil {
 				continue
 			}
-			
+
 			// Test connection
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_, err = client.ChainID(ctx)
 			cancel()
-			
+
 			if err != nil {
 				client.Close()
 				continue
 			}
-			
+
 			mc.clients[nextIndex] = client
 		}
 
@@ -211,7 +223,7 @@ func (mc *MultiClient) withRetry(fn func(*ethclient.Client) error) error {
 		}
 
 		lastErr = err
-		
+
 		// Check if error is network related
 		if isNetworkError(err) {
 			logger.Warnf("Network error on RPC %s: %v", mc.urls[mc.currentIndex], err)
@@ -233,7 +245,7 @@ func isNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	errStr := err.Error()
 	networkErrors := []string{
 		"connection refused",
@@ -259,9 +271,9 @@ func isNetworkError(err error) bool {
 }
 
 func contains(s, substr string) bool {
-	return len(substr) > 0 && len(s) >= len(substr) && 
-		(s == substr || len(s) > len(substr) && 
-			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
+	return len(substr) > 0 && len(s) >= len(substr) &&
+		(s == substr || len(s) > len(substr) &&
+			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
 				len(s) > len(substr) && findSubstring(s[1:len(s)-1], substr)))
 }
 
@@ -493,7 +505,7 @@ func (mc *MultiClient) Client() *rpc.Client {
 func (mc *MultiClient) GetCurrentRPCURL() string {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
-	
+
 	if mc.currentIndex >= 0 && mc.currentIndex < len(mc.urls) {
 		return mc.urls[mc.currentIndex]
 	}
@@ -504,7 +516,7 @@ func (mc *MultiClient) GetCurrentRPCURL() string {
 func (mc *MultiClient) GetHealthStatus() map[string]bool {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
-	
+
 	status := make(map[string]bool)
 	for i, url := range mc.urls {
 		status[url] = mc.clients[i] != nil

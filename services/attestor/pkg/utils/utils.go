@@ -17,6 +17,7 @@ func GetEnv(key, defaultValue string) string {
 func CreateEnvTemplate() error {
 	envContent := `# Oracle Attestor Configuration
 RPC_URL=https://testnet-rpc.diadata.org
+RPC_URLS=https://testnet-rpc.diadata.org
 ORACLE_ADDRESS=0x0087342f5f4c7AB23a37c045c3EF710749527c88
 PRIVATE_KEY=
 SYMBOLS=BTC/USD,ETH/USD

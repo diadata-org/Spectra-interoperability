@@ -9,21 +9,18 @@ func TestNewClient(t *testing.T) {
 	tests := []struct {
 		name         string
 		privateKey   string
-		rpcURL       string
 		registryAddr string
 		wantErr      bool
 	}{
 		{
 			name:         "invalid private key",
 			privateKey:   "invalid",
-			rpcURL:       "http://localhost:8545",
 			registryAddr: "0x1234567890abcdef1234567890abcdef12345678",
 			wantErr:      true,
 		},
 		{
 			name:         "valid hex private key without 0x",
 			privateKey:   "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-			rpcURL:       "http://localhost:8545",
 			registryAddr: "0x1234567890abcdef1234567890abcdef12345678",
 			wantErr:      false,
 		},
@@ -31,7 +28,7 @@ func TestNewClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewClient(tt.privateKey, tt.rpcURL, tt.registryAddr)
+			_, err := NewClient(tt.privateKey, tt.registryAddr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewClient() error = %v, wantErr %v", err, tt.wantErr)
 			}
