@@ -52,9 +52,18 @@ func (s *AttestorService) Start(ctx context.Context) error {
 	}
 
 	serviceCtx, cancel := context.WithCancel(ctx)
+	// Set both cancelFunc and running atomically under lock
 	s.cancelFunc = cancel
 	s.running = true
 	s.mu.Unlock()
+
+	// Defer cleanup in case of early return
+	defer func() {
+		s.mu.Lock()
+		s.running = false
+		s.cancelFunc = nil
+		s.mu.Unlock()
+	}()
 
 	logger.Info("Starting attestor service")
 

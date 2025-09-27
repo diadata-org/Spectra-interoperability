@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/api"
@@ -63,20 +65,35 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	metricsServer := metrics.NewMetricsServer(cfg.Metrics.Port)
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 3)
+
 	// Start metrics server
-	go metrics.StartMetricsServer(cfg.Metrics.Port)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := metricsServer.Start(); err != nil {
+			errCh <- fmt.Errorf("metrics server error: %w", err)
+		}
+	}()
 
 	// Start API server
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := apiServer.Start(); err != nil {
-			logger.Errorf("API server error: %v", err)
+			errCh <- fmt.Errorf("API server error: %w", err)
 		}
 	}()
 
 	// Start attestor service
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := attestorService.Start(ctx); err != nil {
-			logger.Errorf("Attestor service error: %v", err)
+			errCh <- fmt.Errorf("attestor service error: %w", err)
 		}
 	}()
 
@@ -85,7 +102,7 @@ func main() {
 		logger.Warnf("Failed to create .env.example file: %v", err)
 	}
 
-	// Wait for shutdown signal
+	// Wait for shutdown signal or service error
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -97,26 +114,56 @@ func main() {
 		"batch_mode":   cfg.Attestor.BatchMode,
 	}).Info("Attestor service started")
 
-	// Wait for signal
-	sig := <-sigCh
-	logger.WithField("signal", sig).Info("Received shutdown signal, exiting gracefully...")
+	// Wait for signal or error
+	select {
+	case sig := <-sigCh:
+		logger.WithField("signal", sig).Info("Received shutdown signal, exiting gracefully...")
+	case err := <-errCh:
+		logger.WithError(err).Error("Service error occurred, shutting down...")
+	}
 
 	// Cancel context to stop services
 	cancel()
 
-	// Stop services
+	// Create shutdown context with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	// Stop services gracefully with timeout
+	logger.Info("Stopping services...")
+
 	if err := attestorService.Stop(); err != nil {
 		logger.Errorf("Error stopping attestor service: %v", err)
 	}
+
 	if err := apiServer.Stop(); err != nil {
 		logger.Errorf("Error stopping API server: %v", err)
 	}
 
+	if err := metricsServer.Stop(shutdownCtx); err != nil {
+		logger.Errorf("Error stopping metrics server: %v", err)
+	}
+
+	// Close client connections
 	if oracleClient, ok := deps.oracle.(*client.OracleClient); ok {
 		oracleClient.Close()
 	}
 	if deps.registry != nil {
 		deps.registry.Close()
+	}
+
+	// Wait for all goroutines to finish with timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("All services stopped gracefully")
+	case <-shutdownCtx.Done():
+		logger.Warn("Shutdown timeout exceeded, forcing exit")
 	}
 
 	logger.Info("Shutdown complete")
@@ -180,7 +227,7 @@ func validateConfig(cfg *config.Config) error {
 	}
 
 	if cfg.Registry.Address == "" {
-		logger.Warn("Registry address not configured")
+		return fmt.Errorf("registry address not configured")
 	}
 
 	if len(cfg.Attestor.Symbols) == 0 {

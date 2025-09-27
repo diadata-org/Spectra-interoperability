@@ -1,11 +1,13 @@
 package metrics
 
 import (
+	"context"
 	"fmt"
+	"net/http"
+
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
 )
 
 var (
@@ -54,17 +56,48 @@ func init() {
 	prometheus.MustRegister(ProcessingDuration)
 }
 
-// StartMetricsServer starts the Prometheus metrics server
-func StartMetricsServer(port int) {
-	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+// MetricsServer represents a metrics server with graceful shutdown
+type MetricsServer struct {
+	server *http.Server
+}
+
+// NewMetricsServer creates a new metrics server
+func NewMetricsServer(port int) *MetricsServer {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
 
 	addr := fmt.Sprintf(":%d", port)
-	logger.Infof("Starting metrics server on port %d", port)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	return &MetricsServer{
+		server: &http.Server{
+			Addr:    addr,
+			Handler: mux,
+		},
+	}
+}
+
+// Start starts the metrics server
+func (m *MetricsServer) Start() error {
+	logger.Infof("Starting metrics server on %s", m.server.Addr)
+	if err := m.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("failed to start metrics server: %w", err)
+	}
+	return nil
+}
+
+// Stop gracefully stops the metrics server
+func (m *MetricsServer) Stop(ctx context.Context) error {
+	logger.Info("Stopping metrics server")
+	return m.server.Shutdown(ctx)
+}
+
+// StartMetricsServer starts the Prometheus metrics server (deprecated - use NewMetricsServer)
+func StartMetricsServer(port int) {
+	server := NewMetricsServer(port)
+	if err := server.Start(); err != nil {
 		logger.Errorf("Failed to start metrics server: %v", err)
 	}
 }

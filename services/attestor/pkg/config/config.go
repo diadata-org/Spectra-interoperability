@@ -177,3 +177,11 @@ func Get() *Config {
 	}
 	return cfg
 }
+
+// GetSafe returns the config safely with error handling
+func GetSafe() (*Config, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config not initialized")
+	}
+	return cfg, nil
+}
