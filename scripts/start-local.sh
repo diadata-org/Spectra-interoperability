@@ -238,7 +238,7 @@ deploy_receiver() {
         --private-key "${DEFAULT_KEY}" \
         --broadcast \
         "contracts/PushOracleReceiverV2.sol:PushOracleReceiverV2" \
-        --constructor-args "SpectraIntents" "1.0" 31337 "$registry_addr" 2>&1); then
+        --constructor-args "DIA Oracle" "1.0" 31337 "$registry_addr" 2>&1); then
         log_error "Failed to deploy PushOracleReceiverV2"
         echo "$output" >&2
         return 1
