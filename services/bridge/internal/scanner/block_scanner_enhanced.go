@@ -464,10 +464,46 @@ func (bs *EnhancedBlockScanner) scanBlockRange(ctx context.Context, startBlock, 
 		Topics:    [][]common.Hash{bs.eventSignatures},
 	}
 
-	// Get logs
+	// Get logs for the block range, fallback to per-block on error
 	logs, err := bs.client.FilterLogs(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to filter logs: %w", err)
+		logger.Errorf("RPC error filtering logs for blocks %d-%d: %v", startBlock, endBlock, err)
+		// Notify error but continue processing other blocks
+		select {
+		case bs.errorChan <- fmt.Errorf("RPC error filtering logs for blocks %d-%d: %w", startBlock, endBlock, err):
+		default:
+		}
+		// Fallback: scan each block individually
+		var allEvents []*bridgeTypes.EventData
+		for block := startBlock; block <= endBlock; block++ {
+			subQuery := ethereum.FilterQuery{
+				FromBlock: big.NewInt(int64(block)),
+				ToBlock:   big.NewInt(int64(block)),
+				Addresses: bs.contractAddresses,
+				Topics:    [][]common.Hash{bs.eventSignatures},
+			}
+			blockLogs, err2 := bs.client.FilterLogs(ctx, subQuery)
+			if err2 != nil {
+				logger.Errorf("RPC error filtering logs for block %d: %v", block, err2)
+				select {
+				case bs.errorChan <- fmt.Errorf("RPC error filtering logs for block %d: %w", block, err2):
+				default:
+				}
+				continue
+			}
+			for _, logEntry := range blockLogs {
+				event, err3 := bs.parseLog(logEntry)
+				if err3 != nil {
+					logger.Errorf("Failed to parse log at block %d, tx %s: %v", logEntry.BlockNumber, logEntry.TxHash.Hex(), err3)
+					continue
+				}
+				event.IsBackwardScan = isBackward
+				if bs.shouldProcessEvent(event) {
+					allEvents = append(allEvents, event)
+				}
+			}
+		}
+		return allEvents, nil
 	}
 
 	// Convert logs to events
@@ -766,6 +802,11 @@ func (bs *EnhancedBlockScanner) parseLog(log types.Log) (*bridgeTypes.EventData,
 }
 
 func (bs *EnhancedBlockScanner) findEventDefinition(eventSig common.Hash) (string, *config.EventDefinition) {
+	// Lazy initialize eventCache from eventDefinitions
+	if bs.eventCache == nil {
+		bs.eventCache = newEventCache(bs.eventDefinitions)
+	}
+	// Lookup event signature in cache
 	return bs.eventCache.findEvent(eventSig)
 }
 
