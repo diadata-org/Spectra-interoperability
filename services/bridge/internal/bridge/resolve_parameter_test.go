@@ -323,8 +323,21 @@ func TestBridge_buildMethodParams(t *testing.T) {
 			switch i {
 			case 0:
 				// First param could be any of the three
-				if intentParam, ok := param.(*bridgetypes.OracleIntent); ok {
-					paramValues["intent"] = intentParam
+				// Check for intent tuple struct
+				if intentTuple, ok := param.(struct {
+					IntentType string         `abi:"intentType"`
+					Version    string         `abi:"version"`
+					ChainId    *big.Int       `abi:"chainId"`
+					Nonce      *big.Int       `abi:"nonce"`
+					Expiry     *big.Int       `abi:"expiry"`
+					Symbol     string         `abi:"symbol"`
+					Price      *big.Int       `abi:"price"`
+					Timestamp  *big.Int       `abi:"timestamp"`
+					Source     string         `abi:"source"`
+					Signature  []byte         `abi:"signature"`
+					Signer     common.Address `abi:"signer"`
+				}); ok {
+					paramValues["intent"] = intentTuple
 				} else if randomParam, ok := param.([]int); ok {
 					paramValues["randomData"] = randomParam
 				} else if literalParam, ok := param.(string); ok {
@@ -332,8 +345,20 @@ func TestBridge_buildMethodParams(t *testing.T) {
 				}
 			case 1:
 				// Second param
-				if intentParam, ok := param.(*bridgetypes.OracleIntent); ok {
-					paramValues["intent"] = intentParam
+				if intentTuple, ok := param.(struct {
+					IntentType string         `abi:"intentType"`
+					Version    string         `abi:"version"`
+					ChainId    *big.Int       `abi:"chainId"`
+					Nonce      *big.Int       `abi:"nonce"`
+					Expiry     *big.Int       `abi:"expiry"`
+					Symbol     string         `abi:"symbol"`
+					Price      *big.Int       `abi:"price"`
+					Timestamp  *big.Int       `abi:"timestamp"`
+					Source     string         `abi:"source"`
+					Signature  []byte         `abi:"signature"`
+					Signer     common.Address `abi:"signer"`
+				}); ok {
+					paramValues["intent"] = intentTuple
 				} else if randomParam, ok := param.([]int); ok {
 					paramValues["randomData"] = randomParam
 				} else if literalParam, ok := param.(string); ok {
@@ -341,8 +366,20 @@ func TestBridge_buildMethodParams(t *testing.T) {
 				}
 			case 2:
 				// Third param
-				if intentParam, ok := param.(*bridgetypes.OracleIntent); ok {
-					paramValues["intent"] = intentParam
+				if intentTuple, ok := param.(struct {
+					IntentType string         `abi:"intentType"`
+					Version    string         `abi:"version"`
+					ChainId    *big.Int       `abi:"chainId"`
+					Nonce      *big.Int       `abi:"nonce"`
+					Expiry     *big.Int       `abi:"expiry"`
+					Symbol     string         `abi:"symbol"`
+					Price      *big.Int       `abi:"price"`
+					Timestamp  *big.Int       `abi:"timestamp"`
+					Source     string         `abi:"source"`
+					Signature  []byte         `abi:"signature"`
+					Signer     common.Address `abi:"signer"`
+				}); ok {
+					paramValues["intent"] = intentTuple
 				} else if randomParam, ok := param.([]int); ok {
 					paramValues["randomData"] = randomParam
 				} else if literalParam, ok := param.(string); ok {
@@ -357,7 +394,26 @@ func TestBridge_buildMethodParams(t *testing.T) {
 		assert.Contains(t, paramValues, "literal")
 
 		// Verify parameter values
-		assert.Equal(t, intent, paramValues["intent"])
+		if intentTuple, ok := paramValues["intent"].(struct {
+			IntentType string         `abi:"intentType"`
+			Version    string         `abi:"version"`
+			ChainId    *big.Int       `abi:"chainId"`
+			Nonce      *big.Int       `abi:"nonce"`
+			Expiry     *big.Int       `abi:"expiry"`
+			Symbol     string         `abi:"symbol"`
+			Price      *big.Int       `abi:"price"`
+			Timestamp  *big.Int       `abi:"timestamp"`
+			Source     string         `abi:"source"`
+			Signature  []byte         `abi:"signature"`
+			Signer     common.Address `abi:"signer"`
+		}); ok {
+			assert.Equal(t, intent.Symbol, intentTuple.Symbol)
+			assert.Equal(t, intent.Price, intentTuple.Price)
+			assert.Equal(t, intent.Timestamp, intentTuple.Timestamp)
+			assert.Equal(t, intent.Signer, intentTuple.Signer)
+		} else {
+			t.Errorf("Expected intent parameter to be a tuple struct, got %T", paramValues["intent"])
+		}
 		assert.Equal(t, []int{1, 2, 3, 4, 5}, paramValues["randomData"])
 		assert.Equal(t, "test_value", paramValues["literal"])
 	})

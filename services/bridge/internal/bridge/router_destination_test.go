@@ -289,11 +289,23 @@ func TestCallRouterMethodParameters(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, params, 1)
 
-		// Verify intent parameter
-		resolvedIntent, ok := params[0].(*bridgetypes.OracleIntent)
+		// Verify intent parameter - should be a tuple struct
+		intentTuple, ok := params[0].(struct {
+			IntentType string         `abi:"intentType"`
+			Version    string         `abi:"version"`
+			ChainId    *big.Int       `abi:"chainId"`
+			Nonce      *big.Int       `abi:"nonce"`
+			Expiry     *big.Int       `abi:"expiry"`
+			Symbol     string         `abi:"symbol"`
+			Price      *big.Int       `abi:"price"`
+			Timestamp  *big.Int       `abi:"timestamp"`
+			Source     string         `abi:"source"`
+			Signature  []byte         `abi:"signature"`
+			Signer     common.Address `abi:"signer"`
+		})
 		assert.True(t, ok)
-		assert.Equal(t, intent.Symbol, resolvedIntent.Symbol)
-		assert.Equal(t, intent.Price, resolvedIntent.Price)
+		assert.Equal(t, intent.Symbol, intentTuple.Symbol)
+		assert.Equal(t, intent.Price, intentTuple.Price)
 	})
 }
 

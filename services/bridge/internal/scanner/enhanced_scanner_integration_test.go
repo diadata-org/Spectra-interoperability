@@ -546,7 +546,10 @@ func TestEnhancedScanner_GapDetectionAndFill(t *testing.T) {
 		h.mockDB.mu.Lock()
 		h.collectedEvents = append(h.collectedEvents, event)
 		h.mockDB.mu.Unlock()
-		initialScanWg.Done()
+		// Only call Done() for initial scan events (not gap fill events)
+		if !event.IsGapFill {
+			initialScanWg.Done()
+		}
 	}
 
 	// Start the scanner, then simulate the blocks appearing

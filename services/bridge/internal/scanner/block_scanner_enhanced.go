@@ -669,9 +669,18 @@ func (bs *EnhancedBlockScanner) detectAndFillGaps(ctx context.Context) error {
 	currentScanBlock := bs.forwardBlock
 	bs.mu.RUnlock()
 
-	startBlock := currentScanBlock - lookback
-	if startBlock < bs.sourceConfig.StartBlock {
-		startBlock = bs.sourceConfig.StartBlock
+	// Determine start block for gap detection without underflow and skip the very first block
+	minGapStart := bs.sourceConfig.StartBlock + 1
+	var startBlock uint64
+	// If lookback range extends before start, clamp to first possible gap start
+	if currentScanBlock < lookback+bs.sourceConfig.StartBlock {
+		startBlock = minGapStart
+	} else {
+		// Safe subtraction
+		startBlock = currentScanBlock - lookback
+		if startBlock <= bs.sourceConfig.StartBlock {
+			startBlock = minGapStart
+		}
 	}
 
 	// Get all processed blocks in range
@@ -900,7 +909,7 @@ func (bs *EnhancedBlockScanner) shouldProcessEvent(event *bridgeTypes.EventData)
 
 // extractContractInfo extracts addresses and event signatures from config
 func (bs *EnhancedBlockScanner) extractContractInfo() error {
-	if bs.eventDefinitions == nil || len(bs.eventDefinitions) == 0 {
+	if len(bs.eventDefinitions) == 0 {
 		return fmt.Errorf("no event definitions provided")
 	}
 

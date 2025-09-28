@@ -418,8 +418,8 @@ func TestWriteClient_EdgeCases(t *testing.T) {
 		writeClient, err := NewWriteClient(cfg, "")
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
-		// Error should be about RPC connection since that happens first
-		assert.Contains(t, err.Error(), "failed to connect to destination chain")
+		// Error should be about invalid private key
+		assert.Contains(t, err.Error(), "failed to create receiver client")
 	})
 
 	t.Run("MultipleEnabledContracts", func(t *testing.T) {
@@ -448,8 +448,7 @@ func TestWriteClient_EdgeCases(t *testing.T) {
 
 		// Should use the first enabled receiver/pushoracle contract found
 		writeClient, err := NewWriteClient(cfg, privateKey)
-		assert.Error(t, err) // Will fail at RPC connection
-		assert.Nil(t, writeClient)
-		assert.Contains(t, err.Error(), "failed to connect to destination chain")
+		assert.NoError(t, err) // Should succeed with valid config and key
+		assert.NotNil(t, writeClient)
 	})
 }
