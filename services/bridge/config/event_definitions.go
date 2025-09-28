@@ -1,7 +1,7 @@
 package config
 
 import (
-	"encoding/json"
+	"fmt"
 	"math/big"
 )
 
@@ -121,7 +121,7 @@ func TransformValue(operation string, input interface{}, params map[string]inter
 	case "encode":
 		return nil, nil
 	default:
-		return nil, json.Unmarshal([]byte("unsupported operation"), nil)
+		return nil, fmt.Errorf("unsupported operation %s", operation)
 	}
 }
 
@@ -137,6 +137,6 @@ func ToBigInt(v interface{}) (*big.Int, error) {
 	case float64:
 		return big.NewInt(int64(val)), nil
 	default:
-		return nil, json.Unmarshal([]byte("cannot convert to big.Int"), nil)
+		return nil, fmt.Errorf("cannot convert %T to big.Int", v)
 	}
 }

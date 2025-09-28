@@ -1124,3 +1124,26 @@ func (bs *EnhancedBlockScanner) headTrackerLoop(ctx context.Context) {
 		}
 	}
 }
+
+// calculateEventSignature returns the Keccak256 event signature for the given event ABI
+func (bs *EnhancedBlockScanner) calculateEventSignature(eventABI string) common.Hash {
+	if bs.eventCache == nil {
+		// Fallback: calculate directly
+		var event struct {
+			Name   string `json:"name"`
+			Inputs []struct {
+				Type string `json:"type"`
+			} `json:"inputs"`
+		}
+		if err := json.Unmarshal([]byte(eventABI), &event); err != nil {
+			return common.Hash{}
+		}
+		var typesList []string
+		for _, input := range event.Inputs {
+			typesList = append(typesList, input.Type)
+		}
+		sigStr := fmt.Sprintf("%s(%s)", event.Name, strings.Join(typesList, ","))
+		return crypto.Keccak256Hash([]byte(sigStr))
+	}
+	return bs.eventCache.calculateSignature(eventABI)
+}
