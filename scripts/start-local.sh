@@ -11,6 +11,7 @@ NC='\033[0m' # No Color
 # Global variables
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTRACTS_DIR="${ROOT_DIR}/contracts"
+LOCAL_CONTRACTS_DIR="${CONTRACTS_DIR}"
 ATTESTOR_DIR="${ROOT_DIR}/services/attestor"
 BRIDGE_DIR="${ROOT_DIR}/services/bridge"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.local.yml"
@@ -18,12 +19,30 @@ COMPOSE_FILE="${ROOT_DIR}/docker-compose.local.yml"
 ANVIL_RPC="http://localhost:8545"
 DEFAULT_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
-CACHE_DIR="${ROOT_DIR}/.cache"
-WALLETS_DIR="${ROOT_DIR}/.wallets"
-REGISTRY_ADDR_FILE="${CACHE_DIR}/oracle_intent_registry.addr"
-RECEIVER_ADDR_FILE="${CACHE_DIR}/push_oracle_receiver_v2.addr"
-PROTOCOL_FEE_HOOK_FILE="${CACHE_DIR}/protocol_fee_hook.addr"
-DIA_ORACLE_ADDR_FILE="${CACHE_DIR}/dia_oracle_v2.addr"
+POSTGRES_HOST="postgres"
+POSTGRES_PORT="5432"
+POSTGRES_USER="bridge"
+POSTGRES_PASSWORD="password"
+POSTGRES_DB="oracle_bridge"
+POSTGRES_DSN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable"
+
+# Calculate the address from the private key
+get_address_from_key() {
+    local private_key="$1"
+    FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast wallet address --private-key "$private_key"
+}
+
+# Get the default signer address
+DEFAULT_ADDRESS=$(get_address_from_key "$DEFAULT_KEY")
+
+LOCAL_STACK_DIR="${ROOT_DIR}/.local-stack"
+CONTRACTS_ADDR_DIR="${LOCAL_STACK_DIR}/contracts"
+WALLETS_DIR="${LOCAL_STACK_DIR}/wallets"
+CONFIG_DIR="${LOCAL_STACK_DIR}/config"
+REGISTRY_ADDR_FILE="${CONTRACTS_ADDR_DIR}/oracle_intent_registry.addr"
+RECEIVER_ADDR_FILE="${CONTRACTS_ADDR_DIR}/push_oracle_receiver_v2.addr"
+PROTOCOL_FEE_HOOK_FILE="${CONTRACTS_ADDR_DIR}/protocol_fee_hook.addr"
+DIA_ORACLE_ADDR_FILE="${CONTRACTS_ADDR_DIR}/dia_oracle_v2.addr"
 
 # Logging functions
 log_info() {
@@ -68,6 +87,28 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Migrate from old .cache/.wallets structure to new .local-stack structure
+migrate_to_local_stack() {
+    if [ -d "${ROOT_DIR}/.cache" ] || [ -d "${ROOT_DIR}/.wallets" ]; then
+        log_info "Migrating existing files to new .local-stack structure..."
+
+        # Create new directories
+        mkdir -p "${LOCAL_STACK_DIR}" "${CONTRACTS_ADDR_DIR}" "${WALLETS_DIR}" "${CONFIG_DIR}"
+
+        # Migrate contract addresses
+        if [ -d "${ROOT_DIR}/.cache" ]; then
+            cp "${ROOT_DIR}/.cache"/*.addr "${CONTRACTS_ADDR_DIR}/" 2>/dev/null || true
+        fi
+
+        # Migrate wallets
+        if [ -d "${ROOT_DIR}/.wallets" ]; then
+            cp "${ROOT_DIR}/.wallets"/* "${WALLETS_DIR}/" 2>/dev/null || true
+        fi
+
+        log_success "Migration completed. Old .cache and .wallets directories can be removed manually if desired."
+    fi
+}
+
 # Step 1: Start Anvil
 start_anvil() {
     log_info "Step 1: Starting Anvil blockchain..."
@@ -96,12 +137,265 @@ start_anvil() {
     return 1
 }
 
-# Step 2: Deploy all contracts
-deploy_all_contracts() {
-    log_info "Step 2: Deploying smart contracts..."
+# Step 2: Clone contracts and deploy
+setup_and_deploy_contracts() {
+    log_info "Step 2: Setting up contracts repository and deploying..."
 
-    # Create cache and wallets directories
-    mkdir -p "${CACHE_DIR}" "${WALLETS_DIR}"
+    # Create local stack directories
+    mkdir -p "${LOCAL_STACK_DIR}" "${CONTRACTS_ADDR_DIR}" "${WALLETS_DIR}" "${CONFIG_DIR}" "${ROOT_DIR}/.temp"
+ 
+
+    # Deploy all contracts
+    deploy_all_contracts
+}
+
+# Use local contracts when remote is not available
+use_local_contracts() {
+    log_info "Setting up local contracts environment..."
+
+    # Ensure local contracts directory exists
+    mkdir -p "${LOCAL_CONTRACTS_DIR}"
+
+ 
+
+    # Set up minimal Foundry environment in local contracts directory
+    setup_local_foundry
+
+    # Update CONTRACTS_DIR to point to local directory
+    CONTRACTS_DIR="${LOCAL_CONTRACTS_DIR}"
+
+    # Deploy contracts using local setup
+    deploy_local_contracts
+}
+
+# Set up minimal Foundry environment for local contracts
+setup_local_foundry() {
+    log_info "Setting up local Foundry environment..."
+
+    cd "${ROOT_DIR}/contracts"
+
+    # Create foundry.toml for local contracts
+    cat <<FOUNDRY > "${ROOT_DIR}/contracts/foundry.toml"
+[profile.default]
+src = "contracts/contracts"
+out = "out"
+libs = ["lib"]
+solc = "0.8.29"
+
+[rpc_endpoints]
+anvil = "http://localhost:8545"
+FOUNDRY
+
+    # Initialize as Foundry project if not already done
+    if [ ! -d "lib" ] || [ ! -d "lib/openzeppelin-contracts" ]; then
+        log_info "Initializing Foundry project and installing dependencies..."
+
+        # Clean and initialize
+        rm -rf lib out cache
+        mkdir -p lib
+
+        # Initialize forge (this creates basic structure)
+        forge init --no-git --force .
+
+        # Install OpenZeppelin contracts
+        log_info "Installing OpenZeppelin contracts..."
+        if ! forge install OpenZeppelin/openzeppelin-contracts --no-git --no-commit; then
+            log_warning "Failed to install via forge, trying git clone..."
+            git clone https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
+        fi
+    fi
+
+    # Create remappings.txt for OpenZeppelin
+    cat <<REMAPPINGS > "${ROOT_DIR}/contracts/remappings.txt"
+@openzeppelin/=lib/openzeppelin-contracts/
+REMAPPINGS
+
+    # Verify OpenZeppelin installation
+    if [ ! -f "lib/openzeppelin-contracts/contracts/access/AccessControl.sol" ]; then
+        log_error "OpenZeppelin AccessControl.sol not found after installation"
+        return 1
+    fi
+
+    log_success "Local Foundry environment set up with OpenZeppelin"
+}
+
+# Deploy contracts using local setup
+deploy_local_contracts() {
+    log_info "Deploying contracts using local setup..."
+
+    # Deploy DIAOracleV2
+    deploy_dia_oracle_local
+
+    # Deploy OracleIntentRegistry
+    deploy_registry_local
+
+    # Deploy ProtocolFeeHook
+    deploy_protocol_fee_hook_local
+
+    # Deploy PushOracleReceiverV2
+    deploy_receiver_local
+
+    # Configure contracts
+    configure_contracts_local
+
+    # Fund receiver
+    fund_receiver
+}
+
+# Deploy DIAOracleV2 from local contracts
+deploy_dia_oracle_local() {
+    log_info "🚀 Deploying DIAOracleV2 from local contracts..."
+    local output
+    cd "${ROOT_DIR}/contracts"
+    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        --broadcast \
+        "contracts/DIAOracleV2.sol:DIAOracleV2" 2>&1); then
+        log_error "Failed to deploy DIAOracleV2"
+        echo "$output" >&2
+        return 1
+    fi
+
+    local address
+    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
+    if [ -z "$address" ]; then
+        log_error "Failed to capture DIAOracleV2 address"
+        echo "$output" >&2
+        return 1
+    fi
+
+    echo "$address" > "${DIA_ORACLE_ADDR_FILE}"
+    log_success "DIAOracleV2 deployed at $address"
+}
+
+# Deploy OracleIntentRegistry from local contracts
+deploy_registry_local() {
+    log_info "🚀 Deploying OracleIntentRegistry from local contracts..."
+    local output
+    cd "${ROOT_DIR}/contracts"
+    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        --broadcast \
+        --via-ir \
+        "contracts/OracleIntentRegistry.sol:OracleIntentRegistry" \
+        --constructor-args "DIA Oracle" "1.0" 2>&1); then
+        log_error "Failed to deploy OracleIntentRegistry"
+        echo "$output" >&2
+        return 1
+    fi
+
+    local address
+    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
+    if [ -z "$address" ]; then
+        log_error "Failed to capture OracleIntentRegistry address"
+        echo "$output" >&2
+        return 1
+    fi
+
+    echo "$address" > "${REGISTRY_ADDR_FILE}"
+    log_success "OracleIntentRegistry deployed at $address"
+}
+
+# Deploy ProtocolFeeHook from local contracts
+deploy_protocol_fee_hook_local() {
+    log_info "🚀 Deploying ProtocolFeeHook from local contracts..."
+    local output
+    cd "${ROOT_DIR}"
+    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        --broadcast \
+        "packages/contracts-spectra/ProtocolFeeHook.sol:ProtocolFeeHook" 2>&1); then
+        log_error "Failed to deploy ProtocolFeeHook"
+        echo "$output" >&2
+        return 1
+    fi
+
+    local address
+    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
+    if [ -z "$address" ]; then
+        log_error "Failed to capture ProtocolFeeHook address"
+        echo "$output" >&2
+        return 1
+    fi
+
+    echo "$address" > "${PROTOCOL_FEE_HOOK_FILE}"
+    log_success "ProtocolFeeHook deployed at $address"
+}
+
+# Deploy PushOracleReceiverV2 from local contracts
+deploy_receiver_local() {
+    local registry_addr
+    registry_addr=$(cat "${REGISTRY_ADDR_FILE}")
+    log_info "🚀 Deploying PushOracleReceiverV2 from local contracts with registry $registry_addr..."
+
+    local output
+    cd "${ROOT_DIR}/contracts"
+    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        --broadcast \
+        "contracts/PushOracleReceiverV2.sol:PushOracleReceiverV2" \
+        --constructor-args "SpectraIntents" "1.0" 31337 "$registry_addr" 2>&1); then
+        log_error "Failed to deploy PushOracleReceiverV2"
+        echo "$output" >&2
+        return 1
+    fi
+
+    local address
+    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
+    if [ -z "$address" ]; then
+        log_error "Failed to capture PushOracleReceiverV2 address"
+        echo "$output" >&2
+        return 1
+    fi
+
+    echo "$address" > "${RECEIVER_ADDR_FILE}"
+    log_success "PushOracleReceiverV2 deployed at $address"
+}
+
+# Configure contracts for local deployment
+configure_contracts_local() {
+    log_info "🔧 Configuring local contracts..."
+
+    local receiver_addr fee_hook_addr registry_addr
+    receiver_addr=$(cat "${RECEIVER_ADDR_FILE}")
+    fee_hook_addr=$(cat "${PROTOCOL_FEE_HOOK_FILE}")
+    registry_addr=$(cat "${REGISTRY_ADDR_FILE}")
+
+    # Set payment hook in PushOracleReceiverV2
+    log_info "Setting payment hook in PushOracleReceiverV2..."
+    if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        "$receiver_addr" \
+        "setPaymentHook(address)" \
+        "$fee_hook_addr"; then
+        log_warning "Failed to set payment hook (method might not exist)"
+    else
+        log_success "Payment hook configured"
+    fi
+
+    # Authorize signer in registry
+    log_info "Authorizing signer in registry ($DEFAULT_ADDRESS)..."
+    if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        "$registry_addr" \
+        "setSignerAuthorization(address,bool)" \
+        "$DEFAULT_ADDRESS" \
+        true; then
+        log_warning "Failed to authorize signer (method might not exist)"
+    else
+        log_success "Signer authorized: $DEFAULT_ADDRESS"
+    fi
+}
+
+# Deploy all contracts
+deploy_all_contracts() {
+    log_info "Deploying smart contracts..."
 
     # Deploy contracts in correct order
     deploy_dia_oracle
@@ -249,17 +543,17 @@ configure_contracts() {
     fi
 
     # Authorize signer in registry
-    log_info "Authorizing signer in registry..."
+    log_info "Authorizing signer in registry ($DEFAULT_ADDRESS)..."
     if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
         --rpc-url "${ANVIL_RPC}" \
         --private-key "${DEFAULT_KEY}" \
         "$registry_addr" \
         "setSignerAuthorization(address,bool)" \
-        "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" \
+        "$DEFAULT_ADDRESS" \
         true; then
         log_warning "Failed to authorize signer (method might not exist)"
     else
-        log_success "Signer authorized"
+        log_success "Signer authorized: $DEFAULT_ADDRESS"
     fi
 }
 
@@ -365,7 +659,7 @@ create_wallets() {
 # Create attestor environment
 create_attestor_env() {
     log_info "Creating attestor environment configuration..."
-    cat <<ENV > "${ATTESTOR_DIR}/.env"
+    cat <<ENV > "${CONFIG_DIR}/attestor.env"
 RPC_URLS=http://host.docker.internal:8545
 PRIVATE_KEY=${DEFAULT_KEY}
 INTENT_REGISTRY_ADDRESS=$(cat "${REGISTRY_ADDR_FILE}")
@@ -379,7 +673,7 @@ API_PORT=8081
 ENV
 
     # Create config.yaml for local development
-    cat <<YAML > "${ATTESTOR_DIR}/config-local.yaml"
+    cat <<YAML > "${CONFIG_DIR}/attestor-local.yaml"
 # Attestor Service Configuration for Local Development
 
 # RPC Configuration
@@ -426,20 +720,153 @@ YAML
 # Create bridge config
 create_bridge_config() {
     log_info "Creating bridge configuration..."
-    cat <<JSON > "${BRIDGE_DIR}/config.json"
+    cat <<JSON > "${CONFIG_DIR}/bridge.json"
 {
-  "chains": [
-    {
-      "name": "anvil",
-      "chain_id": 31337,
-      "rpc": {
-        "urls": ["http://host.docker.internal:8545"]
+  "database": {
+    "driver": "postgres",
+    "dsn": "${POSTGRES_DSN}"
+  },
+  "source": {
+    "chain_id": 31337,
+    "name": "Anvil Local",
+    "rpc_urls": ["http://host.docker.internal:8545"],
+    "ws_url": "ws://host.docker.internal:8545",
+    "start_block": 0
+  },
+  "event_definitions": {
+    "IntentRegistered": {
+      "contract": "$(cat "${REGISTRY_ADDR_FILE}")",
+      "abi": "{\"name\":\"IntentRegistered\",\"type\":\"event\",\"inputs\":[{\"name\":\"intentHash\",\"type\":\"bytes32\",\"indexed\":true},{\"name\":\"symbol\",\"type\":\"string\",\"indexed\":true},{\"name\":\"price\",\"type\":\"uint256\",\"indexed\":true},{\"name\":\"timestamp\",\"type\":\"uint256\",\"indexed\":false},{\"name\":\"signer\",\"type\":\"address\",\"indexed\":false}]}",
+      "data_extraction": {
+        "intentHash": "topics[1]",
+        "symbol": "topics[2]",
+        "price": "topics[3]",
+        "timestamp": "timestamp",
+        "signer": "signer"
+      },
+      "enrichment": {
+        "method": "getIntent",
+        "abi": "{\"name\":\"getIntent\",\"type\":\"function\",\"inputs\":[{\"name\":\"intentHash\",\"type\":\"bytes32\"}],\"outputs\":[{\"name\":\"intent\",\"type\":\"tuple\",\"components\":[{\"name\":\"intentType\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"nonce\",\"type\":\"uint256\"},{\"name\":\"expiry\",\"type\":\"uint256\"},{\"name\":\"symbol\",\"type\":\"string\"},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"signature\",\"type\":\"bytes\"},{\"name\":\"signer\",\"type\":\"address\"}]}]}",
+        "params": ["\${event.intentHash}"],
+        "returns": {
+          "fullIntent": "0"
+        }
       }
     }
+  },
+  "destinations": {
+    "31337": {
+      "chain_id": 31337,
+      "name": "Anvil Local",
+      "rpc_urls": ["http://host.docker.internal:8545"],
+      "enabled": true,
+      "contracts": [
+        {
+          "name": "push_oracle_receiver",
+          "address": "$(cat "${RECEIVER_ADDR_FILE}")",
+          "type": "pushoracle",
+          "enabled": true,
+          "gas_limit": 300000,
+          "gas_multiplier": 1.2,
+          "max_gas_price": "100000000000",
+          "abi": "[{\"name\":\"handleIntentUpdate\",\"type\":\"function\",\"inputs\":[{\"name\":\"intent\",\"type\":\"tuple\",\"components\":[{\"name\":\"intentType\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"nonce\",\"type\":\"uint256\"},{\"name\":\"expiry\",\"type\":\"uint256\"},{\"name\":\"symbol\",\"type\":\"string\"},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"signature\",\"type\":\"bytes\"},{\"name\":\"signer\",\"type\":\"address\"}]}]}]",
+          "methods": {
+            "intent_update": {
+              "method_name": "handleIntentUpdate",
+              "fields_mapping": {
+                "intent": "fullIntent"
+              },
+              "gas_limit": 300000
+            }
+          }
+        }
+      ]
+    }
+  },
+  "routers": [
+    {
+      "id": "oracle_intent_router_001",
+      "name": "oracle_intent_router",
+      "type": "event",
+      "enabled": true,
+      "private_key": "${DEFAULT_KEY}",
+      "triggers": {
+        "events": ["IntentRegistered"],
+        "conditions": []
+      },
+      "processing": {
+        "data_source": "enrichment",
+        "transformations": []
+      },
+      "destinations": [
+        {
+          "chain_id": 31337,
+          "contract": "$(cat "${RECEIVER_ADDR_FILE}")",
+          "method": {
+            "name": "handleIntentUpdate",
+            "abi": "{\"name\":\"handleIntentUpdate\",\"type\":\"function\",\"inputs\":[{\"name\":\"intent\",\"type\":\"tuple\",\"components\":[{\"name\":\"intentType\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"nonce\",\"type\":\"uint256\"},{\"name\":\"expiry\",\"type\":\"uint256\"},{\"name\":\"symbol\",\"type\":\"string\"},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"signature\",\"type\":\"bytes\"},{\"name\":\"signer\",\"type\":\"address\"}]}]}",
+            "params": {
+              "intent": "\${enrichment.fullIntent}"
+            },
+            "value": "0",
+            "gas_limit": 300000,
+            "gas_multiplier": 1.2
+          },
+          "condition": ""
+        }
+      ]
+    }
   ],
-  "receiver_address": "$(cat "${RECEIVER_ADDR_FILE}")",
-  "signer_private_key": "${DEFAULT_KEY}",
-  "protocol_fee_hook": "$(cat "${PROTOCOL_FEE_HOOK_FILE}")"
+  "event_monitor": {
+    "enabled": true,
+    "reconnect_interval": "5s",
+    "max_reconnect_attempts": 10
+  },
+  "block_scanner": {
+    "enabled": true,
+    "scan_interval": "10s",
+    "block_range": 100,
+    "max_block_gap": 1000,
+    "backward_sync": true
+  },
+  "event_processor": {
+    "batch_size": 10,
+    "validation_timeout": "30s",
+    "dedup_cache_size": 1000,
+    "dedup_cache_ttl": "1h"
+  },
+  "worker_pool": {
+    "max_workers": 5,
+    "task_queue_size": 100,
+    "task_timeout": "2m",
+    "retry_delay": "10s",
+    "max_retries": 3
+  },
+  "health_check": {
+    "enabled": true,
+    "check_interval": "30s",
+    "timeout": "10s",
+    "max_processing_lag": "2m",
+    "max_queue_size": 50
+  },
+  "recovery": {
+    "enabled": true,
+    "min_failures": 3,
+    "max_attempts": 5,
+    "retry_interval": "30s",
+    "recovery_timeout": "5m"
+  },
+  "api": {
+    "enabled": true,
+    "listen_addr": ":8080",
+    "enable_cors": true
+  },
+  "metrics": {
+    "enabled": true,
+    "namespace": "oracle_bridge"
+  },
+  "private_key": "${DEFAULT_KEY}",
+  "dry_run": false
 }
 JSON
     log_success "Bridge configuration created"
@@ -454,9 +881,15 @@ start_docker_services() {
     export RECEIVER_ADDRESS=$(cat "${RECEIVER_ADDR_FILE}")
     export PROTOCOL_FEE_HOOK_ADDRESS=$(cat "${PROTOCOL_FEE_HOOK_FILE}")
     export PRIVATE_KEY="${DEFAULT_KEY}"
+    export POSTGRES_HOST="${POSTGRES_HOST}"
+    export POSTGRES_PORT="${POSTGRES_PORT}"
+    export POSTGRES_USER="${POSTGRES_USER}"
+    export POSTGRES_PASSWORD="${POSTGRES_PASSWORD}"
+    export POSTGRES_DB="${POSTGRES_DB}"
+    export POSTGRES_DSN="${POSTGRES_DSN}"
 
     # Start only the services (not anvil since we have it running on host)
-    if ! docker compose -f "${COMPOSE_FILE}" up -d attestor bridge; then
+    if ! docker compose -f "${COMPOSE_FILE}" up -d postgres attestor bridge; then
         log_error "Failed to start Docker services"
         return 1
     fi
@@ -470,6 +903,12 @@ wait_for_services() {
     sleep 5
 
     # Check if services are running
+    if docker ps --filter "name=spectra-interoperability-postgres-1" --filter "status=running" | grep -q postgres; then
+        log_success "Postgres service is running"
+    else
+        log_warning "Postgres service may still be starting"
+    fi
+
     if docker ps --filter "name=spectra-interoperability-attestor-1" --filter "status=running" | grep -q attestor; then
         log_success "Attestor service is running"
     else
@@ -512,11 +951,14 @@ show_summary() {
     echo "  💰 ProtocolFeeHook: $(cat "${PROTOCOL_FEE_HOOK_FILE}")"
     echo "  📡 PushOracleReceiverV2: $(cat "${RECEIVER_ADDR_FILE}")"
     echo "  💰 Receiver Balance: 1 ETH"
+    echo "  🔑 Authorized Signer: $DEFAULT_ADDRESS"
+    echo "  🗄️  Postgres DSN: ${POSTGRES_DSN}"
     echo ""
     echo "🔧 Configuration Files:"
-    echo "  ⚖️  Attestor env: ${ATTESTOR_DIR}/.env"
-    echo "  📋 Attestor config: ${ATTESTOR_DIR}/config-local.yaml"
-    echo "  🌉 Bridge config: ${BRIDGE_DIR}/config.json"
+    echo "  ⚖️  Attestor env: ${CONFIG_DIR}/attestor.env"
+    echo "  📋 Attestor config: ${CONFIG_DIR}/attestor-local.yaml"
+    echo "  🌉 Bridge config: ${CONFIG_DIR}/bridge.json"
+    echo "  📄 Contract addresses: ${CONTRACTS_ADDR_DIR}/"
     echo "  🔑 Wallets: ${WALLETS_DIR}/"
     echo ""
     echo "🐳 Docker Services:"
@@ -532,6 +974,11 @@ show_summary() {
     echo "  🔄 Price updates every 10 seconds (ETH/USD & BTC/USD)"
     echo "  📊 Price updater log: ${ROOT_DIR}/.temp/price-updater.log"
     echo ""
+    echo "🌉 Bridge Router Configuration:"
+    echo "  📝 Event: IntentRegistered from OracleIntentRegistry"
+    echo "  🎯 Destination: PushOracleReceiverV2.handleIntentUpdate()"
+    echo "  🔐 Router Signer: $DEFAULT_ADDRESS (authorized in registry)"
+    echo ""
     log_info "Anvil is running with PID: $ANVIL_PID"
     if [ -n "${PRICE_UPDATER_PID:-}" ]; then
         log_info "Price updater is running with PID: $PRICE_UPDATER_PID"
@@ -544,11 +991,14 @@ main() {
     log_info "🚀 Starting Spectra Local Development Environment"
     echo ""
 
+    # Migrate to new directory structure if needed
+    migrate_to_local_stack
+
     # Step 1: Start Anvil blockchain
     start_anvil
 
-    # Step 2: Deploy all smart contracts
-    deploy_all_contracts
+    # Step 2: Set up contracts and deploy
+    setup_and_deploy_contracts
 
     # Step 3: Create wallets and configurations
     create_wallets_and_configs
