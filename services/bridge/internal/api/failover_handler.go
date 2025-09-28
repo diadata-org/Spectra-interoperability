@@ -22,12 +22,12 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
 
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/contracts"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/contracts"
 )
 
 // FailoverHandler handles failover requests from the Hyperlane monitor
@@ -88,7 +88,7 @@ func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *met
 					break
 				}
 			}
-			
+
 			if receiverAddr == "" {
 				logrus.Warnf("No receiver contract found for chain %d", dest.ChainID)
 				continue
@@ -117,15 +117,15 @@ func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *met
 
 // FailoverRequest represents a request to trigger failover delivery
 type FailoverRequest struct {
-	MessageID          string                     `json:"message_id"`
-	IntentHash         string                     `json:"intent_hash"`
-	PairID             string                     `json:"pair_id"`
-	SourceChainID      int                        `json:"source_chain_id"`
-	DestinationChainID int                        `json:"destination_chain_id"`
-	ReceiverAddress    string                     `json:"receiver_address"`
-	IntentData         *bridgetypes.OracleIntent  `json:"intent_data"`
-	Reason             string                     `json:"reason"`
-	
+	MessageID          string                    `json:"message_id"`
+	IntentHash         string                    `json:"intent_hash"`
+	PairID             string                    `json:"pair_id"`
+	SourceChainID      int                       `json:"source_chain_id"`
+	DestinationChainID int                       `json:"destination_chain_id"`
+	ReceiverAddress    string                    `json:"receiver_address"`
+	IntentData         *bridgetypes.OracleIntent `json:"intent_data"`
+	Reason             string                    `json:"reason"`
+
 	// Phase tracking timestamps
 	DetectionTimestamp       int64  `json:"detection_timestamp"`
 	MonitoringStartTimestamp int64  `json:"monitoring_start_timestamp"`
@@ -158,7 +158,7 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 			h.metrics.RecordHTTPRequest("POST", "/api/v1/failover/trigger", "202", time.Since(startTime).Seconds(), 0)
 		}
 	}()
-	
+
 	// Read the body first to debug it
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -166,13 +166,13 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	
+
 	// Debug log the raw request
 	logger.WithFields(logrus.Fields{
 		"body_size": len(bodyBytes),
-		"body": string(bodyBytes),
+		"body":      string(bodyBytes),
 	}).Info("Raw failover request body")
-	
+
 	var req FailoverRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.sendError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
@@ -192,7 +192,7 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 
 	// Generate request ID
 	requestID := uuid.New().String()
-	
+
 	// Record failover request metric
 	if h.metrics != nil {
 		h.metrics.RecordFailoverRequest(
@@ -202,13 +202,13 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 	}
 
 	logger.WithFields(logrus.Fields{
-		"request_id":   requestID,
-		"message_id":   req.MessageID,
-		"intent_hash":  req.IntentHash,
-		"source":       req.SourceChainID,
-		"destination":  req.DestinationChainID,
-		"receiver":     req.ReceiverAddress,
-		"reason":       req.Reason,
+		"request_id":  requestID,
+		"message_id":  req.MessageID,
+		"intent_hash": req.IntentHash,
+		"source":      req.SourceChainID,
+		"destination": req.DestinationChainID,
+		"receiver":    req.ReceiverAddress,
+		"reason":      req.Reason,
 	}).Info("Received failover request")
 
 	// Check if destination is configured
@@ -242,12 +242,12 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 			sigHex = fmt.Sprintf("0x%x", req.IntentData.Signature)
 		}
 		logger.WithFields(logrus.Fields{
-			"intent_type": req.IntentData.IntentType,
-			"symbol": req.IntentData.Symbol,
+			"intent_type":   req.IntentData.IntentType,
+			"symbol":        req.IntentData.Symbol,
 			"signature_len": len(req.IntentData.Signature),
 			"signature_nil": req.IntentData.Signature == nil,
-			"signature": sigHex,
-			"signer": req.IntentData.Signer.Hex(),
+			"signature":     sigHex,
+			"signer":        req.IntentData.Signer.Hex(),
 		}).Info("Received intent data in failover request")
 	}
 
@@ -270,18 +270,18 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 func (h *FailoverHandler) intentToContractStruct(intent *bridgetypes.OracleIntent) interface{} {
 	// Debug log all fields
 	logger.WithFields(logrus.Fields{
-		"intentType": intent.IntentType,
-		"version": intent.Version,
-		"chainId": intent.ChainID,
-		"nonce": intent.Nonce,
-		"expiry": intent.Expiry,
-		"symbol": intent.Symbol,
-		"price": intent.Price,
-		"timestamp": intent.Timestamp,
-		"source": intent.Source,
+		"intentType":    intent.IntentType,
+		"version":       intent.Version,
+		"chainId":       intent.ChainID,
+		"nonce":         intent.Nonce,
+		"expiry":        intent.Expiry,
+		"symbol":        intent.Symbol,
+		"price":         intent.Price,
+		"timestamp":     intent.Timestamp,
+		"source":        intent.Source,
 		"signature_len": len(intent.Signature),
 		"signature_nil": intent.Signature == nil,
-		"signer": intent.Signer.Hex(),
+		"signer":        intent.Signer.Hex(),
 	}).Info("Converting intent to contract struct")
 
 	// Ensure all big.Int fields are not nil
@@ -310,19 +310,19 @@ func (h *FailoverHandler) intentToContractStruct(intent *bridgetypes.OracleInten
 		signature = []byte{}
 	}
 
-	// No struct tags needed - field order and types must match contract exactly
+	// Include ABI tags so fields align with the contract tuple
 	return struct {
-		IntentType string
-		Version    string
-		ChainId    *big.Int
-		Nonce      *big.Int
-		Expiry     *big.Int
-		Symbol     string
-		Price      *big.Int
-		Timestamp  *big.Int
-		Source     string
-		Signature  []byte
-		Signer     common.Address
+		IntentType string         `abi:"intentType"`
+		Version    string         `abi:"version"`
+		ChainId    *big.Int       `abi:"chainId"`
+		Nonce      *big.Int       `abi:"nonce"`
+		Expiry     *big.Int       `abi:"expiry"`
+		Symbol     string         `abi:"symbol"`
+		Price      *big.Int       `abi:"price"`
+		Timestamp  *big.Int       `abi:"timestamp"`
+		Source     string         `abi:"source"`
+		Signature  []byte         `abi:"signature"`
+		Signer     common.Address `abi:"signer"`
 	}{
 		IntentType: intent.IntentType,
 		Version:    intent.Version,
@@ -341,13 +341,13 @@ func (h *FailoverHandler) intentToContractStruct(intent *bridgetypes.OracleInten
 // processFailover handles the actual failover transaction
 func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest, destConfig *DestinationConfig, client *ethclient.Client) {
 	startTime := time.Now()
-	
+
 	// Update status
 	h.updateStatus(requestID, "processing", "", "")
 
 	// Prepare transaction data
 	intentData := req.IntentData
-	
+
 	// Validate intent data
 	if intentData == nil {
 		h.updateStatus(requestID, "failed", "", "Intent data is nil")
@@ -362,23 +362,23 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		}
 		return
 	}
-	
+
 	// Log intent data for debugging
 	logger.WithFields(logrus.Fields{
-		"intent_type": intentData.IntentType,
-		"symbol":      intentData.Symbol,
-		"chainId":     intentData.ChainID,
-		"price":       intentData.Price,
-		"nonce":       intentData.Nonce,
+		"intent_type":   intentData.IntentType,
+		"symbol":        intentData.Symbol,
+		"chainId":       intentData.ChainID,
+		"price":         intentData.Price,
+		"nonce":         intentData.Nonce,
 		"signature_len": len(intentData.Signature),
-		"signer":      intentData.Signer.Hex(),
+		"signer":        intentData.Signer.Hex(),
 	}).Info("Processing failover with intent data")
-	
+
 	// Track intent lifecycle using the intent's timestamp
 	if h.intentMetrics != nil && intentData.Timestamp != nil {
 		intentTime := time.Unix(intentData.Timestamp.Int64(), 0)
 		intentHash := req.IntentHash
-		
+
 		// Record intent as created (using the original timestamp)
 		h.intentMetrics.RecordIntentCreated(
 			intentHash,
@@ -386,7 +386,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			"hyperlane",
 			intentTime,
 		)
-		
+
 		// Record the age of the intent when received
 		intentAge := time.Since(intentTime).Seconds()
 		receiverKey := req.ReceiverKey
@@ -399,50 +399,50 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			receiverKey,
 			intentAge,
 		)
-		
+
 		// Record phase tracking metrics if timestamps are provided
 		if req.DetectionTimestamp > 0 && req.MonitoringStartTimestamp > 0 && req.FailoverTimestamp > 0 {
 			detectionTime := time.Unix(req.DetectionTimestamp, 0)
 			monitoringStartTime := time.Unix(req.MonitoringStartTimestamp, 0)
 			failoverTime := time.Unix(req.FailoverTimestamp, 0)
-			
+
 			// Calculate phase durations
 			intentToEventDuration := detectionTime.Sub(intentTime).Seconds()
 			eventDetectionDuration := monitoringStartTime.Sub(detectionTime).Seconds()
 			hyperlaneWaitDuration := failoverTime.Sub(monitoringStartTime).Seconds()
-			
+
 			// Record phase durations using the unified metric
 			if h.metrics != nil {
 				// Intent to Event phase
 				h.metrics.RecordTimelinePhaseDuration("intent_to_event", intentToEventDuration, receiverKey)
-				
+
 				// Event Detection phase
 				h.metrics.RecordTimelinePhaseDuration("event_detection", eventDetectionDuration, receiverKey)
-				
+
 				// Hyperlane Wait phase
 				h.metrics.RecordTimelinePhaseDuration("wait", hyperlaneWaitDuration, receiverKey)
 			}
-			
+
 			// Log phase durations
 			logger.WithFields(logrus.Fields{
-				"intent_hash": intentHash,
-				"receiver_key": receiverKey,
-				"intent_to_event": intentToEventDuration,
-				"event_detection": eventDetectionDuration,
-				"hyperlane_wait": hyperlaneWaitDuration,
+				"intent_hash":             intentHash,
+				"receiver_key":            receiverKey,
+				"intent_to_event":         intentToEventDuration,
+				"event_detection":         eventDetectionDuration,
+				"hyperlane_wait":          hyperlaneWaitDuration,
 				"detection_to_monitoring": monitoringStartTime.Sub(detectionTime).Seconds(),
-				"monitoring_to_failover": failoverTime.Sub(monitoringStartTime).Seconds(),
-				"total_time": failoverTime.Sub(intentTime).Seconds(),
+				"monitoring_to_failover":  failoverTime.Sub(monitoringStartTime).Seconds(),
+				"total_time":              failoverTime.Sub(intentTime).Seconds(),
 			}).Info("Phase tracking metrics")
 		}
-		
+
 		logger.WithFields(logrus.Fields{
-			"intent_hash": intentHash,
+			"intent_hash":        intentHash,
 			"intent_age_seconds": intentAge,
-			"intent_timestamp": intentTime.Format(time.RFC3339),
+			"intent_timestamp":   intentTime.Format(time.RFC3339),
 		}).Info("Processing intent with age tracking")
 	}
-	
+
 	// Use the same ABI as receiver.go
 	contractABI, err := abi.JSON(strings.NewReader(contracts.PushOracleReceiverABI))
 	if err != nil {
@@ -454,7 +454,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	logger.WithFields(logrus.Fields{
 		"signature_hex": fmt.Sprintf("0x%x", intentData.Signature),
 		"signature_len": len(intentData.Signature),
-		"signer": intentData.Signer.Hex(),
+		"signer":        intentData.Signer.Hex(),
 	}).Info("About to pack intent for contract call")
 
 	// Pack the data (using helper function like receiver.go)
@@ -519,7 +519,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 
 	txHash := signedTx.Hash().Hex()
 	h.updateStatus(requestID, "sent", txHash, "")
-	
+
 	// Record transaction submitted metric
 	if h.metrics != nil {
 		h.metrics.RecordTransaction(
@@ -529,19 +529,19 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			gasPrice.Uint64()*destConfig.GasLimit,
 		)
 	}
-	
+
 	// Record intent submission in lifecycle
 	if h.intentMetrics != nil && intentData.Timestamp != nil {
 		intentTime := time.Unix(intentData.Timestamp.Int64(), 0)
 		lifecycle := &metrics.IntentLifecycle{
 			IntentHash:       req.IntentHash,
-			Symbol:          intentData.Symbol,
-			SourceChain:     fmt.Sprintf("%d", req.SourceChainID),
+			Symbol:           intentData.Symbol,
+			SourceChain:      fmt.Sprintf("%d", req.SourceChainID),
 			DestinationChain: fmt.Sprintf("%d", destConfig.ChainID),
 			IntentTime:       intentTime, // Set the original intent time
 			SubmissionTime:   time.Now(),
-			TxHash:          txHash,
-			GasPrice:        float64(gasPrice.Uint64()) / 1e9, // Convert to Gwei
+			TxHash:           txHash,
+			GasPrice:         float64(gasPrice.Uint64()) / 1e9, // Convert to Gwei
 		}
 		h.intentMetrics.RecordIntentSubmitted(lifecycle)
 	}
@@ -579,13 +579,13 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			"PushOracleReceiver",
 			confirmDuration,
 		)
-		
+
 		// Record timeline phases
 		h.metrics.RecordTimelinePhase("bridge_processing", time.Since(startTime).Seconds(),
 			fmt.Sprintf("%d", destConfig.ChainID),
 			fmt.Sprintf("%d", req.SourceChainID),
 			fmt.Sprintf("%d", req.DestinationChainID))
-			
+
 		h.metrics.RecordTimelinePhase("confirmation", confirmDuration,
 			fmt.Sprintf("%d", destConfig.ChainID),
 			fmt.Sprintf("%d", req.SourceChainID),
@@ -594,7 +594,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 
 	if receipt.Status == 1 {
 		h.updateStatus(requestID, "completed", txHash, "")
-		
+
 		// Record successful failover
 		if h.metrics != nil {
 			h.metrics.RecordFailoverProcessing(
@@ -604,7 +604,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 				true,
 				"",
 			)
-			
+
 			// Record total delivery time (if we have the original dispatch time)
 			// This would need to be passed from hyperlane-monitor
 			h.metrics.RecordTotalDeliveryTime(
@@ -615,29 +615,29 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 				"failover",
 			)
 		}
-		
+
 		// Record bridge processing phase duration
 		if h.metrics != nil && req.ReceiverKey != "" {
 			bridgeProcessingDuration := time.Since(startTime).Seconds()
 			h.metrics.RecordTimelinePhaseDuration("bridge_processing", bridgeProcessingDuration, req.ReceiverKey)
 		}
-		
+
 		// Record intent confirmation in lifecycle
 		if h.intentMetrics != nil && intentData.Timestamp != nil {
 			intentTime := time.Unix(intentData.Timestamp.Int64(), 0)
 			lifecycle := &metrics.IntentLifecycle{
 				IntentHash:       req.IntentHash,
-				Symbol:          intentData.Symbol,
-				SourceChain:     fmt.Sprintf("%d", req.SourceChainID),
+				Symbol:           intentData.Symbol,
+				SourceChain:      fmt.Sprintf("%d", req.SourceChainID),
 				DestinationChain: fmt.Sprintf("%d", destConfig.ChainID),
-				IntentTime:       intentTime, // Set the original intent time for end-to-end calculation
+				IntentTime:       intentTime,                                                             // Set the original intent time for end-to-end calculation
 				SubmissionTime:   time.Now().Add(-time.Duration(confirmDuration * float64(time.Second))), // Approximate submission time
 				ConfirmationTime: time.Now(),
-				TxHash:          txHash,
+				TxHash:           txHash,
 			}
 			h.intentMetrics.RecordIntentConfirmed(lifecycle, receipt.GasUsed)
 		}
-		
+
 		logger.WithFields(logrus.Fields{
 			"request_id": requestID,
 			"tx_hash":    txHash,
@@ -717,12 +717,12 @@ func (h *FailoverHandler) ProcessFailoverRequest(requestID string, req FailoverR
 func (h *FailoverHandler) GetStatus(requestID string) *FailoverStatus {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	
+
 	status, exists := h.requestStatus[requestID]
 	if !exists {
 		return nil
 	}
-	
+
 	// Return a copy to avoid race conditions
 	statusCopy := *status
 	return &statusCopy
@@ -781,8 +781,8 @@ func (h *FailoverHandler) GetFailoverStats(w http.ResponseWriter, r *http.Reques
 	destinations := []map[string]interface{}{}
 	for chainID, config := range h.destinations {
 		dest := map[string]interface{}{
-			"chain_id": chainID,
-			"receiver": config.ReceiverAddress.Hex(),
+			"chain_id":  chainID,
+			"receiver":  config.ReceiverAddress.Hex(),
 			"connected": h.clients[chainID] != nil,
 		}
 		destinations = append(destinations, dest)

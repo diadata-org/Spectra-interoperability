@@ -8,23 +8,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // OracleIntent represents an oracle intent from the registry
 type OracleIntent struct {
-	IntentType string         `json:"intentType"`
-	Version    string         `json:"version"`
-	ChainID    *big.Int       `json:"chainId"`
-	Nonce      *big.Int       `json:"nonce"`
-	Expiry     *big.Int       `json:"expiry"`
-	Symbol     string         `json:"symbol"`
-	Price      *big.Int       `json:"price"`
-	Timestamp  *big.Int       `json:"timestamp"`
-	Source     string         `json:"source"`
-	Signature  HexBytes       `json:"signature"`
-	Signer     common.Address `json:"signer"`
+	IntentType string         `json:"intentType" abi:"intentType"`
+	Version    string         `json:"version" abi:"version"`
+	ChainID    *big.Int       `json:"chainId" abi:"chainId"`
+	Nonce      *big.Int       `json:"nonce" abi:"nonce"`
+	Expiry     *big.Int       `json:"expiry" abi:"expiry"`
+	Symbol     string         `json:"symbol" abi:"symbol"`
+	Price      *big.Int       `json:"price" abi:"price"`
+	Timestamp  *big.Int       `json:"timestamp" abi:"timestamp"`
+	Source     string         `json:"source" abi:"source"`
+	Signature  HexBytes       `json:"signature" abi:"signature"`
+	Signer     common.Address `json:"signer" abi:"signer"`
 }
 
 // HexBytes is a byte slice that marshals/unmarshals as hex string
@@ -44,7 +44,7 @@ func (h *HexBytes) UnmarshalJSON(data []byte) error {
 		*h = nil
 		return nil
 	}
-	
+
 	var str string
 	if err := json.Unmarshal(data, &str); err != nil {
 		// Try as base64 byte array for backward compatibility
@@ -55,7 +55,7 @@ func (h *HexBytes) UnmarshalJSON(data []byte) error {
 		*h = HexBytes(b)
 		return nil
 	}
-	
+
 	str = strings.TrimPrefix(str, "0x")
 	b, err := hex.DecodeString(str)
 	if err != nil {
@@ -79,11 +79,11 @@ func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
 	}{
 		Alias: (*Alias)(oi),
 	}
-	
+
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	
+
 	// Convert json.Number to *big.Int
 	if aux.ChainID != "" {
 		val, ok := new(big.Int).SetString(string(aux.ChainID), 10)
@@ -92,7 +92,7 @@ func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
 		}
 		oi.ChainID = val
 	}
-	
+
 	if aux.Nonce != "" {
 		val, ok := new(big.Int).SetString(string(aux.Nonce), 10)
 		if !ok {
@@ -100,7 +100,7 @@ func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
 		}
 		oi.Nonce = val
 	}
-	
+
 	if aux.Expiry != "" {
 		val, ok := new(big.Int).SetString(string(aux.Expiry), 10)
 		if !ok {
@@ -108,7 +108,7 @@ func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
 		}
 		oi.Expiry = val
 	}
-	
+
 	if aux.Price != "" {
 		val, ok := new(big.Int).SetString(string(aux.Price), 10)
 		if !ok {
@@ -116,7 +116,7 @@ func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
 		}
 		oi.Price = val
 	}
-	
+
 	if aux.Timestamp != "" {
 		val, ok := new(big.Int).SetString(string(aux.Timestamp), 10)
 		if !ok {
@@ -124,7 +124,7 @@ func (oi *OracleIntent) UnmarshalJSON(data []byte) error {
 		}
 		oi.Timestamp = val
 	}
-	
+
 	return nil
 }
 
@@ -140,12 +140,12 @@ func (oi *OracleIntent) GetPriceFloat() float64 {
 	if oi.Price == nil {
 		return 0
 	}
-	
+
 	// Convert from wei (18 decimals) to float
 	priceFloat := new(big.Float).SetInt(oi.Price)
 	divisor := new(big.Float).SetInt(new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil))
 	priceFloat.Quo(priceFloat, divisor)
-	
+
 	result, _ := priceFloat.Float64()
 	return result
 }
@@ -160,13 +160,13 @@ func (oi *OracleIntent) GetTimestamp() time.Time {
 
 // IntentRegisteredEvent represents the IntentRegistered event from the registry
 type IntentRegisteredEvent struct {
-	IntentHash common.Hash    `json:"intent_hash"`
-	Symbol     string         `json:"symbol"`
-	Price      *big.Int       `json:"price"`
-	Timestamp  *big.Int       `json:"timestamp"`
-	Signer     common.Address `json:"signer"`
-	BlockNumber uint64        `json:"block_number"`
-	TxHash     common.Hash    `json:"tx_hash"`
+	IntentHash  common.Hash    `json:"intent_hash"`
+	Symbol      string         `json:"symbol"`
+	Price       *big.Int       `json:"price"`
+	Timestamp   *big.Int       `json:"timestamp"`
+	Signer      common.Address `json:"signer"`
+	BlockNumber uint64         `json:"block_number"`
+	TxHash      common.Hash    `json:"tx_hash"`
 }
 
 // BridgeStatus represents the status of a bridge operation
@@ -199,53 +199,53 @@ func (s BridgeStatus) String() string {
 
 // BridgeOperation represents a bridge operation
 type BridgeOperation struct {
-	ID              string            `json:"id"`
-	SourceChainID   int64            `json:"source_chain_id"`
-	DestChainID     int64            `json:"dest_chain_id"`
-	IntentHash      common.Hash      `json:"intent_hash"`
-	Symbol          string           `json:"symbol"`
-	Price           *big.Int         `json:"price"`
-	Timestamp       *big.Int         `json:"timestamp"`
-	Signer          common.Address   `json:"signer"`
-	Status          BridgeStatus     `json:"status"`
-	TxHash          common.Hash      `json:"tx_hash"`
-	GasUsed         uint64           `json:"gas_used"`
-	GasPrice        *big.Int         `json:"gas_price"`
-	RetryCount      int              `json:"retry_count"`
-	LastError       string           `json:"last_error"`
-	CreatedAt       time.Time        `json:"created_at"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	ProcessedAt     *time.Time       `json:"processed_at"`
+	ID            string         `json:"id"`
+	SourceChainID int64          `json:"source_chain_id"`
+	DestChainID   int64          `json:"dest_chain_id"`
+	IntentHash    common.Hash    `json:"intent_hash"`
+	Symbol        string         `json:"symbol"`
+	Price         *big.Int       `json:"price"`
+	Timestamp     *big.Int       `json:"timestamp"`
+	Signer        common.Address `json:"signer"`
+	Status        BridgeStatus   `json:"status"`
+	TxHash        common.Hash    `json:"tx_hash"`
+	GasUsed       uint64         `json:"gas_used"`
+	GasPrice      *big.Int       `json:"gas_price"`
+	RetryCount    int            `json:"retry_count"`
+	LastError     string         `json:"last_error"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	ProcessedAt   *time.Time     `json:"processed_at"`
 }
 
 // ChainStatus represents the status of a blockchain connection
 type ChainStatus struct {
-	ChainID          int64     `json:"chain_id"`
-	Name             string    `json:"name"`
-	Connected        bool      `json:"connected"`
-	LatestBlock      uint64    `json:"latest_block"`
-	SyncedBlock      uint64    `json:"synced_block"`
-	LastHealthCheck  time.Time `json:"last_health_check"`
-	LastError        string    `json:"last_error"`
-	PendingTxCount   int       `json:"pending_tx_count"`
-	SuccessfulTxCount int      `json:"successful_tx_count"`
-	FailedTxCount    int       `json:"failed_tx_count"`
+	ChainID           int64     `json:"chain_id"`
+	Name              string    `json:"name"`
+	Connected         bool      `json:"connected"`
+	LatestBlock       uint64    `json:"latest_block"`
+	SyncedBlock       uint64    `json:"synced_block"`
+	LastHealthCheck   time.Time `json:"last_health_check"`
+	LastError         string    `json:"last_error"`
+	PendingTxCount    int       `json:"pending_tx_count"`
+	SuccessfulTxCount int       `json:"successful_tx_count"`
+	FailedTxCount     int       `json:"failed_tx_count"`
 }
 
 // BridgeStats represents bridge statistics
 type BridgeStats struct {
-	TotalOperations    int64              `json:"total_operations"`
-	SuccessfulOps      int64              `json:"successful_ops"`
-	FailedOps          int64              `json:"failed_ops"`
-	PendingOps         int64              `json:"pending_ops"`
-	ProcessingOps      int64              `json:"processing_ops"`
-	RetryingOps        int64              `json:"retrying_ops"`
+	TotalOperations    int64                  `json:"total_operations"`
+	SuccessfulOps      int64                  `json:"successful_ops"`
+	FailedOps          int64                  `json:"failed_ops"`
+	PendingOps         int64                  `json:"pending_ops"`
+	ProcessingOps      int64                  `json:"processing_ops"`
+	RetryingOps        int64                  `json:"retrying_ops"`
 	ChainStats         map[int64]*ChainStatus `json:"chain_stats"`
-	LastProcessedBlock uint64             `json:"last_processed_block"`
-	StartTime          time.Time          `json:"start_time"`
-	Uptime             time.Duration      `json:"uptime"`
-	UptimeFormatted    string             `json:"uptime_formatted"`
-	ScannerStats       *ScannerStats      `json:"scanner_stats,omitempty"`
+	LastProcessedBlock uint64                 `json:"last_processed_block"`
+	StartTime          time.Time              `json:"start_time"`
+	Uptime             time.Duration          `json:"uptime"`
+	UptimeFormatted    string                 `json:"uptime_formatted"`
+	ScannerStats       *ScannerStats          `json:"scanner_stats,omitempty"`
 }
 
 // UpdateRequest represents a request to update an oracle value
@@ -259,9 +259,9 @@ type UpdateRequest struct {
 	Priority         int                       `json:"priority"`
 	Retries          int                       `json:"retries"`
 	CreatedAt        time.Time                 `json:"created_at"`
-	
+
 	// New router system fields
-	RouterID                string                           `json:"router_id,omitempty"`
+	RouterID                string                          `json:"router_id,omitempty"`
 	DestinationMethodConfig *config.DestinationMethodConfig `json:"destination_method_config,omitempty"`
 	ExtractedData           *config.ExtractedData           `json:"extracted_data,omitempty"`
 }
@@ -290,21 +290,21 @@ type EventData struct {
 	Price           *big.Int       `json:"price"`
 	Timestamp       *big.Int       `json:"timestamp"`
 	Signer          common.Address `json:"signer"`
-	
+
 	// IntArraySet event specific fields
-	RequestId       *big.Int       `json:"request_id,omitempty"`
-	Round           *big.Int       `json:"round,omitempty"`
-	Seed            string         `json:"seed,omitempty"`
-	Signature       string         `json:"signature,omitempty"`
-	RandomInts      []*big.Int     `json:"random_ints,omitempty"`
-	RawData         []byte         `json:"raw_data,omitempty"`
-	
-	Data            map[string]interface{} `json:"data"`
-	Raw             interface{}    `json:"raw"`
-	IsGapFill       bool           `json:"is_gap_fill"`
-	IsBackwardScan  bool           `json:"is_backward_scan"`
-	Priority        int            `json:"priority"`
-	DetectedAt      time.Time      `json:"detected_at"`
+	RequestId  *big.Int   `json:"request_id,omitempty"`
+	Round      *big.Int   `json:"round,omitempty"`
+	Seed       string     `json:"seed,omitempty"`
+	Signature  string     `json:"signature,omitempty"`
+	RandomInts []*big.Int `json:"random_ints,omitempty"`
+	RawData    []byte     `json:"raw_data,omitempty"`
+
+	Data           map[string]interface{} `json:"data"`
+	Raw            interface{}            `json:"raw"`
+	IsGapFill      bool                   `json:"is_gap_fill"`
+	IsBackwardScan bool                   `json:"is_backward_scan"`
+	Priority       int                    `json:"priority"`
+	DetectedAt     time.Time              `json:"detected_at"`
 }
 
 // WorkerStats represents worker pool statistics

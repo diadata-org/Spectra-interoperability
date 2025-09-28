@@ -622,23 +622,39 @@ func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig,
 			return nil, fmt.Errorf("failed to resolve parameter %s: %w", paramName, err)
 		}
 
-		// Debug log for intent parameter specifically
+		// Convert OracleIntent into tuple struct for ABI packing
 		if paramName == "intent" && paramSource == "${enrichment.fullIntent}" {
 			if intent, ok := value.(*bridgetypes.OracleIntent); ok {
-				logger.Debugf("Sending intent to method %s: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s",
-					methodConfig.Name,
-					intent.Symbol,
-					intent.Price.String(),
-					intent.Timestamp.String(),
-					intent.Nonce.String(),
-					intent.Expiry.String(),
-					intent.Signer.Hex(),
-					intent.Source)
-			} else {
-				logger.Debugf("Sending parameter to method %s: type=%T value=%+v", methodConfig.Name, value, value)
+				tuple := struct {
+					IntentType string         `abi:"intentType"`
+					Version    string         `abi:"version"`
+					ChainId    *big.Int       `abi:"chainId"`
+					Nonce      *big.Int       `abi:"nonce"`
+					Expiry     *big.Int       `abi:"expiry"`
+					Symbol     string         `abi:"symbol"`
+					Price      *big.Int       `abi:"price"`
+					Timestamp  *big.Int       `abi:"timestamp"`
+					Source     string         `abi:"source"`
+					Signature  []byte         `abi:"signature"`
+					Signer     common.Address `abi:"signer"`
+				}{
+					IntentType: intent.IntentType,
+					Version:    intent.Version,
+					ChainId:    intent.ChainID,
+					Nonce:      intent.Nonce,
+					Expiry:     intent.Expiry,
+					Symbol:     intent.Symbol,
+					Price:      intent.Price,
+					Timestamp:  intent.Timestamp,
+					Source:     intent.Source,
+					Signature:  []byte(intent.Signature),
+					Signer:     intent.Signer,
+				}
+				params = append(params, tuple)
+				continue
 			}
 		}
-
+		// Default append
 		params = append(params, value)
 	}
 

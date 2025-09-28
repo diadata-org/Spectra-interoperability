@@ -53,17 +53,19 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 
 	logger.Infof("NonceManager: Chain state - confirmed: %d, pending: %d", confirmedNonce, pendingNonce)
 
-	// Always use confirmed nonce to avoid gaps
-	nonce := confirmedNonce
-	
-	// If there are stuck transactions, mark this as a retry
+	// Prefer pending nonce when it's ahead of confirmed nonce
+	var nonce uint64
 	if pendingNonce > confirmedNonce {
-		nm.retryCount[nonce]++
-		logger.Warnf("NonceManager: Stuck transactions detected (%d pending). Using nonce %d for replacement (attempt %d)", 
-			pendingNonce - confirmedNonce, nonce, nm.retryCount[nonce])
-	} else {
-		// Clean state
+		// Use pending nonce to continue from where we left off
+		nonce = pendingNonce
+		logger.Infof("NonceManager: Using pending nonce %d (ahead of confirmed %d)", pendingNonce, confirmedNonce)
+		// Reset retry count since we're advancing
 		nm.retryCount[nonce] = 0
+	} else {
+		// Use confirmed nonce when pending is not ahead
+		nonce = confirmedNonce
+		nm.retryCount[nonce] = 0
+		logger.Infof("NonceManager: Using confirmed nonce %d (pending: %d)", confirmedNonce, pendingNonce)
 	}
 
 	// Clear any old retry counts
