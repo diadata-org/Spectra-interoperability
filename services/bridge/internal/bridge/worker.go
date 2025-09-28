@@ -18,13 +18,13 @@ type WorkerTask struct {
 
 // WorkerPool manages a pool of workers for processing update requests
 type WorkerPool struct {
-	maxWorkers    int
-	taskQueue     chan *WorkerTask
-	workers       []*Worker
-	shutdownChan  chan struct{}
-	wg            sync.WaitGroup
-	mu            sync.RWMutex
-	running       bool
+	maxWorkers   int
+	taskQueue    chan *WorkerTask
+	workers      []*Worker
+	shutdownChan chan struct{}
+	wg           sync.WaitGroup
+	mu           sync.RWMutex
+	running      bool
 }
 
 // Worker represents a single worker in the pool
@@ -64,7 +64,7 @@ func (wp *WorkerPool) Start(ctx context.Context) {
 			wg:        &wp.wg,
 		}
 		wp.workers[i] = worker
-		
+
 		wp.wg.Add(1)
 		go worker.start(ctx)
 	}
@@ -129,7 +129,7 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 // start starts a worker
 func (w *Worker) start(ctx context.Context) {
 	defer w.wg.Done()
-	
+
 	logger.Debugf("Worker %d started", w.id)
 
 	for {
@@ -149,7 +149,7 @@ func (w *Worker) start(ctx context.Context) {
 // processTask processes a single task
 func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	startTime := time.Now()
-	
+
 	logger.Debugf("Worker %d processing task %s", w.id, task.ID)
 
 	// Process the task with retry logic

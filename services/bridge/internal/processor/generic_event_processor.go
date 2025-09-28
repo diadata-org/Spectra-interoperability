@@ -1,4 +1,3 @@
-
 package processor
 
 import (
@@ -16,9 +15,9 @@ import (
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/pipeline"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
@@ -27,38 +26,38 @@ import (
 
 // GenericEventProcessor processes events using the generic pipeline
 type GenericEventProcessor struct {
-	config          *config.EventProcessorConfig
-	eventDefs       map[string]*config.EventDefinition
-	destinations    map[int64]*config.DestinationConfig
-	db              *database.DB
-	routerRegistry  *router.GenericRegistry
-	sourceClient    *ethclient.Client
-	destClients     map[int64]*ethclient.Client
+	config         *config.EventProcessorConfig
+	eventDefs      map[string]*config.EventDefinition
+	destinations   map[int64]*config.DestinationConfig
+	db             *database.DB
+	routerRegistry *router.GenericRegistry
+	sourceClient   *ethclient.Client
+	destClients    map[int64]*ethclient.Client
 
-	extractor       *pipeline.DataExtractor
-	enricher        *pipeline.DataEnricher
-	transformer     *pipeline.DataTransformer
-	txBuilder       *pipeline.TransactionBuilder
+	extractor   *pipeline.DataExtractor
+	enricher    *pipeline.DataEnricher
+	transformer *pipeline.DataTransformer
+	txBuilder   *pipeline.TransactionBuilder
 
-	eventChan       <-chan *types.EventData
-	errorChan       chan<- error
-	updateChan      chan<- *types.UpdateRequest
+	eventChan  <-chan *types.EventData
+	errorChan  chan<- error
+	updateChan chan<- *types.UpdateRequest
 
-	dedupCache      *DedupCache
+	dedupCache       *DedupCache
 	metricsCollector *metrics.Collector
 
-	stats           types.ProcessorStats
+	stats types.ProcessorStats
 
 	// Event processing worker pool
-	eventWorkerPool  *EventWorkerPool
-	useParallelMode  bool
+	eventWorkerPool *EventWorkerPool
+	useParallelMode bool
 
 	// Parallel pipeline processing
-	parallelPipeline *ParallelPipeline
+	parallelPipeline    *ParallelPipeline
 	useParallelPipeline bool
 
-	stopChan        chan struct{}
-	wg              sync.WaitGroup
+	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewGenericEventProcessor creates a new generic event processor
@@ -339,7 +338,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				if event.EventName == "IntArraySet" && updateReq.Intent == nil {
 					updateReq.Intent = &types.OracleIntent{
 						Symbol: fmt.Sprintf("RandomRequest-%s", event.RequestId.String()),
-						Signer: common.Address{}, // No signer required for randomness
+						Signer: common.Address{},                                  // No signer required for randomness
 						Expiry: big.NewInt(time.Now().Add(24 * time.Hour).Unix()), // 24h expiry
 					}
 				}

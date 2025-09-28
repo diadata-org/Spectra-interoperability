@@ -62,7 +62,6 @@ func (c *EIP712OracleClient) validateRequest(request *bridgeTypes.UpdateRequest)
 
 	// Additional EIP-712-specific validations can be added here
 	// For example, verifying the signature against the signer
-	
+
 	return nil
 }
-

@@ -8,62 +8,62 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/contracts"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
 // WorkerPool manages concurrent transaction processing
 type WorkerPool struct {
-	config           *config.WorkerPoolConfig
-	db               *database.DB
-	contractClients  map[int64]map[string]contracts.ContractClient // chainID -> contractAddr -> client
-	workers          []*Worker
-	taskQueue        chan *Task
-	priorityQueue    *PriorityQueue
-	metrics          *metrics.Collector
-	
-	mu               sync.RWMutex
-	stats            *WorkerStats
-	rateLimiters     map[string]*RateLimiter // per chain+contract rate limiting
-	
-	stopChan         chan struct{}
-	stoppedChan      chan struct{}
+	config          *config.WorkerPoolConfig
+	db              *database.DB
+	contractClients map[int64]map[string]contracts.ContractClient // chainID -> contractAddr -> client
+	workers         []*Worker
+	taskQueue       chan *Task
+	priorityQueue   *PriorityQueue
+	metrics         *metrics.Collector
+
+	mu           sync.RWMutex
+	stats        *WorkerStats
+	rateLimiters map[string]*RateLimiter // per chain+contract rate limiting
+
+	stopChan    chan struct{}
+	stoppedChan chan struct{}
 }
 
 // Worker represents a single worker in the pool
 type Worker struct {
-	id               int
-	pool             *WorkerPool
-	taskChan         <-chan *Task
-	
-	mu               sync.Mutex
-	currentTask      *Task
-	lastTaskTime     time.Time
+	id       int
+	pool     *WorkerPool
+	taskChan <-chan *Task
+
+	mu           sync.Mutex
+	currentTask  *Task
+	lastTaskTime time.Time
 }
 
 // Task represents a work item
 type Task struct {
-	UpdateRequest    *types.UpdateRequest
-	RetryCount       int
-	MaxRetries       int
-	Priority         int
-	CreatedAt        time.Time
+	UpdateRequest *types.UpdateRequest
+	RetryCount    int
+	MaxRetries    int
+	Priority      int
+	CreatedAt     time.Time
 }
 
 // WorkerStats tracks worker pool statistics
 type WorkerStats struct {
-	TasksReceived    uint64
-	TasksProcessed   uint64
-	TasksSucceeded   uint64
-	TasksFailed      uint64
-	TasksRetried     uint64
-	ActiveWorkers    int32
-	QueueSize        int32
-	TotalGasUsed     uint64
+	TasksReceived  uint64
+	TasksProcessed uint64
+	TasksSucceeded uint64
+	TasksFailed    uint64
+	TasksRetried   uint64
+	ActiveWorkers  int32
+	QueueSize      int32
+	TotalGasUsed   uint64
 }
 
 // NewWorkerPool creates a new worker pool
@@ -124,9 +124,9 @@ func (wp *WorkerPool) Start(ctx context.Context) error {
 // Stop gracefully stops the worker pool
 func (wp *WorkerPool) Stop() error {
 	logger.Info("Stopping worker pool")
-	
+
 	close(wp.stopChan)
-	
+
 	// Wait for workers to finish with timeout
 	done := make(chan struct{})
 	go func() {
@@ -205,7 +205,7 @@ func (wp *WorkerPool) priorityQueueProcessor(ctx context.Context) {
 
 func (w *Worker) start(ctx context.Context) {
 	logger.Debugf("Worker %d started", w.id)
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -234,10 +234,10 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 	}()
 
 	// Apply rate limiting
-	rateLimitKey := fmt.Sprintf("%d-%s", 
+	rateLimitKey := fmt.Sprintf("%d-%s",
 		task.UpdateRequest.DestinationChain.ChainID,
 		task.UpdateRequest.Contract.Address)
-	
+
 	if rateLimiter, exists := w.pool.rateLimiters[rateLimitKey]; exists {
 		if err := rateLimiter.Wait(ctx); err != nil {
 			logger.Warnf("Rate limiter error: %v", err)
@@ -277,7 +277,7 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 
 	// Update transaction log
 	if result.Error != nil {
-		logger.Errorf("Task failed for %s on %s: %v", 
+		logger.Errorf("Task failed for %s on %s: %v",
 			task.UpdateRequest.Intent.Symbol,
 			task.UpdateRequest.Contract.Name,
 			result.Error)
@@ -285,7 +285,7 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 		txLog.Status = "failed"
 		errMsg := result.Error.Error()
 		txLog.ErrorMessage = &errMsg
-		
+
 		// Check if error is due to insufficient balance
 		if isInsufficientBalanceError(result.Error) {
 			if w.pool.metrics != nil {
@@ -293,20 +293,20 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 			}
 			logger.Errorf("Transaction failed due to insufficient balance: %v", result.Error)
 		}
-		
+
 		// Retry if applicable
 		if task.RetryCount < task.MaxRetries && isRetryableError(result.Error) {
 			task.RetryCount++
 			atomic.AddUint64(&w.pool.stats.TasksRetried, 1)
-			
+
 			// Re-queue with exponential backoff
 			time.Sleep(time.Duration(task.RetryCount) * w.pool.config.RetryDelay.Duration())
 			w.pool.Submit(task.UpdateRequest)
-			
+
 			logger.Infof("Retrying task (attempt %d/%d)", task.RetryCount+1, task.MaxRetries)
 		} else {
 			atomic.AddUint64(&w.pool.stats.TasksFailed, 1)
-			
+
 			// Update metrics for failed transactions
 			if w.pool.metrics != nil {
 				w.pool.metrics.IncTransactionsFailed()
@@ -323,10 +323,10 @@ func (w *Worker) processTask(ctx context.Context, task *Task) {
 		txLog.GasUsed = &result.GasUsed
 		gasPrice := result.GasPrice.String()
 		txLog.GasPrice = &gasPrice
-		
+
 		atomic.AddUint64(&w.pool.stats.TasksSucceeded, 1)
 		atomic.AddUint64(&w.pool.stats.TotalGasUsed, result.GasUsed)
-		
+
 		// Update metrics
 		if w.pool.metrics != nil {
 			w.pool.metrics.IncTransactionsConfirmed()
@@ -450,14 +450,14 @@ func isRetryableError(err error) bool {
 	// - Timeout errors
 	// - Nonce errors
 	// - Gas price errors
-	
+
 	errStr := err.Error()
-	
+
 	// Don't retry on insufficient balance errors
 	if isInsufficientBalanceError(err) {
 		return false
 	}
-	
+
 	retryableErrors := []string{
 		"connection refused",
 		"timeout",
@@ -483,6 +483,6 @@ func isInsufficientBalanceError(err error) bool {
 		return false
 	}
 	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "insufficient balance") || 
+	return strings.Contains(errStr, "insufficient balance") ||
 		strings.Contains(errStr, "insufficient funds")
 }

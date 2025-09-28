@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 )
 
 // GenericRegistry manages generic routers

@@ -8,9 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // EventWorkerPoolConfig configures the event processing worker pool
@@ -38,26 +38,26 @@ type EventProcessor interface {
 
 // EventWorkerPool manages parallel event processing
 type EventWorkerPool struct {
-	config      *EventWorkerPoolConfig
-	processor   EventProcessor
-	eventQueue  chan *types.EventData
-	workers     []*EventWorker
-	
+	config     *EventWorkerPoolConfig
+	processor  EventProcessor
+	eventQueue chan *types.EventData
+	workers    []*EventWorker
+
 	// Control channels
 	stopChan    chan struct{}
 	stoppedChan chan struct{}
 	wg          sync.WaitGroup
-	
+
 	// Statistics
-	stats       *EventWorkerStats
+	stats *EventWorkerStats
 }
 
 // EventWorker processes events in parallel
 type EventWorker struct {
-	id          int
-	pool        *EventWorkerPool
-	eventChan   <-chan *types.EventData
-	
+	id        int
+	pool      *EventWorkerPool
+	eventChan <-chan *types.EventData
+
 	// Worker statistics
 	eventsProcessed uint64
 	eventsFailed    uint64
@@ -81,7 +81,7 @@ func NewEventWorkerPool(config *EventWorkerPoolConfig, processor EventProcessor)
 	if config == nil {
 		config = DefaultEventWorkerPoolConfig()
 	}
-	
+
 	pool := &EventWorkerPool{
 		config:      config,
 		processor:   processor,
@@ -91,7 +91,7 @@ func NewEventWorkerPool(config *EventWorkerPoolConfig, processor EventProcessor)
 		stoppedChan: make(chan struct{}),
 		stats:       &EventWorkerStats{},
 	}
-	
+
 	// Create workers
 	for i := 0; i < config.WorkerCount; i++ {
 		pool.workers[i] = &EventWorker{
@@ -100,37 +100,37 @@ func NewEventWorkerPool(config *EventWorkerPoolConfig, processor EventProcessor)
 			eventChan: pool.eventQueue,
 		}
 	}
-	
+
 	return pool
 }
 
 // Start begins processing events with workers
 func (ewp *EventWorkerPool) Start(ctx context.Context) error {
 	logger.Infof("Starting event worker pool with %d workers", ewp.config.WorkerCount)
-	
+
 	// Start all workers
 	for _, worker := range ewp.workers {
 		ewp.wg.Add(1)
 		go worker.start(ctx)
 	}
-	
+
 	// Start statistics reporter if enabled
 	if ewp.config.EnableStats {
 		ewp.wg.Add(1)
 		go ewp.statsReporter(ctx)
 	}
-	
+
 	return nil
 }
 
 // Stop gracefully stops all workers
 func (ewp *EventWorkerPool) Stop() error {
 	logger.Info("Stopping event worker pool...")
-	
+
 	close(ewp.stopChan)
 	ewp.wg.Wait()
 	close(ewp.stoppedChan)
-	
+
 	logger.Info("Event worker pool stopped")
 	return nil
 }
@@ -138,7 +138,7 @@ func (ewp *EventWorkerPool) Stop() error {
 // SubmitEvent submits an event for processing
 func (ewp *EventWorkerPool) SubmitEvent(event *types.EventData) error {
 	atomic.AddUint64(&ewp.stats.EventsReceived, 1)
-	
+
 	select {
 	case ewp.eventQueue <- event:
 		atomic.AddInt32(&ewp.stats.QueueLength, 1)
@@ -156,17 +156,17 @@ func (ewp *EventWorkerPool) GetStats() *EventWorkerStats {
 	// Calculate average processing time
 	var totalTime uint64
 	var totalEvents uint64
-	
+
 	for _, worker := range ewp.workers {
 		totalTime += atomic.LoadUint64(&worker.totalTime)
 		totalEvents += atomic.LoadUint64(&worker.eventsProcessed)
 	}
-	
+
 	avgTime := float64(0)
 	if totalEvents > 0 {
 		avgTime = float64(totalTime) / float64(totalEvents) / 1e6 // Convert to milliseconds
 	}
-	
+
 	return &EventWorkerStats{
 		EventsReceived:     atomic.LoadUint64(&ewp.stats.EventsReceived),
 		EventsProcessed:    atomic.LoadUint64(&ewp.stats.EventsProcessed),
@@ -181,10 +181,10 @@ func (ewp *EventWorkerPool) GetStats() *EventWorkerStats {
 // statsReporter periodically reports statistics
 func (ewp *EventWorkerPool) statsReporter(ctx context.Context) {
 	defer ewp.wg.Done()
-	
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -211,9 +211,9 @@ func (ewp *EventWorkerPool) statsReporter(ctx context.Context) {
 // start begins processing events
 func (ew *EventWorker) start(ctx context.Context) {
 	defer ew.pool.wg.Done()
-	
+
 	logger.Debugf("Event worker %d started", ew.id)
-	
+
 	for {
 		select {
 		case <-ctx.Done():

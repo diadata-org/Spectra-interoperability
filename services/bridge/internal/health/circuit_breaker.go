@@ -10,11 +10,11 @@ import (
 
 // CircuitBreaker implements the circuit breaker pattern
 type CircuitBreaker struct {
-	name            string
-	maxFailures     int
-	resetTimeout    time.Duration
+	name             string
+	maxFailures      int
+	resetTimeout     time.Duration
 	halfOpenMaxCalls int
-	
+
 	mu              sync.Mutex
 	state           State
 	failures        int
@@ -61,32 +61,32 @@ func NewCircuitBreaker(name string, maxFailures int, resetTimeout time.Duration)
 // Call executes the function with circuit breaker protection
 func (cb *CircuitBreaker) Call(fn func() error) error {
 	cb.mu.Lock()
-	
+
 	// Check if we should transition from open to half-open
 	if cb.state == StateOpen && time.Since(cb.lastFailureTime) > cb.resetTimeout {
 		cb.changeState(StateHalfOpen)
 	}
-	
+
 	state := cb.state
 	cb.mu.Unlock()
-	
+
 	// Check if circuit is open
 	if state == StateOpen {
 		return fmt.Errorf("circuit breaker %s is open", cb.name)
 	}
-	
+
 	// Execute the function
 	err := fn()
-	
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	if err != nil {
 		cb.recordFailure()
 	} else {
 		cb.recordSuccess()
 	}
-	
+
 	return err
 }
 
@@ -94,7 +94,7 @@ func (cb *CircuitBreaker) Call(fn func() error) error {
 func (cb *CircuitBreaker) recordFailure() {
 	cb.failures++
 	cb.lastFailureTime = time.Now()
-	
+
 	switch cb.state {
 	case StateClosed:
 		if cb.failures >= cb.maxFailures {
@@ -124,7 +124,7 @@ func (cb *CircuitBreaker) changeState(newState State) {
 		oldState := cb.state
 		cb.state = newState
 		cb.lastStateChange = time.Now()
-		
+
 		// Reset counters based on new state
 		switch newState {
 		case StateClosed:
@@ -133,7 +133,7 @@ func (cb *CircuitBreaker) changeState(newState State) {
 		case StateHalfOpen:
 			cb.successCount = 0
 		}
-		
+
 		logger.Infof("Circuit breaker %s: %s -> %s", cb.name, oldState, newState)
 	}
 }
@@ -149,7 +149,7 @@ func (cb *CircuitBreaker) GetState() State {
 func (cb *CircuitBreaker) GetStats() map[string]interface{} {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	return map[string]interface{}{
 		"name":              cb.name,
 		"state":             cb.state.String(),
@@ -164,7 +164,7 @@ func (cb *CircuitBreaker) GetStats() map[string]interface{} {
 func (cb *CircuitBreaker) Reset() {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
-	
+
 	cb.changeState(StateClosed)
 	cb.failures = 0
 	cb.successCount = 0

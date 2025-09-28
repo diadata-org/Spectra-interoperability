@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Parameter parsing helpers
@@ -16,12 +16,12 @@ func (s *Server) parseIntParam(r *http.Request, name string, defaultValue int) i
 	if valueStr == "" {
 		return defaultValue
 	}
-	
+
 	value, err := strconv.Atoi(valueStr)
 	if err != nil {
 		return defaultValue
 	}
-	
+
 	return value
 }
 
@@ -30,12 +30,12 @@ func (s *Server) parseInt64Param(r *http.Request, name string, defaultValue int6
 	if valueStr == "" {
 		return defaultValue
 	}
-	
+
 	value, err := strconv.ParseInt(valueStr, 10, 64)
 	if err != nil {
 		return defaultValue
 	}
-	
+
 	return value
 }
 
@@ -44,12 +44,12 @@ func (s *Server) parseUint64Param(r *http.Request, name string, defaultValue uin
 	if valueStr == "" {
 		return defaultValue
 	}
-	
+
 	value, err := strconv.ParseUint(valueStr, 10, 64)
 	if err != nil {
 		return defaultValue
 	}
-	
+
 	return value
 }
 
@@ -70,14 +70,14 @@ func (s *Server) getSystemStats() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get transaction count
 	var txCount int64
 	err = s.db.QueryRow("SELECT COUNT(*) FROM transaction_log").Scan(&txCount)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get success rate
 	var successCount, totalCount int64
 	err = s.db.QueryRow(`
@@ -90,16 +90,16 @@ func (s *Server) getSystemStats() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	successRate := 0.0
 	if totalCount > 0 {
 		successRate = float64(successCount) / float64(totalCount)
 	}
-	
+
 	return map[string]interface{}{
-		"events_processed": eventCount,
+		"events_processed":  eventCount,
 		"transactions_sent": txCount,
-		"success_rate": successRate,
+		"success_rate":      successRate,
 	}, nil
 }
 
@@ -112,13 +112,13 @@ func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int, eve
 	`
 	args := []interface{}{}
 	argCount := 0
-	
+
 	if startBlock > 0 {
 		argCount++
 		query += " AND block_number >= $" + strconv.Itoa(argCount)
 		args = append(args, startBlock)
 	}
-	
+
 	if endBlock > 0 {
 		argCount++
 		query += " AND block_number <= $" + strconv.Itoa(argCount)
@@ -130,23 +130,23 @@ func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int, eve
 		query += " AND event_name = $" + strconv.Itoa(argCount)
 		args = append(args, eventName)
 	}
-	
+
 	query += " ORDER BY block_number DESC, log_index DESC"
-	
+
 	argCount++
 	query += " LIMIT $" + strconv.Itoa(argCount)
 	args = append(args, limit)
-	
+
 	argCount++
 	query += " OFFSET $" + strconv.Itoa(argCount)
 	args = append(args, offset)
-	
+
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var events []*database.ProcessedEvent
 	for rows.Next() {
 		event := &database.ProcessedEvent{}
@@ -171,7 +171,7 @@ func (s *Server) queryEvents(startBlock, endBlock uint64, limit, offset int, eve
 		event.Signer = common.HexToAddress(signerHex)
 		events = append(events, event)
 	}
-	
+
 	return events, nil
 }
 
@@ -182,7 +182,7 @@ func (s *Server) getEventByHash(hash string) (*database.ProcessedEvent, error) {
 		FROM processed_events
 		WHERE intent_hash = $1
 	`
-	
+
 	event := &database.ProcessedEvent{}
 	var signerHex string
 	err := s.db.QueryRow(query, hash).Scan(
@@ -197,11 +197,11 @@ func (s *Server) getEventByHash(hash string) (*database.ProcessedEvent, error) {
 		&signerHex,
 		&event.ProcessedAt,
 	)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return event, nil
 }
 
@@ -216,35 +216,35 @@ func (s *Server) queryTransactions(chainID int64, status string, limit, offset i
 	`
 	args := []interface{}{}
 	argCount := 0
-	
+
 	if chainID > 0 {
 		argCount++
 		query += " AND destination_chain_id = $" + strconv.Itoa(argCount)
 		args = append(args, chainID)
 	}
-	
+
 	if status != "" {
 		argCount++
 		query += " AND status = $" + strconv.Itoa(argCount)
 		args = append(args, status)
 	}
-	
+
 	query += " ORDER BY created_at DESC"
-	
+
 	argCount++
 	query += " LIMIT $" + strconv.Itoa(argCount)
 	args = append(args, limit)
-	
+
 	argCount++
 	query += " OFFSET $" + strconv.Itoa(argCount)
 	args = append(args, offset)
-	
+
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var transactions []*database.TransactionLog
 	for rows.Next() {
 		tx := &database.TransactionLog{}
@@ -274,7 +274,7 @@ func (s *Server) queryTransactions(chainID int64, status string, limit, offset i
 		}
 		transactions = append(transactions, tx)
 	}
-	
+
 	return transactions, nil
 }
 
@@ -288,7 +288,7 @@ func (s *Server) getTransactionByHash(hash string) (*database.TransactionLog, er
 		WHERE transaction_hash = $1 OR intent_hash = $1
 		LIMIT 1
 	`
-	
+
 	tx := &database.TransactionLog{}
 	err := s.db.QueryRow(query, hash).Scan(
 		&tx.ID,
@@ -311,11 +311,11 @@ func (s *Server) getTransactionByHash(hash string) (*database.TransactionLog, er
 		&tx.ConfirmedAt,
 		&tx.FailedAt,
 	)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return tx, nil
 }
 
@@ -324,7 +324,7 @@ func (s *Server) getConfiguredChains() ([]map[string]interface{}, error) {
 	// For now, return a placeholder
 	return []map[string]interface{}{
 		{
-			"id": 1,
+			"id":   1,
 			"name": "DIA Chain",
 			"type": "source",
 		},
@@ -337,13 +337,13 @@ func (s *Server) getSupportedSymbols() ([]string, error) {
 		FROM processed_events
 		ORDER BY symbol
 	`
-	
+
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var symbols []string
 	for rows.Next() {
 		var symbol string
@@ -352,7 +352,7 @@ func (s *Server) getSupportedSymbols() ([]string, error) {
 		}
 		symbols = append(symbols, symbol)
 	}
-	
+
 	return symbols, nil
 }
 
@@ -366,31 +366,31 @@ func (s *Server) getSymbolUpdates(symbol string, chainID int64, contractAddr str
 	`
 	args := []interface{}{symbol}
 	argCount := 1
-	
+
 	if chainID > 0 {
 		argCount++
 		query += " AND tl.destination_chain_id = $" + strconv.Itoa(argCount)
 		args = append(args, chainID)
 	}
-	
+
 	if contractAddr != "" {
 		argCount++
 		query += " AND tl.contract_address = $" + strconv.Itoa(argCount)
 		args = append(args, contractAddr)
 	}
-	
+
 	query += " ORDER BY tl.confirmed_at DESC"
-	
+
 	argCount++
 	query += " LIMIT $" + strconv.Itoa(argCount)
 	args = append(args, limit)
-	
+
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var updates []map[string]interface{}
 	for rows.Next() {
 		var intentHash string
@@ -400,7 +400,7 @@ func (s *Server) getSymbolUpdates(symbol string, chainID int64, contractAddr str
 		var gasUsed *uint64
 		var status string
 		var confirmedAt *time.Time
-		
+
 		err := rows.Scan(
 			&intentHash,
 			&chainID,
@@ -413,25 +413,25 @@ func (s *Server) getSymbolUpdates(symbol string, chainID int64, contractAddr str
 		if err != nil {
 			return nil, err
 		}
-		
+
 		update := map[string]interface{}{
-			"intent_hash": intentHash,
-			"chain_id": chainID,
+			"intent_hash":      intentHash,
+			"chain_id":         chainID,
 			"contract_address": contractAddress,
-			"price": price,
-			"status": status,
+			"price":            price,
+			"status":           status,
 		}
-		
+
 		if gasUsed != nil {
 			update["gas_used"] = *gasUsed
 		}
 		if confirmedAt != nil {
 			update["confirmed_at"] = confirmedAt
 		}
-		
+
 		updates = append(updates, update)
 	}
-	
+
 	return updates, nil
 }
 

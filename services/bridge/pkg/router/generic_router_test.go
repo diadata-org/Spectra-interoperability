@@ -84,11 +84,11 @@ func TestEvaluateCondition_Operators(t *testing.T) {
 	router, _ := NewGenericRouter(cfg)
 	data := &config.ExtractedData{
 		Event: map[string]interface{}{
-			"symbol":     "ETH",
-			"price":      3000,
-			"price_str":  "3000",
-			"source":     "exchange-A",
-			"tags":       []interface{}{"tag1", "tag2"},
+			"symbol":    "ETH",
+			"price":     3000,
+			"price_str": "3000",
+			"source":    "exchange-A",
+			"tags":      []interface{}{"tag1", "tag2"},
 		},
 	}
 
@@ -368,11 +368,11 @@ func TestCheckTimeThreshold(t *testing.T) {
 	}
 
 	tests := []struct {
-		name           string
-		timeThreshold  string
-		setupTime      *time.Time
-		expected       bool
-		description    string
+		name          string
+		timeThreshold string
+		setupTime     *time.Time
+		expected      bool
+		description   string
 	}{
 		{
 			name:          "first time no threshold",
@@ -667,7 +667,7 @@ func TestFilterDestinationsByTimeThreshold(t *testing.T) {
 			name: "threshold not met for some destinations",
 			setupTimes: map[string]time.Time{
 				"421614-0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd-BTC/USD": time.Now().Add(-1 * time.Minute), // 1 min ago, 2min threshold
-				"42161-0xabcdefabcdefabcdefabcdefabcdefabcdefabcd-BTC/USD":   time.Now().Add(-3 * time.Minute), // 3 min ago, 5min threshold
+				"42161-0xabcdefabcdefabcdefabcdefabcdefabcdefabcd-BTC/USD":  time.Now().Add(-3 * time.Minute), // 3 min ago, 5min threshold
 			},
 			expectedDestCount: 1, // Only the one with no threshold
 			description:       "destinations with unmet thresholds should be filtered",
@@ -676,7 +676,7 @@ func TestFilterDestinationsByTimeThreshold(t *testing.T) {
 			name: "all thresholds met",
 			setupTimes: map[string]time.Time{
 				"421614-0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd-BTC/USD": time.Now().Add(-3 * time.Minute), // 3 min ago, 2min threshold
-				"42161-0xabcdefabcdefabcdefabcdefabcdefabcdefabcd-BTC/USD":   time.Now().Add(-6 * time.Minute), // 6 min ago, 5min threshold
+				"42161-0xabcdefabcdefabcdefabcdefabcdefabcdefabcd-BTC/USD":  time.Now().Add(-6 * time.Minute), // 6 min ago, 5min threshold
 			},
 			expectedDestCount: 3,
 			description:       "all destinations should be returned when thresholds are met",
@@ -685,7 +685,7 @@ func TestFilterDestinationsByTimeThreshold(t *testing.T) {
 			name: "mixed threshold states",
 			setupTimes: map[string]time.Time{
 				"421614-0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd-BTC/USD": time.Now().Add(-3 * time.Minute), // 3 min ago, 2min threshold - PASS
-				"42161-0xabcdefabcdefabcdefabcdefabcdefabcdefabcd-BTC/USD":   time.Now().Add(-2 * time.Minute), // 2 min ago, 5min threshold - FAIL
+				"42161-0xabcdefabcdefabcdefabcdefabcdefabcdefabcd-BTC/USD":  time.Now().Add(-2 * time.Minute), // 2 min ago, 5min threshold - FAIL
 			},
 			expectedDestCount: 2, // First destination + no-threshold destination
 			description:       "mixed states should return correct subset",

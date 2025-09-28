@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	
+
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
@@ -27,7 +27,7 @@ func NewDataExtractor(eventDefs map[string]*config.EventDefinition) (*DataExtrac
 		eventDefs: eventDefs,
 		abiCache:  make(map[string]abi.Event),
 	}
-	
+
 	for eventName, def := range eventDefs {
 		event, err := parseEventABI(def.ABI)
 		if err != nil {
@@ -35,7 +35,7 @@ func NewDataExtractor(eventDefs map[string]*config.EventDefinition) (*DataExtrac
 		}
 		extractor.abiCache[eventName] = event
 	}
-	
+
 	return extractor, nil
 }
 
@@ -45,24 +45,24 @@ func (de *DataExtractor) ExtractEventData(eventName string, log types.Log) (*con
 	if !exists {
 		return nil, fmt.Errorf("event definition not found: %s", eventName)
 	}
-	
+
 	eventABI, exists := de.abiCache[eventName]
 	if !exists {
 		return nil, fmt.Errorf("event ABI not found in cache: %s", eventName)
 	}
-	
+
 	indexedData := make(map[string]interface{})
 	if err := de.extractIndexedData(&eventABI, log.Topics, indexedData); err != nil {
 		return nil, fmt.Errorf("failed to extract indexed data: %w", err)
 	}
-	
+
 	nonIndexedData := make(map[string]interface{})
 	if len(log.Data) > 0 {
 		if err := de.extractNonIndexedData(&eventABI, log.Data, nonIndexedData); err != nil {
 			return nil, fmt.Errorf("failed to extract non-indexed data: %w", err)
 		}
 	}
-	
+
 	allData := make(map[string]interface{})
 	for k, v := range indexedData {
 		allData[k] = v
@@ -70,7 +70,7 @@ func (de *DataExtractor) ExtractEventData(eventName string, log types.Log) (*con
 	for k, v := range nonIndexedData {
 		allData[k] = v
 	}
-	
+
 	eventData := make(map[string]interface{})
 	for fieldName, extractPath := range eventDef.DataExtraction {
 		value, err := de.extractValue(allData, log, extractPath)
@@ -79,12 +79,12 @@ func (de *DataExtractor) ExtractEventData(eventName string, log types.Log) (*con
 		}
 		eventData[fieldName] = value
 	}
-	
+
 	eventData["_contract"] = log.Address.Hex()
 	eventData["_blockNumber"] = log.BlockNumber
 	eventData["_txHash"] = log.TxHash.Hex()
 	eventData["_logIndex"] = log.Index
-	
+
 	return &config.ExtractedData{
 		Event: eventData,
 	}, nil
@@ -95,27 +95,27 @@ func (de *DataExtractor) extractIndexedData(event *abi.Event, topics []common.Ha
 	if len(topics) == 0 {
 		return fmt.Errorf("no topics in log")
 	}
-	
+
 	topicIndex := 1
-	
+
 	for _, input := range event.Inputs {
 		if !input.Indexed {
 			continue
 		}
-		
+
 		if topicIndex >= len(topics) {
 			return fmt.Errorf("not enough topics for indexed parameter %s", input.Name)
 		}
-		
+
 		value, err := de.decodeIndexedValue(&input, topics[topicIndex])
 		if err != nil {
 			return fmt.Errorf("failed to decode indexed parameter %s: %w", input.Name, err)
 		}
-		
+
 		output[input.Name] = value
 		topicIndex++
 	}
-	
+
 	return nil
 }
 
@@ -127,22 +127,22 @@ func (de *DataExtractor) extractNonIndexedData(event *abi.Event, data []byte, ou
 			nonIndexedArgs = append(nonIndexedArgs, input)
 		}
 	}
-	
+
 	if len(nonIndexedArgs) == 0 {
 		return nil
 	}
-	
+
 	values, err := nonIndexedArgs.Unpack(data)
 	if err != nil {
 		return fmt.Errorf("failed to unpack data: %w", err)
 	}
-	
+
 	for i, arg := range nonIndexedArgs {
 		if i < len(values) {
 			output[arg.Name] = values[i]
 		}
 	}
-	
+
 	return nil
 }
 
@@ -169,15 +169,15 @@ func (de *DataExtractor) extractValue(data map[string]interface{}, log types.Log
 	if strings.HasPrefix(path, "topics[") {
 		return de.extractTopicValue(log.Topics, path)
 	}
-	
+
 	if strings.HasPrefix(path, "data[") {
 		return de.extractDataValue(data, path)
 	}
-	
+
 	if value, exists := data[path]; exists {
 		return value, nil
 	}
-	
+
 	return nil, fmt.Errorf("path not found: %s", path)
 }
 
@@ -188,16 +188,16 @@ func (de *DataExtractor) extractTopicValue(topics []common.Hash, path string) (i
 	if len(matches) != 2 {
 		return nil, fmt.Errorf("invalid topic path: %s", path)
 	}
-	
+
 	index, err := strconv.Atoi(matches[1])
 	if err != nil {
 		return nil, fmt.Errorf("invalid topic index: %s", matches[1])
 	}
-	
+
 	if index >= len(topics) {
 		return nil, fmt.Errorf("topic index out of range: %d", index)
 	}
-	
+
 	return topics[index], nil
 }
 
@@ -209,10 +209,10 @@ func (de *DataExtractor) extractDataValue(data map[string]interface{}, path stri
 		if len(matches) != 2 {
 			return nil, fmt.Errorf("invalid data path: %s", path)
 		}
-		
+
 		return nil, fmt.Errorf("array access not yet implemented: %s", path)
 	}
-	
+
 	parts := strings.Split(path, ".")
 	if len(parts) > 1 && parts[0] == "data" {
 		fieldName := strings.Join(parts[1:], ".")
@@ -220,23 +220,23 @@ func (de *DataExtractor) extractDataValue(data map[string]interface{}, path stri
 			return value, nil
 		}
 	}
-	
+
 	return nil, fmt.Errorf("data path not found: %s", path)
 }
 
 // parseEventABI parses an event ABI string
 func parseEventABI(abiStr string) (abi.Event, error) {
 	contractABI := fmt.Sprintf(`[%s]`, abiStr)
-	
+
 	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
 		return abi.Event{}, fmt.Errorf("failed to parse ABI: %w", err)
 	}
-	
+
 	for _, event := range parsedABI.Events {
 		return event, nil
 	}
-	
+
 	return abi.Event{}, fmt.Errorf("no event found in ABI")
 }
 
@@ -245,25 +245,25 @@ func (de *DataExtractor) MatchEventDefinition(log types.Log) (string, *config.Ev
 	if len(log.Topics) == 0 {
 		return "", nil, fmt.Errorf("log has no topics")
 	}
-	
+
 	eventSig := log.Topics[0]
-	
+
 	for eventName, def := range de.eventDefs {
 		if !strings.EqualFold(def.Contract, log.Address.Hex()) {
 			continue
 		}
-		
+
 		event, exists := de.abiCache[eventName]
 		if !exists {
 			continue
 		}
-		
+
 		if event.ID == eventSig {
 			return eventName, def, nil
 		}
 	}
-	
-	return "", nil, fmt.Errorf("no matching event definition for signature %s from contract %s", 
+
+	return "", nil, fmt.Errorf("no matching event definition for signature %s from contract %s",
 		eventSig.Hex(), log.Address.Hex())
 }
 
@@ -278,27 +278,26 @@ func (de *DataExtractor) ConvertToEventData(eventName string, extracted *config.
 		Data:            extracted.Event,
 		Raw:             log,
 	}
-	
+
 	if intentHash, ok := extracted.Event["intentHash"].(common.Hash); ok {
 		eventData.IntentHash = [32]byte(intentHash)
 	}
-	
+
 	if symbol, ok := extracted.Event["symbol"].(string); ok {
 		eventData.Symbol = symbol
 	}
-	
+
 	if price, ok := extracted.Event["price"].(*big.Int); ok {
 		eventData.Price = price
 	}
-	
+
 	if timestamp, ok := extracted.Event["timestamp"].(*big.Int); ok {
 		eventData.Timestamp = timestamp
 	}
-	
+
 	if signer, ok := extracted.Event["signer"].(common.Address); ok {
 		eventData.Signer = signer
 	}
-	
+
 	return eventData
 }
-

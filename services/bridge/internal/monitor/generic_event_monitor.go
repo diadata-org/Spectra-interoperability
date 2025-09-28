@@ -13,10 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/pipeline"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // GenericEventMonitor monitors blockchain events using generic event definitions

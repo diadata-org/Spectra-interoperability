@@ -6,16 +6,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // NonceManager manages nonce allocation for addresses across different chains
 type NonceManager struct {
-	clients    map[int64]*ethclient.Client
-	nonces     map[string]*NonceTracker // key: chainID-address
-	mutex      sync.RWMutex
+	clients map[int64]*ethclient.Client
+	nonces  map[string]*NonceTracker // key: chainID-address
+	mutex   sync.RWMutex
 }
 
 // NonceTracker tracks nonce state for a specific address on a chain
@@ -36,7 +36,7 @@ func NewNonceManager(clients map[int64]*ethclient.Client) *NonceManager {
 // GetNextNonce returns the next available nonce for an address on a chain
 func (nm *NonceManager) GetNextNonce(ctx context.Context, chainID int64, address common.Address) (uint64, error) {
 	key := nm.getKey(chainID, address)
-	
+
 	nm.mutex.Lock()
 	tracker, exists := nm.nonces[key]
 	if !exists {
@@ -60,7 +60,7 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context, chainID int64, address
 
 	nonce := tracker.currentNonce
 	tracker.currentNonce++
-	
+
 	logger.Debugf("Allocated nonce %d for address %s on chain %d", nonce, address.Hex(), chainID)
 	return nonce, nil
 }
@@ -79,11 +79,11 @@ func (nm *NonceManager) syncNonce(ctx context.Context, chainID int64, address co
 
 	// Use the higher of network nonce or current tracked nonce
 	if networkNonce > tracker.currentNonce {
-		logger.Debugf("Syncing nonce for %s on chain %d: local=%d network=%d", 
+		logger.Debugf("Syncing nonce for %s on chain %d: local=%d network=%d",
 			address.Hex(), chainID, tracker.currentNonce, networkNonce)
 		tracker.currentNonce = networkNonce
 	}
-	
+
 	tracker.lastSync = time.Now()
 	return nil
 }
@@ -91,7 +91,7 @@ func (nm *NonceManager) syncNonce(ctx context.Context, chainID int64, address co
 // ResetNonce forces a nonce reset for an address (useful after failed transactions)
 func (nm *NonceManager) ResetNonce(ctx context.Context, chainID int64, address common.Address) error {
 	key := nm.getKey(chainID, address)
-	
+
 	nm.mutex.Lock()
 	tracker, exists := nm.nonces[key]
 	if !exists {

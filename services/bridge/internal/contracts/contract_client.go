@@ -15,8 +15,8 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
@@ -48,15 +48,15 @@ type BaseContractClient struct {
 	contractConfig  *config.ContractConfig
 	privateKey      *ecdsa.PrivateKey
 	fromAddress     common.Address
-	
+
 	// Dynamic method mappings
-	methods         map[string]*MethodConfig
-	
+	methods map[string]*MethodConfig
+
 	// Transaction options
-	gasLimit        uint64
-	gasMultiplier   float64
-	maxGasPrice     *big.Int
-	nonceManager    *NonceManager
+	gasLimit      uint64
+	gasMultiplier float64
+	maxGasPrice   *big.Int
+	nonceManager  *NonceManager
 }
 
 // MethodConfig holds configuration for a contract method
@@ -226,7 +226,7 @@ func (c *BaseContractClient) UpdateOracle(ctx context.Context, request *bridgeTy
 	// Check if balance is sufficient
 	if balance.Cmp(requiredBalance) < 0 {
 		c.nonceManager.ReturnNonce(nonce)
-		result.Error = fmt.Errorf("insufficient balance: have %s, need %s (gas: %d, gasPrice: %s)", 
+		result.Error = fmt.Errorf("insufficient balance: have %s, need %s (gas: %d, gasPrice: %s)",
 			balance.String(), requiredBalance.String(), gasLimit, gasPrice.String())
 		logger.Errorf("Insufficient balance for address %s on chain %s: have %s, need %s",
 			c.fromAddress.Hex(), c.chainName, balance.String(), requiredBalance.String())
@@ -303,23 +303,23 @@ func (c *BaseContractClient) buildTransactionData(methodConfig *MethodConfig, re
 
 	// Map intent fields to method parameters
 	args := make([]interface{}, len(method.Inputs))
-	
+
 	for i, input := range method.Inputs {
 		// Check field mapping
 		mappedField, _ := methodConfig.FieldsMapping[input.Name]
-		
+
 		// Get value based on mapping or default field name
 		value, err := c.getFieldValue(request, mappedField, input.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get value for %s: %w", input.Name, err)
 		}
-		
+
 		// Convert value to appropriate type
 		convertedValue, err := c.convertValue(value, input.Type)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert value for %s: %w", input.Name, err)
 		}
-		
+
 		args[i] = convertedValue
 	}
 

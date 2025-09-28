@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	
+
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
@@ -16,7 +16,7 @@ import (
 // MetricsTracker tracks intent lifecycle metrics
 type MetricsTracker struct {
 	collector *metrics.Collector
-	
+
 	// In-memory tracking of intent lifecycles
 	mu         sync.RWMutex
 	lifecycles map[string]*metrics.IntentLifecycle // intentHash -> lifecycle
@@ -35,10 +35,10 @@ func (mt *MetricsTracker) StartIntentLifecycle(intent *bridgetypes.OracleIntent,
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	intentHash := fmt.Sprintf("%x", getIntentHash(intent))
 	intentTime := intent.GetTimestamp()
-	
+
 	// Record intent creation
 	mt.collector.IntentMetrics.RecordIntentCreated(
 		intentHash,
@@ -46,7 +46,7 @@ func (mt *MetricsTracker) StartIntentLifecycle(intent *bridgetypes.OracleIntent,
 		intent.Source,
 		intentTime,
 	)
-	
+
 	// Store lifecycle for tracking
 	mt.mu.Lock()
 	mt.lifecycles[intentHash] = &metrics.IntentLifecycle{
@@ -56,7 +56,7 @@ func (mt *MetricsTracker) StartIntentLifecycle(intent *bridgetypes.OracleIntent,
 		IntentTime:  intentTime,
 	}
 	mt.mu.Unlock()
-	
+
 	logger.Debugf("Started tracking intent lifecycle: %s for %s", intentHash, intent.Symbol)
 }
 
@@ -65,9 +65,9 @@ func (mt *MetricsTracker) RecordIntentRegistered(event *bridgetypes.IntentRegist
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	intentHash := event.IntentHash.Hex()
-	
+
 	// Handle nil timestamp
 	var registrationTime time.Time
 	if event.Timestamp != nil {
@@ -75,7 +75,7 @@ func (mt *MetricsTracker) RecordIntentRegistered(event *bridgetypes.IntentRegist
 	} else {
 		registrationTime = time.Now()
 	}
-	
+
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]
 	if !exists {
@@ -89,7 +89,7 @@ func (mt *MetricsTracker) RecordIntentRegistered(event *bridgetypes.IntentRegist
 	}
 	lifecycle.RegistrationTime = registrationTime
 	mt.mu.Unlock()
-	
+
 	mt.collector.IntentMetrics.RecordIntentRegistered(lifecycle)
 	logger.Debugf("Recorded intent registration: %s at %v", intentHash, registrationTime)
 }
@@ -99,15 +99,15 @@ func (mt *MetricsTracker) RecordIntentScanned(event *bridgetypes.EventData, scan
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	intentHash := common.BytesToHash(event.IntentHash[:]).Hex()
 	scanTime := time.Now()
-	
+
 	priority := "normal"
 	if event.Priority > 1 {
 		priority = "high"
 	}
-	
+
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]
 	if !exists {
@@ -121,7 +121,7 @@ func (mt *MetricsTracker) RecordIntentScanned(event *bridgetypes.EventData, scan
 	lifecycle.ScannerType = scannerType
 	lifecycle.Priority = priority
 	mt.mu.Unlock()
-	
+
 	mt.collector.IntentMetrics.RecordIntentScanned(lifecycle)
 	logger.Debugf("Recorded intent scan: %s by %s scanner", intentHash, scannerType)
 }
@@ -131,10 +131,10 @@ func (mt *MetricsTracker) RecordIntentProcessing(intent *bridgetypes.OracleInten
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	intentHash := fmt.Sprintf("%x", getIntentHash(intent))
 	processingTime := time.Now()
-	
+
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]
 	if !exists {
@@ -147,7 +147,7 @@ func (mt *MetricsTracker) RecordIntentProcessing(intent *bridgetypes.OracleInten
 	lifecycle.ProcessingTime = processingTime
 	lifecycle.RouterID = routerID
 	mt.mu.Unlock()
-	
+
 	mt.collector.IntentMetrics.RecordIntentProcessing(lifecycle)
 }
 
@@ -156,10 +156,10 @@ func (mt *MetricsTracker) RecordIntentSubmitted(intent *bridgetypes.OracleIntent
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	intentHash := fmt.Sprintf("%x", getIntentHash(intent))
 	submissionTime := time.Now()
-	
+
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]
 	if !exists {
@@ -179,7 +179,7 @@ func (mt *MetricsTracker) RecordIntentSubmitted(intent *bridgetypes.OracleIntent
 		lifecycle.GasPrice, _ = gasPriceGwei.Float64()
 	}
 	mt.mu.Unlock()
-	
+
 	mt.collector.IntentMetrics.RecordIntentSubmitted(lifecycle)
 	logger.Debugf("Recorded intent submission: %s tx=%s", intentHash, txHash)
 }
@@ -189,10 +189,10 @@ func (mt *MetricsTracker) RecordIntentConfirmed(intent *bridgetypes.OracleIntent
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	intentHash := fmt.Sprintf("%x", getIntentHash(intent))
 	confirmationTime := time.Now()
-	
+
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]
 	if !exists {
@@ -201,15 +201,15 @@ func (mt *MetricsTracker) RecordIntentConfirmed(intent *bridgetypes.OracleIntent
 	}
 	lifecycle.ConfirmationTime = confirmationTime
 	mt.mu.Unlock()
-	
+
 	mt.collector.IntentMetrics.RecordIntentConfirmed(lifecycle, gasUsed)
-	
+
 	// Calculate and log total latency
 	if !lifecycle.IntentTime.IsZero() {
 		totalLatency := confirmationTime.Sub(lifecycle.IntentTime)
 		logger.Infof("Intent %s completed end-to-end in %v", intentHash, totalLatency)
 	}
-	
+
 	// Clean up old lifecycles after some time
 	go mt.cleanupLifecycle(intentHash, 5*time.Minute)
 }
@@ -219,9 +219,9 @@ func (mt *MetricsTracker) RecordIntentFailed(intent *bridgetypes.OracleIntent, s
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	mt.collector.IntentMetrics.RecordIntentFailed(intent.Symbol, stage, errorType)
-	
+
 	// Clean up lifecycle
 	intentHash := fmt.Sprintf("%x", getIntentHash(intent))
 	go mt.cleanupLifecycle(intentHash, 1*time.Minute)
@@ -232,7 +232,7 @@ func (mt *MetricsTracker) RecordRouterDecision(routerID string, intent *bridgety
 	if mt.collector == nil || mt.collector.IntentMetrics == nil {
 		return
 	}
-	
+
 	latency := time.Since(startTime).Seconds()
 	mt.collector.IntentMetrics.RecordRouterDecision(routerID, decision, reason, latency)
 }
@@ -242,17 +242,17 @@ func (mt *MetricsTracker) RecordPriceDeviation(symbol string, originalPrice, cur
 	if mt.collector == nil || mt.collector.IntentMetrics == nil || originalPrice == nil || currentPrice == nil {
 		return
 	}
-	
+
 	// Calculate percentage deviation
 	original := new(big.Float).SetInt(originalPrice)
 	current := new(big.Float).SetInt(currentPrice)
-	
+
 	diff := new(big.Float).Sub(current, original)
 	diff.Abs(diff)
-	
+
 	deviation := new(big.Float).Quo(diff, original)
 	deviation.Mul(deviation, big.NewFloat(100))
-	
+
 	deviationPercent, _ := deviation.Float64()
 	mt.collector.IntentMetrics.RecordPriceDeviation(symbol, deviationPercent)
 }
@@ -260,11 +260,11 @@ func (mt *MetricsTracker) RecordPriceDeviation(symbol string, originalPrice, cur
 // cleanupLifecycle removes old lifecycle data after a delay
 func (mt *MetricsTracker) cleanupLifecycle(intentHash string, delay time.Duration) {
 	time.Sleep(delay)
-	
+
 	mt.mu.Lock()
 	delete(mt.lifecycles, intentHash)
 	mt.mu.Unlock()
-	
+
 	logger.Debugf("Cleaned up lifecycle for intent: %s", intentHash)
 }
 
@@ -272,18 +272,18 @@ func (mt *MetricsTracker) cleanupLifecycle(intentHash string, delay time.Duratio
 func (mt *MetricsTracker) GetLifecycleStats() map[string]interface{} {
 	mt.mu.RLock()
 	defer mt.mu.RUnlock()
-	
+
 	stats := map[string]interface{}{
 		"active_lifecycles": len(mt.lifecycles),
 		"symbols":           make(map[string]int),
 	}
-	
+
 	// Count by symbol
 	symbolCounts := stats["symbols"].(map[string]int)
 	for _, lifecycle := range mt.lifecycles {
 		symbolCounts[lifecycle.Symbol]++
 	}
-	
+
 	return stats
 }
 

@@ -254,7 +254,7 @@ func NewReceiverClient(client *ethclient.Client, address common.Address, private
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Log the sender address
 	logger.Infof("Receiver client sender address: %s", auth.From.Hex())
 
@@ -295,7 +295,7 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 		Value:    r.auth.Value,
 		Data:     input,
 	}
-	
+
 	_, err = r.client.CallContract(ctx, callMsg, nil)
 	if err != nil {
 		logger.Errorf("Transaction simulation failed for symbol %s: %v", intent.Symbol, err)
@@ -308,7 +308,7 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 
 	// Log transaction details before sending
 	logger.Infof("Preparing transaction for symbol %s: nonce=%d, gas_limit=%d, gas_price=%s, from=%s, to=%s",
-		intent.Symbol, r.auth.Nonce.Uint64(), gasLimit, gasPrice.String(), 
+		intent.Symbol, r.auth.Nonce.Uint64(), gasLimit, gasPrice.String(),
 		r.auth.From.Hex(), r.address.Hex())
 
 	// Get chain ID for transaction
@@ -321,8 +321,8 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   chainID,
 		Nonce:     r.auth.Nonce.Uint64(),
-		GasTipCap: gasPrice,     // Use gasPrice as tip
-		GasFeeCap: gasPrice,     // Use gasPrice as max fee
+		GasTipCap: gasPrice, // Use gasPrice as tip
+		GasFeeCap: gasPrice, // Use gasPrice as max fee
 		Gas:       gasLimit,
 		To:        &r.address,
 		Value:     r.auth.Value,
@@ -332,31 +332,31 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 	// Sign transaction
 	signedTx, err := r.auth.Signer(r.auth.From, tx)
 	if err != nil {
-		logger.Errorf("Failed to sign transaction for symbol %s, nonce %d: %v", 
+		logger.Errorf("Failed to sign transaction for symbol %s, nonce %d: %v",
 			intent.Symbol, r.auth.Nonce.Uint64(), err)
 		return nil, err
 	}
 
 	// Send transaction
 	usedNonce := r.auth.Nonce.Uint64()
-	
+
 	// Log transaction details before sending
 	logger.Infof("Sending raw transaction: nonce=%d, gas=%d, gasPrice=%s, value=%s, to=%s, dataLen=%d",
 		usedNonce, signedTx.Gas(), signedTx.GasPrice().String(), signedTx.Value().String(),
 		signedTx.To().Hex(), len(signedTx.Data()))
-	
+
 	err = r.client.SendTransaction(ctx, signedTx)
 	if err != nil {
-		logger.Errorf("Failed to send transaction for symbol %s, nonce %d, tx_hash %s: %v", 
+		logger.Errorf("Failed to send transaction for symbol %s, nonce %d, tx_hash %s: %v",
 			intent.Symbol, usedNonce, signedTx.Hash().Hex(), err)
 		// Handle the error appropriately
 		r.nonceManager.HandleError(ctx, err, usedNonce)
 		return nil, err
 	}
 
-	logger.Infof("Transaction sent successfully for symbol %s: tx_hash=%s, nonce=%d", 
+	logger.Infof("Transaction sent successfully for symbol %s: tx_hash=%s, nonce=%d",
 		intent.Symbol, signedTx.Hash().Hex(), usedNonce)
-	
+
 	// Immediately check if transaction is in mempool
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -367,7 +367,7 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 			logger.Infof("Transaction %s found in mempool, pending=%v", signedTx.Hash().Hex(), pending)
 		}
 	}()
-	
+
 	// Don't confirm nonce immediately - wait for actual confirmation
 	// r.nonceManager.ConfirmNonce(usedNonce)
 
@@ -405,7 +405,7 @@ func (r *ReceiverClient) HandleBatchIntentUpdates(ctx context.Context, intents [
 		Value:    r.auth.Value,
 		Data:     input,
 	}
-	
+
 	_, err = r.client.CallContract(ctx, callMsg, nil)
 	if err != nil {
 		logger.Errorf("Batch transaction simulation failed for symbols %v: %v", symbols, err)
@@ -418,7 +418,7 @@ func (r *ReceiverClient) HandleBatchIntentUpdates(ctx context.Context, intents [
 
 	// Log transaction details before sending
 	logger.Infof("Preparing batch transaction for %d intents (symbols: %v): nonce=%d, gas_limit=%d, gas_price=%s, from=%s, to=%s",
-		len(intents), symbols, r.auth.Nonce.Uint64(), gasLimit, gasPrice.String(), 
+		len(intents), symbols, r.auth.Nonce.Uint64(), gasLimit, gasPrice.String(),
 		r.auth.From.Hex(), r.address.Hex())
 
 	// Get chain ID for transaction
@@ -431,8 +431,8 @@ func (r *ReceiverClient) HandleBatchIntentUpdates(ctx context.Context, intents [
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   chainID,
 		Nonce:     r.auth.Nonce.Uint64(),
-		GasTipCap: gasPrice,     // Use gasPrice as tip
-		GasFeeCap: gasPrice,     // Use gasPrice as max fee
+		GasTipCap: gasPrice, // Use gasPrice as tip
+		GasFeeCap: gasPrice, // Use gasPrice as max fee
 		Gas:       gasLimit,
 		To:        &r.address,
 		Value:     r.auth.Value,
@@ -442,7 +442,7 @@ func (r *ReceiverClient) HandleBatchIntentUpdates(ctx context.Context, intents [
 	// Sign transaction
 	signedTx, err := r.auth.Signer(r.auth.From, tx)
 	if err != nil {
-		logger.Errorf("Failed to sign batch transaction for symbols %v, nonce %d: %v", 
+		logger.Errorf("Failed to sign batch transaction for symbols %v, nonce %d: %v",
 			symbols, r.auth.Nonce.Uint64(), err)
 		return nil, err
 	}
@@ -451,16 +451,16 @@ func (r *ReceiverClient) HandleBatchIntentUpdates(ctx context.Context, intents [
 	usedNonce := r.auth.Nonce.Uint64()
 	err = r.client.SendTransaction(ctx, signedTx)
 	if err != nil {
-		logger.Errorf("Failed to send batch transaction for symbols %v, nonce %d, tx_hash %s: %v", 
+		logger.Errorf("Failed to send batch transaction for symbols %v, nonce %d, tx_hash %s: %v",
 			symbols, usedNonce, signedTx.Hash().Hex(), err)
 		// Handle the error appropriately
 		r.nonceManager.HandleError(ctx, err, usedNonce)
 		return nil, err
 	}
 
-	logger.Infof("Batch transaction sent successfully for symbols %v: tx_hash=%s, nonce=%d", 
+	logger.Infof("Batch transaction sent successfully for symbols %v: tx_hash=%s, nonce=%d",
 		symbols, signedTx.Hash().Hex(), usedNonce)
-	
+
 	// Confirm the nonce was used successfully
 	r.nonceManager.ConfirmNonce(usedNonce)
 
@@ -495,16 +495,16 @@ func (r *ReceiverClient) UpdateAuth(ctx context.Context, gasPrice *big.Int) erro
 		if bumpPercent > 300 {
 			bumpPercent = 300 // Cap at 3x original price
 		}
-		
+
 		originalGasPrice := new(big.Int).Set(gasPrice)
 		gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(int64(bumpPercent)))
 		gasPrice.Div(gasPrice, big.NewInt(100))
-		
-		logger.Warnf("Replacement transaction for nonce %d (retry %d): bumping gas from %s to %s (%d%%)", 
+
+		logger.Warnf("Replacement transaction for nonce %d (retry %d): bumping gas from %s to %s (%d%%)",
 			nonce, retryCount, originalGasPrice.String(), gasPrice.String(), bumpPercent)
 	}
 
-	logger.Infof("Nonce allocated for address %s: nonce=%d, gas_price=%s", 
+	logger.Infof("Nonce allocated for address %s: nonce=%d, gas_price=%s",
 		r.auth.From.Hex(), nonce, gasPrice.String())
 
 	r.auth.Nonce = big.NewInt(int64(nonce))
@@ -564,9 +564,9 @@ func (r *ReceiverClient) extractRevertReason(ctx context.Context, callMsg ethere
 	if err == nil {
 		return ""
 	}
-	
+
 	errStr := err.Error()
-	
+
 	// Common patterns for revert reasons
 	// Pattern 1: "execution reverted: <reason>"
 	if strings.Contains(errStr, "execution reverted: ") {
@@ -575,7 +575,7 @@ func (r *ReceiverClient) extractRevertReason(ctx context.Context, callMsg ethere
 			return strings.TrimSpace(parts[1])
 		}
 	}
-	
+
 	// Pattern 2: Error in hex format (0x08c379a0... for Error(string))
 	if strings.Contains(errStr, "0x") {
 		// Extract hex data
@@ -589,19 +589,19 @@ func (r *ReceiverClient) extractRevertReason(ctx context.Context, callMsg ethere
 			if end > 0 {
 				hexData = hexData[:end]
 			}
-			
+
 			// Try to decode as Error(string)
 			if reason := r.decodeErrorString(hexData); reason != "" {
 				return reason
 			}
 		}
 	}
-	
+
 	// Pattern 3: Direct revert message
 	if strings.Contains(errStr, "revert") {
 		return errStr
 	}
-	
+
 	return ""
 }
 
@@ -609,37 +609,37 @@ func (r *ReceiverClient) extractRevertReason(ctx context.Context, callMsg ethere
 func (r *ReceiverClient) decodeErrorString(hexData string) string {
 	// Error(string) selector is 0x08c379a0
 	errorSelector := "0x08c379a0"
-	
+
 	if !strings.HasPrefix(hexData, errorSelector) {
 		return ""
 	}
-	
+
 	// Remove 0x prefix
 	data := strings.TrimPrefix(hexData, "0x")
-	
+
 	// Remove function selector (4 bytes = 8 hex chars)
 	if len(data) < 8 {
 		return ""
 	}
 	data = data[8:]
-	
+
 	// Decode the remaining data as string
 	bytes, err := hex.DecodeString(data)
 	if err != nil {
 		return ""
 	}
-	
+
 	// The string is ABI encoded: offset (32 bytes) + length (32 bytes) + data
 	if len(bytes) < 64 {
 		return ""
 	}
-	
+
 	// Get string length (bytes 32-63)
 	length := new(big.Int).SetBytes(bytes[32:64]).Uint64()
 	if uint64(len(bytes)) < 64+length {
 		return ""
 	}
-	
+
 	// Extract string data
 	return string(bytes[64 : 64+length])
 }

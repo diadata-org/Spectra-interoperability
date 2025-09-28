@@ -58,32 +58,32 @@ func loggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 	start := time.Now()
 	logger.WithFields(logrus.Fields{
 		"method": info.FullMethod,
-		"start": start.Format(time.RFC3339),
+		"start":  start.Format(time.RFC3339),
 	}).Info("gRPC request received")
-	
+
 	resp, err := handler(ctx, req)
-	
+
 	logger.WithFields(logrus.Fields{
-		"method": info.FullMethod,
+		"method":   info.FullMethod,
 		"duration": time.Since(start).String(),
-		"error": err,
+		"error":    err,
 	}).Info("gRPC request completed")
-	
+
 	return resp, err
 }
 
 // TriggerFailover handles failover requests via gRPC
 func (s *Server) TriggerFailover(ctx context.Context, req *pb.FailoverRequest) (*pb.FailoverResponse, error) {
 	logger.WithFields(logrus.Fields{
-		"message_id":   req.MessageId,
-		"intent_hash":  req.IntentHash,
-		"source":       req.SourceChainId,
-		"destination":  req.DestinationChainId,
-		"receiver":     req.ReceiverAddress,
-		"detection_timestamp": req.DetectionTimestamp,
+		"message_id":                 req.MessageId,
+		"intent_hash":                req.IntentHash,
+		"source":                     req.SourceChainId,
+		"destination":                req.DestinationChainId,
+		"receiver":                   req.ReceiverAddress,
+		"detection_timestamp":        req.DetectionTimestamp,
 		"monitoring_start_timestamp": req.MonitoringStartTimestamp,
-		"failover_timestamp": req.FailoverTimestamp,
-		"receiver_key": req.ReceiverKey,
+		"failover_timestamp":         req.FailoverTimestamp,
+		"receiver_key":               req.ReceiverKey,
 	}).Info("Received gRPC failover request with phase timestamps")
 
 	// Validate request
@@ -155,10 +155,10 @@ func (s *Server) GetFailoverStatus(ctx context.Context, req *pb.StatusRequest) (
 func (s *Server) HealthCheck(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
 	// Get chain status from failover handler
 	chainStatus := make(map[string]*pb.ChainStatus)
-	
+
 	// Add chain status information (this would come from the failover handler)
 	// For now, we'll return a simple healthy status
-	
+
 	return &pb.HealthResponse{
 		Healthy:       true,
 		Version:       "1.0.0",

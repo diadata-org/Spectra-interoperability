@@ -10,13 +10,13 @@ func FormatDuration(d time.Duration) string {
 	if d == 0 {
 		return "0s"
 	}
-	
+
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-	
+
 	var parts []string
-	
+
 	if hours > 0 {
 		if hours == 1 {
 			parts = append(parts, "1h")
@@ -24,7 +24,7 @@ func FormatDuration(d time.Duration) string {
 			parts = append(parts, fmt.Sprintf("%dh", hours))
 		}
 	}
-	
+
 	if minutes > 0 {
 		if minutes == 1 {
 			parts = append(parts, "1m")
@@ -32,7 +32,7 @@ func FormatDuration(d time.Duration) string {
 			parts = append(parts, fmt.Sprintf("%dm", minutes))
 		}
 	}
-	
+
 	if seconds > 0 || len(parts) == 0 {
 		if seconds == 1 {
 			parts = append(parts, "1s")
@@ -40,7 +40,7 @@ func FormatDuration(d time.Duration) string {
 			parts = append(parts, fmt.Sprintf("%ds", seconds))
 		}
 	}
-	
+
 	// Join parts with space
 	result := ""
 	for i, part := range parts {
@@ -49,7 +49,7 @@ func FormatDuration(d time.Duration) string {
 		}
 		result += part
 	}
-	
+
 	return result
 }
 
@@ -58,13 +58,13 @@ func FormatDurationVerbose(d time.Duration) string {
 	if d == 0 {
 		return "0 seconds"
 	}
-	
+
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-	
+
 	var parts []string
-	
+
 	if hours > 0 {
 		if hours == 1 {
 			parts = append(parts, "1 hour")
@@ -72,7 +72,7 @@ func FormatDurationVerbose(d time.Duration) string {
 			parts = append(parts, fmt.Sprintf("%d hours", hours))
 		}
 	}
-	
+
 	if minutes > 0 {
 		if minutes == 1 {
 			parts = append(parts, "1 minute")
@@ -80,7 +80,7 @@ func FormatDurationVerbose(d time.Duration) string {
 			parts = append(parts, fmt.Sprintf("%d minutes", minutes))
 		}
 	}
-	
+
 	if seconds > 0 || len(parts) == 0 {
 		if seconds == 1 {
 			parts = append(parts, "1 second")
@@ -88,16 +88,16 @@ func FormatDurationVerbose(d time.Duration) string {
 			parts = append(parts, fmt.Sprintf("%d seconds", seconds))
 		}
 	}
-	
+
 	// Join parts with commas and "and"
 	if len(parts) == 1 {
 		return parts[0]
 	}
-	
+
 	if len(parts) == 2 {
 		return parts[0] + " and " + parts[1]
 	}
-	
+
 	result := ""
 	for i, part := range parts {
 		if i == len(parts)-1 {
@@ -108,7 +108,7 @@ func FormatDurationVerbose(d time.Duration) string {
 			result += part
 		}
 	}
-	
+
 	return result
 }
 
@@ -117,25 +117,25 @@ func FormatDurationCompact(d time.Duration) string {
 	if d == 0 {
 		return "0s"
 	}
-	
+
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-	
+
 	if hours > 0 {
 		if minutes > 0 {
 			return fmt.Sprintf("%dh %dm", hours, minutes)
 		}
 		return fmt.Sprintf("%dh", hours)
 	}
-	
+
 	if minutes > 0 {
 		if seconds > 0 {
 			return fmt.Sprintf("%dm %ds", minutes, seconds)
 		}
 		return fmt.Sprintf("%dm", minutes)
 	}
-	
+
 	return fmt.Sprintf("%ds", seconds)
 }
 

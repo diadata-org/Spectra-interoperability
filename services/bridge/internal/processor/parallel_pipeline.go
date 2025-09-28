@@ -7,10 +7,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // ParallelPipelineConfig configures parallel processing behavior
@@ -41,17 +41,16 @@ type ParallelPipelineResult struct {
 	ProcessingTime    time.Duration
 }
 
-
 // ParallelPipeline processes events with parallel enrichment and gas estimation
 type ParallelPipeline struct {
-	config           *ParallelPipelineConfig
-	enricher         EnrichmentService
-	gasEstimator     GasEstimationService
-	router           RoutingService
-	
+	config       *ParallelPipelineConfig
+	enricher     EnrichmentService
+	gasEstimator GasEstimationService
+	router       RoutingService
+
 	// Statistics
-	stats            *ParallelPipelineStats
-	mutex            sync.RWMutex
+	stats *ParallelPipelineStats
+	mutex sync.RWMutex
 }
 
 // ParallelPipelineStats tracks parallel processing statistics
@@ -90,7 +89,7 @@ func NewParallelPipeline(
 	if config == nil {
 		config = DefaultParallelPipelineConfig()
 	}
-	
+
 	return &ParallelPipeline{
 		config:       config,
 		enricher:     enricher,
@@ -106,19 +105,19 @@ func (pp *ParallelPipeline) ProcessEventParallel(
 	event *types.EventData,
 	extractedData *config.ExtractedData,
 ) (*ParallelPipelineResult, error) {
-	
+
 	startTime := time.Now()
-	
+
 	result := &ParallelPipelineResult{
 		ExtractedData:     extractedData,
 		GasEstimates:      make(map[string]uint64),
 		GasEstimateErrors: make(map[string]error),
 	}
-	
+
 	// Step 1: Route events first to determine destinations (fast operation)
 	routingResults := pp.router.RouteEvent(event.EventName, extractedData)
 	result.RoutingResults = routingResults
-	
+
 	// Collect all destinations for gas estimation
 	var allDestinations []config.RouterDestination
 	for _, routeResult := range routingResults {
@@ -126,7 +125,7 @@ func (pp *ParallelPipeline) ProcessEventParallel(
 			allDestinations = append(allDestinations, routeResult.Destinations...)
 		}
 	}
-	
+
 	// Step 2: Run enrichment and gas estimation in parallel
 	if pp.config.EnableParallelEnrichment && len(allDestinations) > 0 {
 		err := pp.runParallelOperations(ctx, event, extractedData, allDestinations, result)
@@ -140,10 +139,10 @@ func (pp *ParallelPipeline) ProcessEventParallel(
 			return result, err
 		}
 	}
-	
+
 	result.ProcessingTime = time.Since(startTime)
 	pp.updateStats(result)
-	
+
 	return result, nil
 }
 
@@ -155,24 +154,24 @@ func (pp *ParallelPipeline) runParallelOperations(
 	destinations []config.RouterDestination,
 	result *ParallelPipelineResult,
 ) error {
-	
+
 	// Create error group for parallel execution
 	g, gctx := errgroup.WithContext(ctx)
-	
+
 	// Track timing for each operation
 	var enrichmentTime, gasEstimationTime time.Duration
-	
+
 	// Parallel operation 1: Event enrichment
 	g.Go(func() error {
 		enrichStart := time.Now()
 		defer func() {
 			enrichmentTime = time.Since(enrichStart)
 		}()
-		
+
 		// Create timeout context for enrichment
 		enrichCtx, cancel := context.WithTimeout(gctx, pp.config.EnrichmentTimeout)
 		defer cancel()
-		
+
 		err := pp.enricher.EnrichEventData(enrichCtx, event.EventName, extractedData)
 		if err != nil {
 			result.EnrichmentError = err
@@ -181,7 +180,7 @@ func (pp *ParallelPipeline) runParallelOperations(
 		}
 		return nil
 	})
-	
+
 	// Parallel operation 2: Gas estimation for all destinations
 	if pp.config.EnableGasPreEstimation && len(destinations) > 0 {
 		g.Go(func() error {
@@ -189,15 +188,15 @@ func (pp *ParallelPipeline) runParallelOperations(
 			defer func() {
 				gasEstimationTime = time.Since(gasStart)
 			}()
-			
+
 			// Create timeout context for gas estimation
 			gasCtx, cancel := context.WithTimeout(gctx, pp.config.GasEstimationTimeout)
 			defer cancel()
-			
+
 			estimates, errors := pp.gasEstimator.EstimateGasForDestinations(gasCtx, event, destinations)
 			result.GasEstimates = estimates
 			result.GasEstimateErrors = errors
-			
+
 			// Log results
 			for dest, estimate := range estimates {
 				logger.Debugf("Pre-estimated gas for %s: %d", dest, estimate)
@@ -205,24 +204,24 @@ func (pp *ParallelPipeline) runParallelOperations(
 			for dest, err := range errors {
 				logger.Warnf("Gas estimation failed for %s: %v", dest, err)
 			}
-			
+
 			return nil
 		})
 	}
-	
+
 	// Wait for all parallel operations to complete
 	if err := g.Wait(); err != nil {
 		return err
 	}
-	
+
 	// Calculate time savings
 	sequentialTime := enrichmentTime + gasEstimationTime
 	parallelTime := max(enrichmentTime, gasEstimationTime)
 	timeSaved := sequentialTime - parallelTime
-	
-	logger.Debugf("Parallel processing completed - Sequential: %v, Parallel: %v, Saved: %v", 
+
+	logger.Debugf("Parallel processing completed - Sequential: %v, Parallel: %v, Saved: %v",
 		sequentialTime, parallelTime, timeSaved)
-	
+
 	return nil
 }
 
@@ -234,20 +233,20 @@ func (pp *ParallelPipeline) runSequentialOperations(
 	destinations []config.RouterDestination,
 	result *ParallelPipelineResult,
 ) error {
-	
+
 	// Sequential enrichment
 	if err := pp.enricher.EnrichEventData(ctx, event.EventName, extractedData); err != nil {
 		result.EnrichmentError = err
 		logger.Warnf("Sequential enrichment failed for event %s: %v", event.EventName, err)
 	}
-	
+
 	// Sequential gas estimation
 	if len(destinations) > 0 {
 		estimates, errors := pp.gasEstimator.EstimateGasForDestinations(ctx, event, destinations)
 		result.GasEstimates = estimates
 		result.GasEstimateErrors = errors
 	}
-	
+
 	return nil
 }
 
@@ -255,15 +254,15 @@ func (pp *ParallelPipeline) runSequentialOperations(
 func (pp *ParallelPipeline) updateStats(result *ParallelPipelineResult) {
 	pp.mutex.Lock()
 	defer pp.mutex.Unlock()
-	
+
 	pp.stats.EventsProcessed++
-	
+
 	if result.EnrichmentError == nil {
 		pp.stats.EnrichmentSuccesses++
 	} else {
 		pp.stats.EnrichmentFailures++
 	}
-	
+
 	gasSuccesses := 0
 	gasFailures := 0
 	for _, err := range result.GasEstimateErrors {
@@ -273,10 +272,10 @@ func (pp *ParallelPipeline) updateStats(result *ParallelPipelineResult) {
 			gasFailures++
 		}
 	}
-	
+
 	pp.stats.GasEstimateSuccesses += uint64(gasSuccesses)
 	pp.stats.GasEstimateFailures += uint64(gasFailures)
-	
+
 	// Update average processing time (rolling average)
 	processingTimeMs := float64(result.ProcessingTime) / 1e6
 	pp.stats.AverageParallelTime = updateRollingAverage(pp.stats.AverageParallelTime, processingTimeMs, pp.stats.EventsProcessed)
@@ -286,7 +285,7 @@ func (pp *ParallelPipeline) updateStats(result *ParallelPipelineResult) {
 func (pp *ParallelPipeline) GetStats() *ParallelPipelineStats {
 	pp.mutex.RLock()
 	defer pp.mutex.RUnlock()
-	
+
 	// Return a copy to avoid race conditions
 	statsCopy := *pp.stats
 	return &statsCopy

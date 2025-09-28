@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
-	
+
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 )
 
@@ -29,25 +29,25 @@ func (dt *DataTransformer) ApplyTransformations(data *config.ExtractedData, tran
 	if len(transformations) == 0 {
 		return nil
 	}
-	
+
 	if data.Processed == nil {
 		data.Processed = make(map[string]interface{})
 	}
-	
+
 	for _, transform := range transformations {
 		inputValue, err := dt.resolveValue(transform.Input, data)
 		if err != nil {
 			return fmt.Errorf("failed to resolve input for transformation %s: %w", transform.Field, err)
 		}
-		
+
 		result, err := dt.transform(transform.Operation, inputValue, transform.Params)
 		if err != nil {
 			return fmt.Errorf("transformation %s failed: %w", transform.Field, err)
 		}
-		
+
 		data.Processed[transform.Field] = result
 	}
-	
+
 	return nil
 }
 
@@ -56,14 +56,14 @@ func (dt *DataTransformer) resolveValue(template string, data *config.ExtractedD
 	if !strings.HasPrefix(template, "${") || !strings.HasSuffix(template, "}") {
 		return template, nil
 	}
-	
+
 	path := template[2 : len(template)-1]
-	
+
 	parts := strings.Split(path, ".")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid template path: %s", path)
 	}
-	
+
 	var source map[string]interface{}
 	switch parts[0] {
 	case "event":
@@ -81,14 +81,14 @@ func (dt *DataTransformer) resolveValue(template string, data *config.ExtractedD
 	default:
 		return nil, fmt.Errorf("unknown template source: %s", parts[0])
 	}
-	
+
 	return dt.navigatePath(source, parts[1:])
 }
 
 // navigatePath navigates through a nested structure
 func (dt *DataTransformer) navigatePath(data interface{}, path []string) (interface{}, error) {
 	current := data
-	
+
 	for _, part := range path {
 		switch v := current.(type) {
 		case map[string]interface{}:
@@ -111,7 +111,7 @@ func (dt *DataTransformer) navigatePath(data interface{}, path []string) (interf
 			return nil, fmt.Errorf("cannot navigate through %T at %s", v, part)
 		}
 	}
-	
+
 	return current, nil
 }
 
@@ -145,31 +145,31 @@ func (dt *DataTransformer) transformSlice(input interface{}, params map[string]i
 	if slice.Kind() != reflect.Slice {
 		return nil, fmt.Errorf("slice operation requires array input, got %T", input)
 	}
-	
+
 	start := 0
 	if s, ok := params["start"].(float64); ok {
 		start = int(s)
 	}
-	
+
 	length := slice.Len()
 	if l, ok := params["length"].(float64); ok {
 		length = int(l)
 	}
-	
+
 	if start < 0 || start >= slice.Len() {
 		return nil, fmt.Errorf("slice start index out of bounds: %d", start)
 	}
-	
+
 	end := start + length
 	if end > slice.Len() {
 		end = slice.Len()
 	}
-	
+
 	result := reflect.MakeSlice(slice.Type(), end-start, end-start)
 	for i := start; i < end; i++ {
 		result.Index(i - start).Set(slice.Index(i))
 	}
-	
+
 	return result.Interface(), nil
 }
 
@@ -179,17 +179,17 @@ func (dt *DataTransformer) transformConcat(input interface{}, params map[string]
 	if sep, ok := params["separator"].(string); ok {
 		separator = sep
 	}
-	
+
 	var values []string
-	
+
 	values = append(values, fmt.Sprintf("%v", input))
-	
+
 	if additional, ok := params["values"].([]interface{}); ok {
 		for _, v := range additional {
 			values = append(values, fmt.Sprintf("%v", v))
 		}
 	}
-	
+
 	return strings.Join(values, separator), nil
 }
 
@@ -199,7 +199,7 @@ func (dt *DataTransformer) transformHash(input interface{}, params map[string]in
 	if ht, ok := params["type"].(string); ok {
 		hashType = ht
 	}
-	
+
 	var data []byte
 	switch v := input.(type) {
 	case string:
@@ -213,7 +213,7 @@ func (dt *DataTransformer) transformHash(input interface{}, params map[string]in
 	default:
 		data = []byte(fmt.Sprintf("%v", v))
 	}
-	
+
 	switch hashType {
 	case "keccak256":
 		hash := crypto.Keccak256Hash(data)
@@ -232,7 +232,7 @@ func (dt *DataTransformer) transformEncode(input interface{}, params map[string]
 	if et, ok := params["type"].(string); ok {
 		encodeType = et
 	}
-	
+
 	switch encodeType {
 	case "abi":
 		return dt.encodeABI(input, params)
@@ -251,12 +251,12 @@ func (dt *DataTransformer) encodeABI(input interface{}, params map[string]interf
 	if !ok {
 		return nil, fmt.Errorf("ABI encoding requires types parameter")
 	}
-	
+
 	var typeStrings []string
 	for _, t := range types {
 		typeStrings = append(typeStrings, fmt.Sprintf("%v", t))
 	}
-	
+
 	arguments := make(abi.Arguments, len(typeStrings))
 	for i, typeStr := range typeStrings {
 		typ, err := abi.NewType(typeStr, "", nil)
@@ -265,7 +265,7 @@ func (dt *DataTransformer) encodeABI(input interface{}, params map[string]interf
 		}
 		arguments[i] = abi.Argument{Type: typ}
 	}
-	
+
 	var values []interface{}
 	switch v := input.(type) {
 	case []interface{}:
@@ -273,12 +273,12 @@ func (dt *DataTransformer) encodeABI(input interface{}, params map[string]interf
 	default:
 		values = []interface{}{v}
 	}
-	
+
 	encoded, err := arguments.Pack(values...)
 	if err != nil {
 		return nil, fmt.Errorf("ABI encoding failed: %w", err)
 	}
-	
+
 	return encoded, nil
 }
 
@@ -303,12 +303,12 @@ func (dt *DataTransformer) encodeHex(input interface{}) (interface{}, error) {
 // encodePacked performs packed encoding (non-standard ABI encoding)
 func (dt *DataTransformer) encodePacked(input interface{}, params map[string]interface{}) (interface{}, error) {
 	var result []byte
-	
+
 	values, ok := input.([]interface{})
 	if !ok {
 		values = []interface{}{input}
 	}
-	
+
 	for _, v := range values {
 		switch val := v.(type) {
 		case common.Address:
@@ -323,7 +323,7 @@ func (dt *DataTransformer) encodePacked(input interface{}, params map[string]int
 			return nil, fmt.Errorf("unsupported type for packed encoding: %T", v)
 		}
 	}
-	
+
 	return result, nil
 }
 

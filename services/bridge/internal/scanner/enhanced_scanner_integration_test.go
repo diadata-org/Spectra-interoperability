@@ -22,13 +22,13 @@ import (
 
 // ChainSimulator simulates blockchain events and RPC responses
 type ChainSimulator struct {
-	mu                sync.RWMutex
-	currentBlock      uint64
-	blocks            map[uint64]*SimulatedBlock
-	eventsByBlock     map[uint64][]types.Log
-	rpcDelay          time.Duration
-	rpcErrorRate      float64 // 0.0 to 1.0
-	rpcErrors         map[uint64]error
+	mu            sync.RWMutex
+	currentBlock  uint64
+	blocks        map[uint64]*SimulatedBlock
+	eventsByBlock map[uint64][]types.Log
+	rpcDelay      time.Duration
+	rpcErrorRate  float64 // 0.0 to 1.0
+	rpcErrors     map[uint64]error
 }
 
 type SimulatedBlock struct {
@@ -174,20 +174,20 @@ type MockClientWithSimulator struct {
 
 func (m *MockClientWithSimulator) BlockNumber(ctx context.Context) (uint64, error) {
 	time.Sleep(m.simulator.rpcDelay) // Simulate network delay
-	
+
 	m.simulator.mu.RLock()
 	currentBlock := m.simulator.currentBlock
 	m.simulator.mu.RUnlock()
-	
+
 	return currentBlock, nil
 }
 
 func (m *MockClientWithSimulator) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	time.Sleep(m.simulator.rpcDelay) // Simulate network delay
-	
+
 	startBlock := query.FromBlock.Uint64()
 	endBlock := query.ToBlock.Uint64()
-	
+
 	// Check for simulated RPC errors
 	m.simulator.mu.RLock()
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
@@ -197,7 +197,7 @@ func (m *MockClientWithSimulator) FilterLogs(ctx context.Context, query ethereum
 		}
 	}
 	m.simulator.mu.RUnlock()
-	
+
 	var allLogs []types.Log
 	m.simulator.mu.RLock()
 	for blockNum := startBlock; blockNum <= endBlock; blockNum++ {
@@ -211,7 +211,7 @@ func (m *MockClientWithSimulator) FilterLogs(ctx context.Context, query ethereum
 		}
 	}
 	m.simulator.mu.RUnlock()
-	
+
 	return allLogs, nil
 }
 
@@ -229,7 +229,7 @@ func (m *MockClientWithSimulator) matchesQuery(log types.Log, query ethereum.Fil
 			return false
 		}
 	}
-	
+
 	// Enhanced topic filtering to support multi-level topic matching
 	for topicLevel, topicOptions := range query.Topics {
 		if len(topicOptions) > 0 && topicLevel < len(log.Topics) {
@@ -245,7 +245,7 @@ func (m *MockClientWithSimulator) matchesQuery(log types.Log, query ethereum.Fil
 			}
 		}
 	}
-	
+
 	return true
 }
 
@@ -331,18 +331,18 @@ func (m *MockDatabaseWithState) GetProcessedEventsByBlockRange(startBlock, endBl
 	for hash, event := range m.processedEvents {
 		if event.BlockNumber >= startBlock && event.BlockNumber <= endBlock {
 			processedEvent := &database.ProcessedEvent{
-				EventName:       event.EventName,
-				IntentHash:      hash,
-				BlockNumber:     event.BlockNumber,
+				EventName:   event.EventName,
+				IntentHash:  hash,
+				BlockNumber: event.BlockNumber,
 				TransactionHash: func() string {
 					if event.TxHash == (common.Hash{}) {
 						return ""
 					}
 					return event.TxHash.Hex()
 				}(),
-				LogIndex:    event.LogIndex,
-				Symbol:      event.Symbol,
-				Price:       func() string {
+				LogIndex: event.LogIndex,
+				Symbol:   event.Symbol,
+				Price: func() string {
 					if event.Price != nil {
 						return event.Price.String()
 					}
@@ -448,8 +448,6 @@ func (h *testHarness) stop() {
 	h.collectionWg.Wait()
 }
 
-
-
 // TestEnhancedScanner_NormalForwardScan tests the scanner under normal conditions where it only needs to scan forward.
 func TestEnhancedScanner_NormalForwardScan(t *testing.T) {
 	h := setupScannerTest(t)
@@ -462,7 +460,7 @@ func TestEnhancedScanner_NormalForwardScan(t *testing.T) {
 
 	// Action: Start scanner, then simulate new blocks appearing
 	h.start(ctx)
-	time.Sleep(200 * time.Millisecond)      // Allow workers to start
+	time.Sleep(200 * time.Millisecond)   // Allow workers to start
 	h.simulator.SimulateNewBlocks(10, 2) // Blocks 1001-1010, 20 events total
 
 	// Assertions
@@ -553,7 +551,7 @@ func TestEnhancedScanner_GapDetectionAndFill(t *testing.T) {
 
 	// Start the scanner, then simulate the blocks appearing
 	h.start(ctx)
-	time.Sleep(200 * time.Millisecond)      // Allow workers to start
+	time.Sleep(200 * time.Millisecond)   // Allow workers to start
 	h.simulator.SimulateNewBlocks(20, 1) // Blocks 1001-1020, 20 events
 
 	// Wait for the consumer to process all 20 events from the initial scan.
@@ -698,8 +696,7 @@ func TestEnhancedScanner_DatabaseConstraintViolation(t *testing.T) {
 	h.mockDB.mu.RLock()
 	processedCount := len(h.mockDB.processedEvents)
 	h.mockDB.mu.RUnlock()
-	
+
 	assert.Equal(t, 9, len(h.collectedEvents), "Should have collected all 9 events")
 	assert.Equal(t, 6, processedCount, "Should have marked 6 events as processed (blocks 1001,1002,1004,1005,1007,1008)")
 }
-

@@ -34,7 +34,7 @@ func (m *MockEthClient) CallContract(ctx context.Context, call ethereum.CallMsg,
 	if m.CallLatencyMS > 0 {
 		time.Sleep(time.Duration(m.CallLatencyMS) * time.Millisecond)
 	}
-	
+
 	args := m.Called(ctx, call, blockNumber)
 	return args.Get(0).([]byte), args.Error(1)
 }
@@ -42,25 +42,25 @@ func (m *MockEthClient) CallContract(ctx context.Context, call ethereum.CallMsg,
 // setupMockIntentEnrichment sets up mock for IntentRegistered enrichment
 func setupMockIntentEnrichment(client *MockEthClient, latencyMS int) {
 	client.CallLatencyMS = latencyMS
-	
+
 	// Mock getOracleIntent response
 	// This simulates the registry contract call that takes ~300ms in real world
 	intentData := encodeMockOracleIntent()
-	
+
 	client.On("CallContract", mock.Anything, mock.MatchedBy(func(call ethereum.CallMsg) bool {
 		// Match getOracleIntent call by checking if call data starts with method signature
 		return len(call.Data) >= 4 && call.To != nil
 	}), mock.Anything).Return(intentData, nil)
 }
 
-// setupMockRandomnessEnrichment sets up mock for IntArraySet enrichment  
+// setupMockRandomnessEnrichment sets up mock for IntArraySet enrichment
 func setupMockRandomnessEnrichment(client *MockEthClient, latencyMS int) {
 	client.CallLatencyMS = latencyMS
-	
+
 	// Mock getIntArray response
 	// This simulates the randomness contract call for getting random integers
 	randomData := encodeMockRandomArray()
-	
+
 	client.On("CallContract", mock.Anything, mock.MatchedBy(func(call ethereum.CallMsg) bool {
 		// Match getIntArray call
 		return len(call.Data) >= 4 && call.To != nil
@@ -74,13 +74,13 @@ func encodeMockOracleIntent() []byte {
 	// Create a proper ABI-encoded response for getOracleIntent
 	// This returns a tuple with the oracle intent structure
 	abiDef := `[{"name":"getOracleIntent","type":"function","inputs":[{"name":"intentHash","type":"bytes32"}],"outputs":[{"name":"intent","type":"tuple","components":[{"name":"intentType","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"expiry","type":"uint256"},{"name":"symbol","type":"string"},{"name":"price","type":"uint256"},{"name":"timestamp","type":"uint256"},{"name":"source","type":"string"},{"name":"signature","type":"bytes"},{"name":"signer","type":"address"}]}]}]`
-	
+
 	parsedABI, err := abi.JSON(strings.NewReader(abiDef))
 	if err != nil {
 		// Fallback to simple encoding
 		return []byte("mock_encoded_oracle_intent_data")
 	}
-	
+
 	// Create mock intent data
 	intentData := struct {
 		IntentType string
@@ -107,13 +107,13 @@ func encodeMockOracleIntent() []byte {
 		Signature:  []byte("mock_signature_data"),
 		Signer:     common.HexToAddress("0x0Fa4D71382178ecB0DBA9961cB31153819043DfE"),
 	}
-	
+
 	encoded, err := parsedABI.Methods["getOracleIntent"].Outputs.Pack(intentData)
 	if err != nil {
 		// Fallback to simple encoding
 		return []byte("mock_encoded_oracle_intent_data")
 	}
-	
+
 	return encoded
 }
 
@@ -141,13 +141,13 @@ func (de *TestDataEnricher) EnrichEventData(ctx context.Context, eventName strin
 	if !exists {
 		return fmt.Errorf("event definition not found: %s", eventName)
 	}
-	
+
 	if eventDef.Enrichment == nil {
 		return nil
 	}
-	
+
 	enrichment := eventDef.Enrichment
-	
+
 	contractAddr := enrichment.Contract
 	if contractAddr == "" {
 		if addr, ok := extractedData.Event["_contract"].(string); ok {
@@ -156,46 +156,46 @@ func (de *TestDataEnricher) EnrichEventData(ctx context.Context, eventName strin
 			return fmt.Errorf("no contract address for enrichment")
 		}
 	}
-	
+
 	params, err := de.buildParameters(enrichment.Params, extractedData)
 	if err != nil {
 		return fmt.Errorf("failed to build enrichment parameters: %w", err)
 	}
-	
+
 	result, err := de.callViewMethod(ctx, contractAddr, enrichment.Method, enrichment.ABI, params)
 	if err != nil {
 		return fmt.Errorf("enrichment call failed: %w", err)
 	}
-	
+
 	enrichedData := make(map[string]interface{})
 	if err := de.processReturnValues(result, enrichment.Returns, enrichedData); err != nil {
 		return fmt.Errorf("failed to process return values: %w", err)
 	}
-	
+
 	extractedData.Enrichment = enrichedData
-	
+
 	return nil
 }
 
 // Helper methods for TestDataEnricher (copied from original enricher)
 func (de *TestDataEnricher) buildParameters(paramTemplates []string, data *config.ExtractedData) ([]interface{}, error) {
 	params := make([]interface{}, len(paramTemplates))
-	
+
 	for i, template := range paramTemplates {
 		value, err := de.resolveTemplate(template, data)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve parameter %d: %w", i, err)
 		}
-		
+
 		// Convert types for contract calls (especially hex strings to proper types)
 		convertedValue, err := de.convertTypes(value)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert parameter %d: %w", i, err)
 		}
-		
+
 		params[i] = convertedValue
 	}
-	
+
 	return params, nil
 }
 
@@ -235,14 +235,14 @@ func (de *TestDataEnricher) resolveTemplate(template string, data *config.Extrac
 	if !strings.HasPrefix(template, "${") || !strings.HasSuffix(template, "}") {
 		return template, nil
 	}
-	
+
 	path := template[2 : len(template)-1]
-	
+
 	parts := strings.Split(path, ".")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid template path: %s", path)
 	}
-	
+
 	var source map[string]interface{}
 	switch parts[0] {
 	case "event":
@@ -254,7 +254,7 @@ func (de *TestDataEnricher) resolveTemplate(template string, data *config.Extrac
 	default:
 		return nil, fmt.Errorf("unknown template source: %s", parts[0])
 	}
-	
+
 	var current interface{} = source
 	for i := 1; i < len(parts); i++ {
 		switch v := current.(type) {
@@ -268,43 +268,43 @@ func (de *TestDataEnricher) resolveTemplate(template string, data *config.Extrac
 			return nil, fmt.Errorf("cannot navigate through non-map type at %s", parts[i])
 		}
 	}
-	
+
 	return current, nil
 }
 
 func (de *TestDataEnricher) callViewMethod(ctx context.Context, contractAddr, methodName, methodABI string, params []interface{}) ([]interface{}, error) {
 	address := common.HexToAddress(contractAddr)
-	
+
 	contractABI, err := de.getOrParseABI(methodName, methodABI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ABI: %w", err)
 	}
-	
+
 	data, err := contractABI.Pack(methodName, params...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack method call: %w", err)
 	}
-	
+
 	msg := ethereum.CallMsg{
 		To:   &address,
 		Data: data,
 	}
-	
+
 	result, err := de.client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("contract call failed: %w", err)
 	}
-	
+
 	method, exists := contractABI.Methods[methodName]
 	if !exists {
 		return nil, fmt.Errorf("method not found in ABI: %s", methodName)
 	}
-	
+
 	values, err := method.Outputs.Unpack(result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack result: %w", err)
 	}
-	
+
 	return values, nil
 }
 
@@ -316,22 +316,22 @@ func (de *TestDataEnricher) getOrParseABI(methodName, abiStr string) (abi.ABI, e
 		return cached, nil
 	}
 	de.mutex.RUnlock()
-	
+
 	if abiStr == "" {
 		return abi.ABI{}, fmt.Errorf("no ABI provided for method %s", methodName)
 	}
-	
+
 	contractABI := fmt.Sprintf(`[%s]`, abiStr)
 	parsed, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
 		return abi.ABI{}, fmt.Errorf("failed to parse ABI: %w", err)
 	}
-	
+
 	// Write to cache with write lock
 	de.mutex.Lock()
 	de.abiCache[methodName] = parsed
 	de.mutex.Unlock()
-	
+
 	return parsed, nil
 }
 
@@ -342,7 +342,7 @@ func (de *TestDataEnricher) processReturnValues(values []interface{}, mapping ma
 		}
 		return nil
 	}
-	
+
 	for fieldName, sourcePath := range mapping {
 		value, err := de.extractReturnValue(values, sourcePath)
 		if err != nil {
@@ -350,7 +350,7 @@ func (de *TestDataEnricher) processReturnValues(values []interface{}, mapping ma
 		}
 		output[fieldName] = value
 	}
-	
+
 	return nil
 }
 
@@ -361,16 +361,16 @@ func (de *TestDataEnricher) extractReturnValue(values []interface{}, path string
 		}
 		return values[idx], nil
 	}
-	
+
 	parts := strings.Split(path, ".")
 	if len(parts) > 1 {
 		return nil, fmt.Errorf("nested return paths not yet implemented: %s", path)
 	}
-	
+
 	if path == "tuple" && len(values) == 1 {
 		return values[0], nil
 	}
-	
+
 	return nil, fmt.Errorf("invalid return path: %s", path)
 }
 
@@ -379,25 +379,25 @@ func (de *TestDataEnricher) parseIndex(s string) (int, error) {
 	if _, err := fmt.Sscanf(s, "%d", &idx); err == nil {
 		return idx, nil
 	}
-	
+
 	if _, err := fmt.Sscanf(s, "data[%d]", &idx); err == nil {
 		return idx, nil
 	}
-	
+
 	return 0, fmt.Errorf("not an index: %s", s)
 }
 
 func encodeMockRandomArray() []byte {
 	// Create a proper ABI-encoded response for getIntArray
 	abiDef := `[{"name":"getIntArray","type":"function","inputs":[{"name":"requestId_","type":"uint256"}],"outputs":[{"name":"requestId","type":"uint256"},{"name":"randomInts","type":"int256[]"},{"name":"round","type":"int64"},{"name":"seed","type":"string"},{"name":"signature","type":"string"}]}]`
-	
+
 	parsedABI, err := abi.JSON(strings.NewReader(abiDef))
 	if err != nil {
 		// Fallback to simple hex-encoded data
 		mockData, _ := hex.DecodeString("00000000000000000000000000000000000000000000000000000000000001ce0000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000066b9e00000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000003e700000000000000000000000000000000000000000000000000000000fffffb80000000000000000000000000000000000000000000000000000000000000030900000000000000000000000000000000000000000000000000000000000000007b00000000000000000000000000000000000000000000000000000000fffffe380000000000000000000000000000000000000000000000000000000000000012random_seed_string00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001672616e646f6d5f7369676e61747572655f737472696e6700000000000000000")
 		return mockData
 	}
-	
+
 	// Create mock random data
 	randomInts := []*big.Int{
 		big.NewInt(999),
@@ -406,12 +406,12 @@ func encodeMockRandomArray() []byte {
 		big.NewInt(123),
 		big.NewInt(-456),
 	}
-	
+
 	encoded, err := parsedABI.Methods["getIntArray"].Outputs.Pack(
-		big.NewInt(462),        // requestId
-		randomInts,             // randomInts
-		int64(421614),          // round
-		"random_seed_string",   // seed
+		big.NewInt(462),           // requestId
+		randomInts,                // randomInts
+		int64(421614),             // round
+		"random_seed_string",      // seed
 		"random_signature_string", // signature
 	)
 	if err != nil {
@@ -419,7 +419,7 @@ func encodeMockRandomArray() []byte {
 		mockData, _ := hex.DecodeString("00000000000000000000000000000000000000000000000000000000000001ce0000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000066b9e00000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000003e700000000000000000000000000000000000000000000000000000000fffffb80000000000000000000000000000000000000000000000000000000000000030900000000000000000000000000000000000000000000000000000000000000007b00000000000000000000000000000000000000000000000000000000fffffe380000000000000000000000000000000000000000000000000000000000000012random_seed_string00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001672616e646f6d5f7369676e61747572655f737472696e6700000000000000000")
 		return mockData
 	}
-	
+
 	return encoded
 }
 
@@ -491,7 +491,7 @@ func createIntArraySetEventDef() *config.EventDefinition {
 			},
 			Returns: map[string]string{
 				"randomInts":    "1",
-				"round":         "2", 
+				"round":         "2",
 				"fullSeed":      "3",
 				"fullSignature": "4",
 			},
@@ -522,28 +522,28 @@ func benchmarkIntentEnrichment(b *testing.B, latencyMS int, description string) 
 	// Setup
 	mockClient := &MockEthClient{}
 	setupMockIntentEnrichment(mockClient, latencyMS)
-	
+
 	eventDefs := map[string]*config.EventDefinition{
 		"IntentRegistered": createIntentRegisteredEventDef(),
 	}
-	
+
 	enricher := newTestDataEnricher(mockClient, eventDefs)
-	
+
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	b.Run(description, func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			// Create fresh event data for each iteration
 			data := createIntentRegisteredEventData()
-			
+
 			err := enricher.EnrichEventData(ctx, "IntentRegistered", data)
 			if err != nil {
 				b.Fatalf("Enrichment failed: %v", err)
 			}
 		}
 	})
-	
+
 	// Report metrics
 	b.ReportMetric(float64(latencyMS), "network_latency_ms")
 }
@@ -571,28 +571,28 @@ func benchmarkRandomnessEnrichment(b *testing.B, latencyMS int, description stri
 	// Setup
 	mockClient := &MockEthClient{}
 	setupMockRandomnessEnrichment(mockClient, latencyMS)
-	
+
 	eventDefs := map[string]*config.EventDefinition{
 		"IntArraySet": createIntArraySetEventDef(),
 	}
-	
+
 	enricher := newTestDataEnricher(mockClient, eventDefs)
-	
+
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	b.Run(description, func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			// Create fresh event data for each iteration
 			data := createIntArraySetEventData()
-			
+
 			err := enricher.EnrichEventData(ctx, "IntArraySet", data)
 			if err != nil {
 				b.Fatalf("Enrichment failed: %v", err)
 			}
 		}
 	})
-	
+
 	// Report metrics
 	b.ReportMetric(float64(latencyMS), "network_latency_ms")
 }
@@ -602,11 +602,11 @@ func benchmarkRandomnessEnrichment(b *testing.B, latencyMS int, description stri
 func BenchmarkEnrichment_Comparison(b *testing.B) {
 	latencies := []int{50, 150, 300, 500}
 	eventTypes := []string{"IntentRegistered", "IntArraySet"}
-	
+
 	for _, eventType := range eventTypes {
 		for _, latency := range latencies {
 			testName := fmt.Sprintf("%s_Latency_%dms", eventType, latency)
-			
+
 			b.Run(testName, func(b *testing.B) {
 				switch eventType {
 				case "IntentRegistered":
@@ -642,7 +642,7 @@ func benchmarkConcurrentEnrichment(b *testing.B, eventType string, workers int, 
 	// Setup
 	mockClient := &MockEthClient{}
 	var eventDefs map[string]*config.EventDefinition
-	
+
 	switch eventType {
 	case "IntentRegistered":
 		setupMockIntentEnrichment(mockClient, latencyMS)
@@ -655,14 +655,14 @@ func benchmarkConcurrentEnrichment(b *testing.B, eventType string, workers int, 
 			"IntArraySet": createIntArraySetEventDef(),
 		}
 	}
-	
+
 	enricher := newTestDataEnricher(mockClient, eventDefs)
-	
+
 	ctx := context.Background()
-	
+
 	b.SetParallelism(workers)
 	b.ResetTimer()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			var data *config.ExtractedData
@@ -672,14 +672,14 @@ func benchmarkConcurrentEnrichment(b *testing.B, eventType string, workers int, 
 			case "IntArraySet":
 				data = createIntArraySetEventData()
 			}
-			
+
 			err := enricher.EnrichEventData(ctx, eventType, data)
 			if err != nil {
 				b.Fatalf("Enrichment failed: %v", err)
 			}
 		}
 	})
-	
+
 	// Report metrics
 	b.ReportMetric(float64(workers), "concurrent_workers")
 	b.ReportMetric(float64(latencyMS), "network_latency_ms")
@@ -700,7 +700,7 @@ func benchmarkMemoryUsage(b *testing.B, eventType string, latencyMS int) {
 	// Setup
 	mockClient := &MockEthClient{}
 	var eventDefs map[string]*config.EventDefinition
-	
+
 	switch eventType {
 	case "IntentRegistered":
 		setupMockIntentEnrichment(mockClient, latencyMS)
@@ -713,14 +713,14 @@ func benchmarkMemoryUsage(b *testing.B, eventType string, latencyMS int) {
 			"IntArraySet": createIntArraySetEventDef(),
 		}
 	}
-	
+
 	enricher := newTestDataEnricher(mockClient, eventDefs)
-	
+
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	for i := 0; i < b.N; i++ {
 		var data *config.ExtractedData
 		switch eventType {
@@ -729,7 +729,7 @@ func benchmarkMemoryUsage(b *testing.B, eventType string, latencyMS int) {
 		case "IntArraySet":
 			data = createIntArraySetEventData()
 		}
-		
+
 		err := enricher.EnrichEventData(ctx, eventType, data)
 		if err != nil {
 			b.Fatalf("Enrichment failed: %v", err)
@@ -752,7 +752,7 @@ func stressTestEnrichment(b *testing.B, eventType string, iterations int, latenc
 	// Setup
 	mockClient := &MockEthClient{}
 	var eventDefs map[string]*config.EventDefinition
-	
+
 	switch eventType {
 	case "IntentRegistered":
 		setupMockIntentEnrichment(mockClient, latencyMS)
@@ -765,16 +765,16 @@ func stressTestEnrichment(b *testing.B, eventType string, iterations int, latenc
 			"IntArraySet": createIntArraySetEventDef(),
 		}
 	}
-	
+
 	enricher := newTestDataEnricher(mockClient, eventDefs)
-	
+
 	ctx := context.Background()
-	
+
 	b.ResetTimer()
-	
+
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		
+
 		// Process batch of events
 		for j := 0; j < iterations; j++ {
 			var data *config.ExtractedData
@@ -784,13 +784,13 @@ func stressTestEnrichment(b *testing.B, eventType string, iterations int, latenc
 			case "IntArraySet":
 				data = createIntArraySetEventData()
 			}
-			
+
 			err := enricher.EnrichEventData(ctx, eventType, data)
 			if err != nil {
 				b.Fatalf("Enrichment failed: %v", err)
 			}
 		}
-		
+
 		duration := time.Since(start)
 		b.ReportMetric(float64(iterations), "events_processed")
 		b.ReportMetric(duration.Seconds(), "batch_duration_seconds")
@@ -814,11 +814,11 @@ func BenchmarkEnrichment_FullAnalysis(b *testing.B) {
 		{"High_Latency", 500, 5, 5},
 		{"Burst_Load", 100, 50, 100},
 	}
-	
+
 	for _, eventType := range eventTypes {
 		for _, scenario := range scenarios {
 			testName := fmt.Sprintf("%s_%s", eventType, scenario.name)
-			
+
 			b.Run(testName, func(b *testing.B) {
 				performAnalysisBenchmark(b, eventType, scenario.latency, scenario.workers, scenario.batchSize)
 			})
@@ -830,7 +830,7 @@ func performAnalysisBenchmark(b *testing.B, eventType string, latencyMS, workers
 	// Setup
 	mockClient := &MockEthClient{}
 	var eventDefs map[string]*config.EventDefinition
-	
+
 	switch eventType {
 	case "IntentRegistered":
 		setupMockIntentEnrichment(mockClient, latencyMS)
@@ -843,19 +843,19 @@ func performAnalysisBenchmark(b *testing.B, eventType string, latencyMS, workers
 			"IntArraySet": createIntArraySetEventDef(),
 		}
 	}
-	
+
 	enricher := newTestDataEnricher(mockClient, eventDefs)
-	
+
 	ctx := context.Background()
-	
+
 	b.SetParallelism(workers)
 	b.ResetTimer()
 	b.ReportAllocs()
-	
+
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			start := time.Now()
-			
+
 			// Process batch
 			for i := 0; i < batchSize; i++ {
 				var data *config.ExtractedData
@@ -865,18 +865,18 @@ func performAnalysisBenchmark(b *testing.B, eventType string, latencyMS, workers
 				case "IntArraySet":
 					data = createIntArraySetEventData()
 				}
-				
+
 				err := enricher.EnrichEventData(ctx, eventType, data)
 				if err != nil {
 					b.Fatalf("Enrichment failed: %v", err)
 				}
 			}
-			
+
 			duration := time.Since(start)
 			b.ReportMetric(duration.Seconds()/float64(batchSize), "avg_enrichment_time_seconds")
 		}
 	})
-	
+
 	// Report configuration metrics
 	b.ReportMetric(float64(latencyMS), "network_latency_ms")
 	b.ReportMetric(float64(workers), "concurrent_workers")

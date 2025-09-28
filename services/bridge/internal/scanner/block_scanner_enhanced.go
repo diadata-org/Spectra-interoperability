@@ -15,10 +15,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 type EventCache struct {

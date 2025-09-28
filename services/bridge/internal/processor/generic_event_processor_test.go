@@ -1,4 +1,3 @@
-
 package processor
 
 import (

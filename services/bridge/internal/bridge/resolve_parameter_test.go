@@ -26,7 +26,7 @@ func TestBridge_resolveParameterValue(t *testing.T) {
 						Timestamp: big.NewInt(1234567890),
 						Signer:    common.HexToAddress("0x1234567890123456789012345678901234567890"),
 					},
-					"randomInts": []int{42, 24, 99, 1337},
+					"randomInts":  []int{42, 24, 99, 1337},
 					"stringValue": "test_string",
 					"numberValue": 42,
 					"boolValue":   true,
@@ -245,8 +245,8 @@ func TestBridge_resolveParameterValue(t *testing.T) {
 		updateReq := &bridgetypes.UpdateRequest{}
 
 		testCases := []struct {
-			name          string
-			source        string
+			name           string
+			source         string
 			expectsLiteral bool
 		}{
 			{
@@ -267,7 +267,7 @@ func TestBridge_resolveParameterValue(t *testing.T) {
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
 				value, err := bridge.resolveParameterValue(tc.source, updateReq)
-				
+
 				if tc.expectsLiteral {
 					// Malformed templates are treated as literal values
 					assert.NoError(t, err)
@@ -410,11 +410,11 @@ func TestEnrichmentDataTypes(t *testing.T) {
 
 	enrichmentData := map[string]interface{}{
 		// Different data types
-		"intent":      complexIntent,
-		"strings":     []string{"a", "b", "c"},
-		"numbers":     []int{10, 20, 30},
-		"bigNumbers":  []*big.Int{big.NewInt(100), big.NewInt(200)},
-		"addresses":   []common.Address{common.HexToAddress("0x1111"), common.HexToAddress("0x2222")},
+		"intent":     complexIntent,
+		"strings":    []string{"a", "b", "c"},
+		"numbers":    []int{10, 20, 30},
+		"bigNumbers": []*big.Int{big.NewInt(100), big.NewInt(200)},
+		"addresses":  []common.Address{common.HexToAddress("0x1111"), common.HexToAddress("0x2222")},
 		"nested": map[string]interface{}{
 			"level2": map[string]interface{}{
 				"value": "deep_value",

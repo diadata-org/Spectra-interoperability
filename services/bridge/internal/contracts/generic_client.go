@@ -43,6 +43,6 @@ func (c *GenericClient) validateRequest(request *bridgeTypes.UpdateRequest) erro
 
 	// Generic contracts have minimal requirements
 	// The actual requirements depend on the contract's method signature
-	
+
 	return nil
 }

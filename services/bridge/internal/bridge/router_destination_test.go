@@ -16,7 +16,7 @@ import (
 type MockWriteClient struct {
 	mock.Mock
 	ReceiverClientAddress common.Address
-	Client               interface{} // Mock ethereum client
+	Client                interface{} // Mock ethereum client
 }
 
 func (m *MockWriteClient) GetReceiverClientAddress() common.Address {
@@ -27,26 +27,26 @@ func (m *MockWriteClient) GetReceiverClientAddress() common.Address {
 // passes the correct contract address from the router configuration
 func TestCallRouterMethod_UsesCorrectContractAddress(t *testing.T) {
 	// Test addresses
-	receiverAddress := common.HexToAddress("0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd") // PushOracleReceiver (wrong)
+	receiverAddress := common.HexToAddress("0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd")   // PushOracleReceiver (wrong)
 	randomnessAddress := common.HexToAddress("0x2a1687c44ff91296098B692241Bdf3f5dCf26305") // RandomRequestManager (correct)
 
 	tests := []struct {
-		name                string
-		routerDestination   string
-		expectedAddress     common.Address
-		description         string
+		name              string
+		routerDestination string
+		expectedAddress   common.Address
+		description       string
 	}{
 		{
-			name:                "RandomnessForwarder_UsesRandomRequestManager",
-			routerDestination:   "0x2a1687c44ff91296098B692241Bdf3f5dCf26305",
-			expectedAddress:     randomnessAddress,
-			description:         "IntArraySet events should route to RandomRequestManager contract",
+			name:              "RandomnessForwarder_UsesRandomRequestManager",
+			routerDestination: "0x2a1687c44ff91296098B692241Bdf3f5dCf26305",
+			expectedAddress:   randomnessAddress,
+			description:       "IntArraySet events should route to RandomRequestManager contract",
 		},
 		{
-			name:                "IntentForwarder_UsesPushOracleReceiver", 
-			routerDestination:   "0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd",
-			expectedAddress:     receiverAddress,
-			description:         "IntentRegistered events should route to PushOracleReceiver contract",
+			name:              "IntentForwarder_UsesPushOracleReceiver",
+			routerDestination: "0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd",
+			expectedAddress:   receiverAddress,
+			description:       "IntentRegistered events should route to PushOracleReceiver contract",
 		},
 	}
 
@@ -102,7 +102,7 @@ func TestCallRouterMethod_UsesCorrectContractAddress(t *testing.T) {
 			assert.Len(t, params, 2)
 
 			// Verify the parameters are built correctly
-			assert.Equal(t, big.NewInt(462), params[0]) // requestId
+			assert.Equal(t, big.NewInt(462), params[0])       // requestId
 			assert.Equal(t, []int{999, -888, 777}, params[1]) // randomInts
 
 			// Test the address extraction logic (this is what was fixed)
@@ -113,7 +113,7 @@ func TestCallRouterMethod_UsesCorrectContractAddress(t *testing.T) {
 			// The key test is that extractedAddress equals the router config address
 			// For randomness case, ensure it's different from receiver to prove routing works
 			if tt.name == "RandomnessForwarder_UsesRandomRequestManager" {
-				assert.NotEqual(t, mockClient.ReceiverClientAddress, extractedAddress, 
+				assert.NotEqual(t, mockClient.ReceiverClientAddress, extractedAddress,
 					"RandomRequestManager should use different address than receiverClient")
 			}
 			// For intent case, the addresses may be the same, but what matters is that
@@ -133,7 +133,7 @@ func TestRouterDestinationBugFix(t *testing.T) {
 		// This test verifies that IntArraySet events route to the correct contract
 		// Previously, they were incorrectly routed to PushOracleReceiver
 
-		wrongAddress := common.HexToAddress("0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd") // PushOracleReceiver  
+		wrongAddress := common.HexToAddress("0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd")   // PushOracleReceiver
 		correctAddress := common.HexToAddress("0x2a1687c44ff91296098B692241Bdf3f5dCf26305") // RandomRequestManager
 
 		// Simulate an IntArraySet event that should go to RandomRequestManager
@@ -170,12 +170,12 @@ func TestRouterDestinationBugFix(t *testing.T) {
 
 		// Test the fix: contract address should come from updateReq.Contract.Address
 		actualAddress := common.HexToAddress(updateReq.Contract.Address)
-		
+
 		// BEFORE THE FIX: This would have been wrongAddress (PushOracleReceiver)
 		// AFTER THE FIX: This should be correctAddress (RandomRequestManager)
-		assert.Equal(t, correctAddress, actualAddress, 
+		assert.Equal(t, correctAddress, actualAddress,
 			"IntArraySet events must route to RandomRequestManager, not PushOracleReceiver")
-		
+
 		assert.NotEqual(t, wrongAddress, actualAddress,
 			"Fixed bug: should not route to PushOracleReceiver anymore")
 
@@ -196,7 +196,7 @@ func TestRouterDestinationBugFix(t *testing.T) {
 			ID: "IntentRegistered-421614-1757675035",
 			Contract: &config.ContractConfig{
 				Name:    "receiver",
-				Address: correctAddress.Hex(), // Router specifies PushOracleReceiver  
+				Address: correctAddress.Hex(), // Router specifies PushOracleReceiver
 				Type:    "pushoracle",
 				Enabled: true,
 			},
@@ -260,7 +260,7 @@ func TestCallRouterMethodParameters(t *testing.T) {
 	})
 
 	t.Run("HandleIntentUpdate_Parameters", func(t *testing.T) {
-		// Test that handleIntentUpdate gets the correct parameters  
+		// Test that handleIntentUpdate gets the correct parameters
 		intent := &bridgetypes.OracleIntent{
 			Symbol:    "BTC",
 			Price:     big.NewInt(50000),
@@ -334,7 +334,7 @@ func TestRouterConfigValidation(t *testing.T) {
 			ChainID:  421614,
 			Contract: "0x5e66Aba065Dc38e64D7a9D55c3F0c2CbDab2E2fd",
 			Method: config.DestinationMethodConfig{
-				Name: "handleIntentUpdate", 
+				Name: "handleIntentUpdate",
 				ABI:  `{"name":"handleIntentUpdate","type":"function","inputs":[{"name":"intent","type":"tuple"}],"outputs":[]}`,
 				Params: map[string]string{
 					"intent": "${enrichment.fullIntent}",

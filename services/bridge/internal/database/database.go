@@ -19,8 +19,8 @@ type DB struct {
 // ProcessedEvent represents a processed oracle intent event
 type ProcessedEvent struct {
 	ID              int64
-	EventID         string          // Unique identifier (tx_hash-block-logindex)
-	EventName       string          // Event name (e.g., IntentRegistered)
+	EventID         string // Unique identifier (tx_hash-block-logindex)
+	EventName       string // Event name (e.g., IntentRegistered)
 	IntentHash      string
 	BlockNumber     uint64
 	TransactionHash string
@@ -49,48 +49,48 @@ type ChainState struct {
 
 // TransactionLog records all bridge transactions
 type TransactionLog struct {
-	ID                     int64
-	IntentHash             string
-	DestinationChainID     int64
-	DestinationChainName   string
-	ContractAddress        string
-	ContractName           string
-	ContractType           string
-	TransactionHash        *string
-	Status                 string // 'pending', 'submitted', 'confirmed', 'failed'
-	FromAddress            string
-	ToAddress              string
-	Symbol                 string
-	Price                  string
-	GasLimit               *uint64
-	GasUsed                *uint64
-	GasPrice               *string
-	MaxFeePerGas           *string
-	MaxPriorityFeePerGas   *string
-	TransactionCost        *string
-	ErrorMessage           *string
-	ErrorCode              *string
-	RetryCount             int
-	MaxRetries             int
-	CreatedAt              time.Time
-	SubmittedAt            *time.Time
-	ConfirmedAt            *time.Time
-	FailedAt               *time.Time
-	UpdatedAt              time.Time
+	ID                   int64
+	IntentHash           string
+	DestinationChainID   int64
+	DestinationChainName string
+	ContractAddress      string
+	ContractName         string
+	ContractType         string
+	TransactionHash      *string
+	Status               string // 'pending', 'submitted', 'confirmed', 'failed'
+	FromAddress          string
+	ToAddress            string
+	Symbol               string
+	Price                string
+	GasLimit             *uint64
+	GasUsed              *uint64
+	GasPrice             *string
+	MaxFeePerGas         *string
+	MaxPriorityFeePerGas *string
+	TransactionCost      *string
+	ErrorMessage         *string
+	ErrorCode            *string
+	RetryCount           int
+	MaxRetries           int
+	CreatedAt            time.Time
+	SubmittedAt          *time.Time
+	ConfirmedAt          *time.Time
+	FailedAt             *time.Time
+	UpdatedAt            time.Time
 }
 
 // ContractSymbolUpdate tracks last update per symbol per contract
 type ContractSymbolUpdate struct {
-	ID                   int64
-	ChainID              int64
-	ContractAddress      string
-	Symbol               string
-	LastIntentHash       string
-	LastPrice            string
-	LastUpdateTimestamp  time.Time
-	UpdateCount          int64
-	TotalGasUsed         string
-	AverageGasPrice      string
+	ID                  int64
+	ChainID             int64
+	ContractAddress     string
+	Symbol              string
+	LastIntentHash      string
+	LastPrice           string
+	LastUpdateTimestamp time.Time
+	UpdateCount         int64
+	TotalGasUsed        string
+	AverageGasPrice     string
 }
 
 // NewDB creates a new database connection
@@ -130,7 +130,7 @@ func (db *DB) Migrate() error {
 			return fmt.Errorf("migration failed: %w", err)
 		}
 	}
-	
+
 	// Run generic events migration
 	if err := db.MigrateForGenericEvents(); err != nil {
 		return fmt.Errorf("generic events migration failed: %w", err)
@@ -159,12 +159,12 @@ func (db *DB) SaveProcessedEvent(event *ProcessedEvent) error {
 				symbol, price, timestamp, signer, processed_at
 			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (transaction_hash, log_index) DO NOTHING`
-		
+
 		var signerStr string
 		if event.Signer != (common.Address{}) {
 			signerStr = event.Signer.Hex()
 		}
-		
+
 		_, err := db.Exec(query,
 			event.EventID,
 			event.EventName,
@@ -180,7 +180,7 @@ func (db *DB) SaveProcessedEvent(event *ProcessedEvent) error {
 		)
 		return err
 	}
-	
+
 	// Legacy code path for compatibility
 	query := `
 		INSERT INTO processed_events (
@@ -526,7 +526,7 @@ func (db *DB) GetLastProcessedEvent() (*ProcessedEvent, error) {
 		ORDER BY processed_at DESC
 		LIMIT 1
 	`
-	
+
 	event := &ProcessedEvent{}
 	var signerHex string
 	err := db.QueryRow(query).Scan(
@@ -541,15 +541,15 @@ func (db *DB) GetLastProcessedEvent() (*ProcessedEvent, error) {
 		&signerHex,
 		&event.ProcessedAt,
 	)
-	
+
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	
+
 	if err == nil {
 		event.Signer = common.HexToAddress(signerHex)
 	}
-	
+
 	return event, err
 }
 
@@ -571,7 +571,7 @@ func (db *DB) GetWorkerPoolStats() (*WorkerPoolStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Get success rate (last 1000 transactions)
 	var totalCount, successCount int
 	err = db.QueryRow(`
@@ -588,12 +588,12 @@ func (db *DB) GetWorkerPoolStats() (*WorkerPoolStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	successRate := 0.0
 	if totalCount > 0 {
 		successRate = float64(successCount) / float64(totalCount)
 	}
-	
+
 	return &WorkerPoolStats{
 		QueueSize:     queueSize,
 		ActiveWorkers: 0, // This would come from runtime metrics

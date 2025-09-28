@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	
+
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/bridge"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/utils"
 )
@@ -37,22 +37,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
-	
+
 	// Log if using environment variable for private key
 	if os.Getenv("BRIDGE_PRIVATE_KEY") != "" {
 		log.Printf("Using private key from BRIDGE_PRIVATE_KEY environment variable")
 	}
-	
+
 	// Initialize metrics collector
 	metricsCollector := metrics.NewCollector()
-	
+
 	// Start metrics server
 	metricsPort := 8081
 	metricsServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", metricsPort),
 		Handler: promhttp.Handler(),
 	}
-	
+
 	go func() {
 		log.Printf("Starting metrics server on port %d", metricsPort)
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -61,12 +61,12 @@ func main() {
 	}()
 
 	// Create database connection
-	db, err := database.NewDB(cfg.Database.Driver, cfg.Database.DSN) 
+	db, err := database.NewDB(cfg.Database.Driver, cfg.Database.DSN)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
-	
+
 	// Create bridge service
 	bridgeService, err := bridge.NewBridge(cfg, db, metricsCollector)
 	if err != nil {
@@ -113,7 +113,7 @@ func main() {
 	if err := bridgeService.Stop(shutdownCtx); err != nil {
 		log.Printf("Error during shutdown: %v", err)
 	}
-	
+
 	// Shutdown metrics server
 	log.Printf("Stopping metrics server...")
 	if err := metricsServer.Shutdown(shutdownCtx); err != nil {

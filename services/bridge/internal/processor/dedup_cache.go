@@ -8,10 +8,10 @@ import (
 
 // DedupCache is an in-memory cache for deduplication
 type DedupCache struct {
-	mu       sync.RWMutex
-	items    map[string]*cacheItem
-	maxSize  int
-	ttl      time.Duration
+	mu      sync.RWMutex
+	items   map[string]*cacheItem
+	maxSize int
+	ttl     time.Duration
 }
 
 type cacheItem struct {

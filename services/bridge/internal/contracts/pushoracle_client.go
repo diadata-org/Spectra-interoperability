@@ -48,6 +48,6 @@ func (c *PushOracleClient) validateRequest(request *bridgeTypes.UpdateRequest) e
 	}
 
 	// Additional PushOracle-specific validations can be added here
-	
+
 	return nil
 }

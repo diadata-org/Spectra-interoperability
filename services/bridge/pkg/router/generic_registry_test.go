@@ -1,4 +1,3 @@
-
 package router
 
 import (
@@ -26,7 +25,7 @@ func TestLoadRouters(t *testing.T) {
 	assert.NoError(t, err) // LoadRouters logs errors but doesn't return one
 
 	assert.Equal(t, 2, registry.Count()) // router-3 fails to load
-	
+
 	r1, ok := registry.GetRouter("router-1")
 	assert.True(t, ok)
 	assert.Equal(t, "router-1", r1.ID())
@@ -83,8 +82,8 @@ func TestRouteEvent(t *testing.T) {
 			},
 		},
 		{
-			ID:      "router-C", // Does not trigger on PriceUpdate
-			Enabled: true,
+			ID:       "router-C", // Does not trigger on PriceUpdate
+			Enabled:  true,
 			Triggers: config.RouterTriggers{Events: []string{"OtherEvent"}},
 		},
 	}

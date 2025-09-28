@@ -128,18 +128,18 @@ func (tde *TestableDataEnricher) EnrichEventData(ctx context.Context, eventName 
 		eventDefs: tde.eventDefs,
 		abiCache:  tde.abiCache,
 	}
-	
+
 	eventDef, exists := de.eventDefs[eventName]
 	if !exists {
 		return errors.New("event definition not found: " + eventName)
 	}
-	
+
 	if eventDef.Enrichment == nil {
 		return nil
 	}
-	
+
 	enrichment := eventDef.Enrichment
-	
+
 	contractAddr := enrichment.Contract
 	if contractAddr == "" {
 		if addr, ok := extractedData.Event["_contract"].(string); ok {
@@ -148,60 +148,60 @@ func (tde *TestableDataEnricher) EnrichEventData(ctx context.Context, eventName 
 			return errors.New("no contract address for enrichment")
 		}
 	}
-	
+
 	params, err := de.buildParameters(enrichment.Params, extractedData)
 	if err != nil {
 		return err
 	}
-	
+
 	// Mock the contract call
 	result, err := tde.mockCallViewMethod(ctx, contractAddr, enrichment.Method, enrichment.ABI, params)
 	if err != nil {
 		return err
 	}
-	
+
 	enrichedData := make(map[string]interface{})
 	if err := de.processReturnValues(result, enrichment.Returns, enrichedData); err != nil {
 		return err
 	}
-	
+
 	extractedData.Enrichment = enrichedData
 	return nil
 }
 
 func (tde *TestableDataEnricher) mockCallViewMethod(ctx context.Context, contractAddr, methodName, methodABI string, params []interface{}) ([]interface{}, error) {
 	address := common.HexToAddress(contractAddr)
-	
+
 	contractABI, err := tde.getOrParseABI(methodName, methodABI)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	data, err := contractABI.Pack(methodName, params...)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	msg := ethereum.CallMsg{
 		To:   &address,
 		Data: data,
 	}
-	
+
 	result, err := tde.client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	method, exists := contractABI.Methods[methodName]
 	if !exists {
 		return nil, errors.New("method not found in ABI: " + methodName)
 	}
-	
+
 	values, err := method.Outputs.Unpack(result)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return values, nil
 }
 
@@ -212,21 +212,21 @@ func (tde *TestableDataEnricher) getOrParseABI(methodName, abiStr string) (abi.A
 		return cached, nil
 	}
 	tde.mutex.RUnlock()
-	
+
 	if abiStr == "" {
 		return abi.ABI{}, errors.New("no ABI provided for method " + methodName)
 	}
-	
+
 	contractABI := "[" + abiStr + "]"
 	parsed, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
 		return abi.ABI{}, err
 	}
-	
+
 	tde.mutex.Lock()
 	tde.abiCache[methodName] = parsed
 	tde.mutex.Unlock()
-	
+
 	return parsed, nil
 }
 
@@ -236,9 +236,9 @@ func (suite *EnricherTestSuite) TestNewDataEnricher() {
 	eventDefs := map[string]*config.EventDefinition{
 		"TestEvent": suite.createBasicEventDef("0x1234567890123456789012345678901234567890", nil),
 	}
-	
+
 	enricher, err := NewDataEnricher(nil, eventDefs) // We don't use real client in unit tests
-	
+
 	suite.NoError(err)
 	suite.NotNil(enricher)
 	suite.Equal(eventDefs, enricher.eventDefs)
@@ -251,9 +251,9 @@ func (suite *EnricherTestSuite) TestNewDataEnricher() {
 func (suite *EnricherTestSuite) TestEnrichEventData_EventDefinitionNotFound() {
 	suite.createEnricher(map[string]*config.EventDefinition{})
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	err := suite.enricher.EnrichEventData(context.Background(), "NonExistentEvent", data)
-	
+
 	suite.Error(err)
 	suite.Contains(err.Error(), "event definition not found")
 }
@@ -264,9 +264,9 @@ func (suite *EnricherTestSuite) TestEnrichEventData_NoEnrichmentConfig() {
 	}
 	suite.createEnricher(eventDefs)
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	err := suite.enricher.EnrichEventData(context.Background(), "TestEvent", data)
-	
+
 	suite.NoError(err) // Should succeed with no enrichment
 }
 
@@ -283,12 +283,12 @@ func (suite *EnricherTestSuite) TestEnrichEventData_SuccessfulEnrichment() {
 	}
 	suite.createEnricher(eventDefs)
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	// Mock successful contract call returning 66 (0x42 in hex)
 	suite.mockContractCall(suite.mustHexDecode("0000000000000000000000000000000000000000000000000000000000000042"), nil)
-	
+
 	err := suite.enricher.EnrichEventData(context.Background(), "TestEvent", data)
-	
+
 	suite.NoError(err)
 	suite.Equal(big.NewInt(66), data.Enrichment["result"])
 }
@@ -308,11 +308,11 @@ func (suite *EnricherTestSuite) TestEnrichEventData_ContractAddressFromEventData
 	data := suite.createEventData(map[string]interface{}{
 		"_contract": "0x1234567890123456789012345678901234567890",
 	})
-	
+
 	suite.mockContractCall(suite.mustHexDecode("0000000000000000000000000000000000000000000000000000000000000042"), nil)
-	
+
 	err := suite.enricher.EnrichEventData(context.Background(), "TestEvent", data)
-	
+
 	suite.NoError(err)
 }
 
@@ -329,9 +329,9 @@ func (suite *EnricherTestSuite) TestEnrichEventData_NoContractAddress() {
 	}
 	suite.createEnricher(eventDefs)
 	data := suite.createEventData(map[string]interface{}{}) // No _contract field
-	
+
 	err := suite.enricher.EnrichEventData(context.Background(), "TestEvent", data)
-	
+
 	suite.Error(err)
 	suite.Contains(err.Error(), "no contract address for enrichment")
 }
@@ -341,9 +341,9 @@ func (suite *EnricherTestSuite) TestEnrichEventData_NoContractAddress() {
 func (suite *EnricherTestSuite) TestBuildParameters_EmptyTemplates() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	result, err := de.buildParameters([]string{}, data)
-	
+
 	suite.NoError(err)
 	suite.Empty(result)
 }
@@ -351,9 +351,9 @@ func (suite *EnricherTestSuite) TestBuildParameters_EmptyTemplates() {
 func (suite *EnricherTestSuite) TestBuildParameters_LiteralValue() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	result, err := de.buildParameters([]string{"literal_value"}, data)
-	
+
 	suite.NoError(err)
 	suite.Equal([]interface{}{"literal_value"}, result)
 }
@@ -363,9 +363,9 @@ func (suite *EnricherTestSuite) TestBuildParameters_EventFieldTemplate() {
 	data := suite.createEventData(map[string]interface{}{
 		"requestId": big.NewInt(123),
 	})
-	
+
 	result, err := de.buildParameters([]string{"${event.requestId}"}, data)
-	
+
 	suite.NoError(err)
 	suite.Equal([]interface{}{big.NewInt(123)}, result)
 }
@@ -376,9 +376,9 @@ func (suite *EnricherTestSuite) TestBuildParameters_MultipleTemplates() {
 		"param1": "value1",
 		"param2": "value2",
 	})
-	
+
 	result, err := de.buildParameters([]string{"${event.param1}", "literal", "${event.param2}"}, data)
-	
+
 	suite.NoError(err)
 	suite.Equal([]interface{}{"value1", "literal", "value2"}, result)
 }
@@ -386,9 +386,9 @@ func (suite *EnricherTestSuite) TestBuildParameters_MultipleTemplates() {
 func (suite *EnricherTestSuite) TestBuildParameters_InvalidTemplate() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	result, err := de.buildParameters([]string{"${event.nonexistent}"}, data)
-	
+
 	suite.Error(err)
 	suite.Nil(result)
 }
@@ -398,9 +398,9 @@ func (suite *EnricherTestSuite) TestBuildParameters_InvalidTemplate() {
 func (suite *EnricherTestSuite) TestResolveTemplate_LiteralValue() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	result, err := de.resolveTemplate("literal", data)
-	
+
 	suite.NoError(err)
 	suite.Equal("literal", result)
 }
@@ -410,9 +410,9 @@ func (suite *EnricherTestSuite) TestResolveTemplate_EventField() {
 	data := suite.createEventData(map[string]interface{}{
 		"requestId": big.NewInt(456),
 	})
-	
+
 	result, err := de.resolveTemplate("${event.requestId}", data)
-	
+
 	suite.NoError(err)
 	suite.Equal(big.NewInt(456), result)
 }
@@ -421,9 +421,9 @@ func (suite *EnricherTestSuite) TestResolveTemplate_EnrichmentField() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
 	data.Enrichment["result"] = "enriched_value"
-	
+
 	result, err := de.resolveTemplate("${enrichment.result}", data)
-	
+
 	suite.NoError(err)
 	suite.Equal("enriched_value", result)
 }
@@ -432,9 +432,9 @@ func (suite *EnricherTestSuite) TestResolveTemplate_ProcessedField() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
 	data.Processed["computed"] = 789
-	
+
 	result, err := de.resolveTemplate("${processed.computed}", data)
-	
+
 	suite.NoError(err)
 	suite.Equal(789, result)
 }
@@ -442,9 +442,9 @@ func (suite *EnricherTestSuite) TestResolveTemplate_ProcessedField() {
 func (suite *EnricherTestSuite) TestResolveTemplate_FieldNotFound() {
 	de := &DataEnricher{}
 	data := suite.createEventData(map[string]interface{}{})
-	
+
 	result, err := de.resolveTemplate("${event.nonexistent}", data)
-	
+
 	suite.Error(err)
 	suite.Nil(result)
 	suite.Contains(err.Error(), "field not found")
@@ -456,9 +456,9 @@ func (suite *EnricherTestSuite) TestProcessReturnValues_DefaultNaming() {
 	de := &DataEnricher{}
 	values := []interface{}{big.NewInt(123), "test"}
 	output := make(map[string]interface{})
-	
+
 	err := de.processReturnValues(values, map[string]string{}, output)
-	
+
 	suite.NoError(err)
 	suite.Equal(big.NewInt(123), output["return0"])
 	suite.Equal("test", output["return1"])
@@ -472,9 +472,9 @@ func (suite *EnricherTestSuite) TestProcessReturnValues_IndexMapping() {
 		"text":   "1",
 	}
 	output := make(map[string]interface{})
-	
+
 	err := de.processReturnValues(values, mapping, output)
-	
+
 	suite.NoError(err)
 	suite.Equal(big.NewInt(456), output["number"])
 	suite.Equal("hello", output["text"])
@@ -484,34 +484,34 @@ func (suite *EnricherTestSuite) TestProcessReturnValues_IndexMapping() {
 
 func (suite *EnricherTestSuite) TestParseIndex_SimpleNumber() {
 	de := &DataEnricher{}
-	
+
 	result, err := de.parseIndex("42")
-	
+
 	suite.NoError(err)
 	suite.Equal(42, result)
 }
 
 func (suite *EnricherTestSuite) TestParseIndex_DataArrayFormat() {
 	de := &DataEnricher{}
-	
+
 	result, err := de.parseIndex("data[3]")
-	
+
 	suite.NoError(err)
 	suite.Equal(3, result)
 }
 
 func (suite *EnricherTestSuite) TestParseIndex_InvalidFormat() {
 	de := &DataEnricher{}
-	
+
 	result, err := de.parseIndex("abc")
-	
+
 	suite.Error(err)
 	suite.Equal(0, result)
 }
 
 func (suite *EnricherTestSuite) TestConvertTypes_HexStringToBigInt() {
 	result, err := ConvertTypes("0x42")
-	
+
 	suite.NoError(err)
 	suite.Equal(big.NewInt(66), result)
 }
@@ -519,19 +519,19 @@ func (suite *EnricherTestSuite) TestConvertTypes_HexStringToBigInt() {
 func (suite *EnricherTestSuite) TestConvertTypes_HexAddressToBigInt() {
 	// Note: Current implementation converts addresses to big.Int due to 0x prefix check
 	result, err := ConvertTypes("0x1234567890123456789012345678901234567890")
-	expected := func() *big.Int { 
+	expected := func() *big.Int {
 		n := new(big.Int)
 		n.SetString("1234567890123456789012345678901234567890", 16)
-		return n 
+		return n
 	}()
-	
+
 	suite.NoError(err)
 	suite.Equal(expected, result)
 }
 
 func (suite *EnricherTestSuite) TestConvertTypes_RegularString() {
 	result, err := ConvertTypes("regular_string")
-	
+
 	suite.NoError(err)
 	suite.Equal("regular_string", result)
 }
@@ -541,12 +541,12 @@ func (suite *EnricherTestSuite) TestConvertTypes_RegularString() {
 func (suite *EnricherTestSuite) TestGetOrParseABI_ValidABI() {
 	de := &DataEnricher{abiCache: make(map[string]abi.ABI)}
 	abiStr := `{"name":"testMethod","type":"function","inputs":[],"outputs":[]}`
-	
+
 	result, err := de.getOrParseABI("testMethod", abiStr)
-	
+
 	suite.NoError(err)
 	suite.NotNil(result)
-	
+
 	// Verify it's cached
 	cached, exists := de.abiCache["testMethod"]
 	suite.True(exists)
@@ -555,9 +555,9 @@ func (suite *EnricherTestSuite) TestGetOrParseABI_ValidABI() {
 
 func (suite *EnricherTestSuite) TestGetOrParseABI_EmptyABIString() {
 	de := &DataEnricher{abiCache: make(map[string]abi.ABI)}
-	
+
 	result, err := de.getOrParseABI("testMethod", "")
-	
+
 	suite.Error(err)
 	suite.Contains(err.Error(), "no ABI provided")
 	suite.Equal(abi.ABI{}, result)
@@ -571,9 +571,9 @@ func (suite *EnricherTestSuite) TestBatchEnrich_EmptyRequests() {
 	}
 	de, err := NewDataEnricher(nil, eventDefs)
 	suite.Require().NoError(err)
-	
+
 	results := de.BatchEnrich(context.Background(), []EnrichmentRequest{})
-	
+
 	suite.Empty(results)
 }
 
@@ -583,7 +583,7 @@ func (suite *EnricherTestSuite) TestBatchEnrich_MixedResults() {
 	}
 	de, err := NewDataEnricher(nil, eventDefs)
 	suite.Require().NoError(err)
-	
+
 	requests := []EnrichmentRequest{
 		{
 			EventName: "TestEvent", // Should succeed (no enrichment needed)
@@ -594,12 +594,12 @@ func (suite *EnricherTestSuite) TestBatchEnrich_MixedResults() {
 			Data:      suite.createEventData(map[string]interface{}{}),
 		},
 	}
-	
+
 	results := de.BatchEnrich(context.Background(), requests)
-	
+
 	suite.Len(results, 2)
-	suite.True(results[0].Success)   // First should succeed
-	suite.False(results[1].Success)  // Second should fail
+	suite.True(results[0].Success)  // First should succeed
+	suite.False(results[1].Success) // Second should fail
 	suite.Nil(results[0].Error)
 	suite.NotNil(results[1].Error)
 }
@@ -634,13 +634,13 @@ To add new tests to this suite, follow these patterns:
        }
        suite.createEnricher(eventDefs)
        data := suite.createEventData(map[string]interface{}{"param": "value"})
-       
+
        // Mock responses if needed
        suite.mockContractCall(suite.mustHexDecode("1234..."), nil)
-       
+
        // Execute
        err := suite.enricher.EnrichEventData(context.Background(), "NewEvent", data)
-       
+
        // Assert
        suite.NoError(err)
        suite.Equal("expected_value", data.Enrichment["result"])
@@ -648,7 +648,7 @@ To add new tests to this suite, follow these patterns:
 
 5. RUN SPECIFIC TESTS:
    go test -v ./internal/pipeline/ -run TestEnricherTestSuite/TestNewFeature_EdgeCase
-   
+
 6. RUN ALL SUITE TESTS:
    go test -v ./internal/pipeline/ -run TestEnricherTestSuite
 
@@ -665,9 +665,9 @@ The test suite automatically handles:
 func (suite *EnricherTestSuite) TestExtractReturnValue_IndexOutOfRange() {
 	de := &DataEnricher{}
 	values := []interface{}{"only_one"}
-	
+
 	result, err := de.extractReturnValue(values, "5")
-	
+
 	suite.Error(err)
 	suite.Nil(result)
 	suite.Contains(err.Error(), "index out of range")
@@ -676,9 +676,9 @@ func (suite *EnricherTestSuite) TestExtractReturnValue_IndexOutOfRange() {
 func (suite *EnricherTestSuite) TestExtractReturnValue_TuplePath() {
 	de := &DataEnricher{}
 	values := []interface{}{"single_value"}
-	
+
 	result, err := de.extractReturnValue(values, "tuple")
-	
+
 	suite.NoError(err)
 	suite.Equal("single_value", result)
 }
@@ -686,9 +686,9 @@ func (suite *EnricherTestSuite) TestExtractReturnValue_TuplePath() {
 func (suite *EnricherTestSuite) TestExtractReturnValue_InvalidPath() {
 	de := &DataEnricher{}
 	values := []interface{}{"value"}
-	
+
 	result, err := de.extractReturnValue(values, "invalid.nested")
-	
+
 	suite.Error(err)
 	suite.Nil(result)
 }
@@ -697,12 +697,12 @@ func (suite *EnricherTestSuite) TestExtractReturnValue_InvalidPath() {
 func (suite *EnricherTestSuite) TestSuiteExpectationValidation() {
 	// This test ensures our mock validation works
 	// If we set up expectations but don't use them, TearDownTest should fail
-	
+
 	// Create a simple enricher without setting up expectations
 	suite.createEnricher(map[string]*config.EventDefinition{
 		"TestEvent": suite.createBasicEventDef("0x1234567890123456789012345678901234567890", nil),
 	})
-	
+
 	// Just verify the enricher was created successfully
 	suite.NotNil(suite.enricher)
 }

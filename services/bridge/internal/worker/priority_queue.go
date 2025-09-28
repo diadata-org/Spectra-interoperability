@@ -8,9 +8,9 @@ import (
 
 // PriorityQueue implements a thread-safe priority queue for tasks
 type PriorityQueue struct {
-	mu       sync.Mutex
-	items    priorityQueueItems
-	maxSize  int
+	mu      sync.Mutex
+	items   priorityQueueItems
+	maxSize int
 }
 
 // priorityQueueItems implements heap.Interface

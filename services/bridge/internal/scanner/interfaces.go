@@ -59,32 +59,32 @@ func (da *databaseAdapter) IsEventProcessed(intentHash string) (bool, error) {
 
 func (da *databaseAdapter) MarkEventProcessed(event *bridgeTypes.EventData) {
 	processedEvent := &database.ProcessedEvent{
-		EventName:       event.EventName,
-		IntentHash:      common.BytesToHash(event.IntentHash[:]).Hex(),
-		BlockNumber:     event.BlockNumber,
+		EventName:   event.EventName,
+		IntentHash:  common.BytesToHash(event.IntentHash[:]).Hex(),
+		BlockNumber: event.BlockNumber,
 		TransactionHash: func() string {
-				if event.TxHash == (common.Hash{}) {
-					return ""
-				}
-				return event.TxHash.Hex()
-			}(),
-		LogIndex:        event.LogIndex,
-		Symbol:          event.Symbol,
-		Price:           func() string {
-				if event.Price != nil {
-					// Convert big.Int to decimal string for database (not hex)
-					return event.Price.String()
-				}
-				return "0" // Default price
-			}(),
-		Timestamp:       func() uint64 {
-				if event.Timestamp != nil {
-					return event.Timestamp.Uint64()
-				}
-				return 0 // Default timestamp
-			}(),
-		Signer:          event.Signer,
-		ProcessedAt:     time.Now(),
+			if event.TxHash == (common.Hash{}) {
+				return ""
+			}
+			return event.TxHash.Hex()
+		}(),
+		LogIndex: event.LogIndex,
+		Symbol:   event.Symbol,
+		Price: func() string {
+			if event.Price != nil {
+				// Convert big.Int to decimal string for database (not hex)
+				return event.Price.String()
+			}
+			return "0" // Default price
+		}(),
+		Timestamp: func() uint64 {
+			if event.Timestamp != nil {
+				return event.Timestamp.Uint64()
+			}
+			return 0 // Default timestamp
+		}(),
+		Signer:      event.Signer,
+		ProcessedAt: time.Now(),
 	}
 
 	// event.EventID is not part of bridgeTypes.EventData, so no handling needed here.

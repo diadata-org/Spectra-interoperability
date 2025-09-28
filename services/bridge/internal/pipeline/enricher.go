@@ -10,9 +10,9 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 )
 
 // DataEnricher enriches event data with additional information from view calls
@@ -37,13 +37,13 @@ func (de *DataEnricher) EnrichEventData(ctx context.Context, eventName string, e
 	if !exists {
 		return fmt.Errorf("event definition not found: %s", eventName)
 	}
-	
+
 	if eventDef.Enrichment == nil {
 		return nil
 	}
-	
+
 	enrichment := eventDef.Enrichment
-	
+
 	contractAddr := enrichment.Contract
 	if contractAddr == "" {
 		if addr, ok := extractedData.Event["_contract"].(string); ok {
@@ -52,33 +52,33 @@ func (de *DataEnricher) EnrichEventData(ctx context.Context, eventName string, e
 			return fmt.Errorf("no contract address for enrichment")
 		}
 	}
-	
+
 	params, err := de.buildParameters(enrichment.Params, extractedData)
 	if err != nil {
 		return fmt.Errorf("failed to build enrichment parameters: %w", err)
 	}
-	
+
 	result, err := de.callViewMethod(ctx, contractAddr, enrichment.Method, enrichment.ABI, params)
 	if err != nil {
 		return fmt.Errorf("enrichment call failed: %w", err)
 	}
-	
+
 	enrichedData := make(map[string]interface{})
 	if err := de.processReturnValues(result, enrichment.Returns, enrichedData); err != nil {
 		return fmt.Errorf("failed to process return values: %w", err)
 	}
-	
+
 	extractedData.Enrichment = enrichedData
-	
+
 	logger.Debugf("Enriched event %s with data: %v", eventName, enrichedData)
-	
+
 	return nil
 }
 
 // buildParameters builds parameters for a view call from template strings
 func (de *DataEnricher) buildParameters(paramTemplates []string, data *config.ExtractedData) ([]interface{}, error) {
 	params := make([]interface{}, len(paramTemplates))
-	
+
 	for i, template := range paramTemplates {
 		value, err := de.resolveTemplate(template, data)
 		if err != nil {
@@ -86,7 +86,7 @@ func (de *DataEnricher) buildParameters(paramTemplates []string, data *config.Ex
 		}
 		params[i] = value
 	}
-	
+
 	return params, nil
 }
 
@@ -95,14 +95,14 @@ func (de *DataEnricher) resolveTemplate(template string, data *config.ExtractedD
 	if !strings.HasPrefix(template, "${") || !strings.HasSuffix(template, "}") {
 		return template, nil
 	}
-	
+
 	path := template[2 : len(template)-1]
-	
+
 	parts := strings.Split(path, ".")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid template path: %s", path)
 	}
-	
+
 	var source map[string]interface{}
 	switch parts[0] {
 	case "event":
@@ -114,7 +114,7 @@ func (de *DataEnricher) resolveTemplate(template string, data *config.ExtractedD
 	default:
 		return nil, fmt.Errorf("unknown template source: %s", parts[0])
 	}
-	
+
 	var current interface{} = source
 	for i := 1; i < len(parts); i++ {
 		switch v := current.(type) {
@@ -128,44 +128,44 @@ func (de *DataEnricher) resolveTemplate(template string, data *config.ExtractedD
 			return nil, fmt.Errorf("cannot navigate through non-map type at %s", parts[i])
 		}
 	}
-	
+
 	return current, nil
 }
 
 // callViewMethod calls a view method on a contract
 func (de *DataEnricher) callViewMethod(ctx context.Context, contractAddr, methodName, methodABI string, params []interface{}) ([]interface{}, error) {
 	address := common.HexToAddress(contractAddr)
-	
+
 	contractABI, err := de.getOrParseABI(methodName, methodABI)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get ABI: %w", err)
 	}
-	
+
 	data, err := contractABI.Pack(methodName, params...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pack method call: %w", err)
 	}
-	
+
 	msg := ethereum.CallMsg{
 		To:   &address,
 		Data: data,
 	}
-	
+
 	result, err := de.client.CallContract(ctx, msg, nil)
 	if err != nil {
 		return nil, fmt.Errorf("contract call failed: %w", err)
 	}
-	
+
 	method, exists := contractABI.Methods[methodName]
 	if !exists {
 		return nil, fmt.Errorf("method not found in ABI: %s", methodName)
 	}
-	
+
 	values, err := method.Outputs.Unpack(result)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unpack result: %w", err)
 	}
-	
+
 	return values, nil
 }
 
@@ -174,19 +174,19 @@ func (de *DataEnricher) getOrParseABI(methodName, abiStr string) (abi.ABI, error
 	if cached, exists := de.abiCache[methodName]; exists {
 		return cached, nil
 	}
-	
+
 	if abiStr == "" {
 		return abi.ABI{}, fmt.Errorf("no ABI provided for method %s", methodName)
 	}
-	
+
 	contractABI := fmt.Sprintf(`[%s]`, abiStr)
 	parsed, err := abi.JSON(strings.NewReader(contractABI))
 	if err != nil {
 		return abi.ABI{}, fmt.Errorf("failed to parse ABI: %w", err)
 	}
-	
+
 	de.abiCache[methodName] = parsed
-	
+
 	return parsed, nil
 }
 
@@ -198,7 +198,7 @@ func (de *DataEnricher) processReturnValues(values []interface{}, mapping map[st
 		}
 		return nil
 	}
-	
+
 	for fieldName, sourcePath := range mapping {
 		value, err := de.extractReturnValue(values, sourcePath)
 		if err != nil {
@@ -206,7 +206,7 @@ func (de *DataEnricher) processReturnValues(values []interface{}, mapping map[st
 		}
 		output[fieldName] = value
 	}
-	
+
 	return nil
 }
 
@@ -218,16 +218,16 @@ func (de *DataEnricher) extractReturnValue(values []interface{}, path string) (i
 		}
 		return values[idx], nil
 	}
-	
+
 	parts := strings.Split(path, ".")
 	if len(parts) > 1 {
 		return nil, fmt.Errorf("nested return paths not yet implemented: %s", path)
 	}
-	
+
 	if path == "tuple" && len(values) == 1 {
 		return values[0], nil
 	}
-	
+
 	return nil, fmt.Errorf("invalid return path: %s", path)
 }
 
@@ -237,11 +237,11 @@ func (de *DataEnricher) parseIndex(s string) (int, error) {
 	if _, err := fmt.Sscanf(s, "%d", &idx); err == nil {
 		return idx, nil
 	}
-	
+
 	if _, err := fmt.Sscanf(s, "data[%d]", &idx); err == nil {
 		return idx, nil
 	}
-	
+
 	return 0, fmt.Errorf("not an index: %s", s)
 }
 
@@ -255,17 +255,17 @@ type EnrichmentResult struct {
 // BatchEnrich performs enrichment for multiple events in parallel
 func (de *DataEnricher) BatchEnrich(ctx context.Context, requests []EnrichmentRequest) []EnrichmentResult {
 	results := make([]EnrichmentResult, len(requests))
-	
+
 	const maxConcurrent = 10
 	sem := make(chan struct{}, maxConcurrent)
-	
+
 	for i, req := range requests {
 		i, req := i, req
-		
+
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem }()
-			
+
 			err := de.EnrichEventData(ctx, req.EventName, req.Data)
 			if err != nil {
 				results[i] = EnrichmentResult{
@@ -280,11 +280,11 @@ func (de *DataEnricher) BatchEnrich(ctx context.Context, requests []EnrichmentRe
 			}
 		}()
 	}
-	
+
 	for i := 0; i < maxConcurrent; i++ {
 		sem <- struct{}{}
 	}
-	
+
 	return results
 }
 

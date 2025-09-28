@@ -32,14 +32,14 @@ func (m *MockReceiverClient) IsAuthorizedSigner(ctx context.Context, signer stri
 
 // JSON-RPC structures for mock server
 type jsonRPCRequest struct {
-	ID     interface{} `json:"id"`
-	Method string      `json:"method"`
+	ID     interface{}   `json:"id"`
+	Method string        `json:"method"`
 	Params []interface{} `json:"params"`
 }
 
 type jsonRPCResponse struct {
-	ID     interface{} `json:"id"`
-	Result interface{} `json:"result,omitempty"`
+	ID     interface{}   `json:"id"`
+	Result interface{}   `json:"result,omitempty"`
 	Error  *jsonRPCError `json:"error,omitempty"`
 }
 
@@ -110,24 +110,24 @@ func TestNewWriteClient_Success(t *testing.T) {
 		}
 
 		privateKey := "0x1234567890123456789012345678901234567890123456789012345678901234"
-		
+
 		// Test WriteClient creation
 		writeClient, err := NewWriteClient(cfg, privateKey)
-		
+
 		if err != nil {
 			// If it fails, that's also valid - just check the error message
 			t.Logf("WriteClient creation failed (expected): %v", err)
 			assert.Contains(t, err.Error(), "failed to")
 			return
 		}
-		
+
 		// If it succeeds, verify the WriteClient was created properly
 		assert.NotNil(t, writeClient)
 		assert.Equal(t, cfg, writeClient.config)
 		assert.NotNil(t, writeClient.client)
 		assert.NotNil(t, writeClient.receiverClient)
 		assert.NotNil(t, writeClient.lastUpdate)
-		
+
 		// Clean up
 		if writeClient.client != nil {
 			writeClient.client.Close()
@@ -146,7 +146,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 			RPCURLs: []string{},
 			Enabled: true,
 		}
-		
+
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
@@ -157,10 +157,10 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 		// Use a working mock server for this test since we want to test contract validation
 		server := createMockEthereumServer(t)
 		defer server.Close()
-		
+
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
-			Name:    "Test Chain", 
+			Name:    "Test Chain",
 			RPCURLs: []string{server.URL},
 			Enabled: true,
 			Contracts: []config.ContractConfig{
@@ -172,7 +172,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 				},
 			},
 		}
-		
+
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
@@ -183,7 +183,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 		// Use a working mock server for this test
 		server := createMockEthereumServer(t)
 		defer server.Close()
-		
+
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
 			Name:    "Test Chain",
@@ -198,7 +198,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 				},
 			},
 		}
-		
+
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
@@ -220,7 +220,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 				},
 			},
 		}
-		
+
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
@@ -235,7 +235,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 	t.Run("ReceiverType", func(t *testing.T) {
 		server := createMockEthereumServer(t)
 		defer server.Close()
-		
+
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
 			Name:    "Test Chain",
@@ -250,7 +250,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 				},
 			},
 		}
-		
+
 		// This should work (receiver type is supported)
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		if err != nil {
@@ -266,7 +266,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 	t.Run("PushOracleType", func(t *testing.T) {
 		server := createMockEthereumServer(t)
 		defer server.Close()
-		
+
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
 			Name:    "Test Chain",
@@ -281,7 +281,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 				},
 			},
 		}
-		
+
 		// This should work (pushoracle type is supported)
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		if err != nil {
@@ -297,7 +297,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 	t.Run("UnsupportedType", func(t *testing.T) {
 		server := createMockEthereumServer(t)
 		defer server.Close()
-		
+
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
 			Name:    "Test Chain",
@@ -312,7 +312,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 				},
 			},
 		}
-		
+
 		// This should fail at contract type validation
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		assert.Error(t, err)
@@ -330,27 +330,27 @@ func TestWriteClient_updateLastUpdate(t *testing.T) {
 
 	symbol := "ETH"
 	beforeTime := time.Now()
-	
+
 	// Test updating last update time
 	wc.updateLastUpdate(symbol)
-	
+
 	afterTime := time.Now()
-	
+
 	// Check that the update time was recorded
 	assert.Contains(t, wc.lastUpdate, symbol)
 	updateTime := wc.lastUpdate[symbol]
-	
+
 	// Time should be between before and after
 	assert.True(t, updateTime.After(beforeTime) || updateTime.Equal(beforeTime))
 	assert.True(t, updateTime.Before(afterTime) || updateTime.Equal(afterTime))
-	
+
 	// Test updating the same symbol again
 	time.Sleep(10 * time.Millisecond) // Small delay
 	firstUpdateTime := wc.lastUpdate[symbol]
-	
+
 	wc.updateLastUpdate(symbol)
 	secondUpdateTime := wc.lastUpdate[symbol]
-	
+
 	// Second update should be later
 	assert.True(t, secondUpdateTime.After(firstUpdateTime))
 }
@@ -391,13 +391,13 @@ func TestWriteClient_ConcurrentUpdateLastUpdate(t *testing.T) {
 func TestWriteClient_EdgeCases(t *testing.T) {
 	t.Run("NilConfig", func(t *testing.T) {
 		privateKey := "0x1234567890123456789012345678901234567890123456789012345678901234"
-		
+
 		// This should panic or return error - test the behavior
 		assert.Panics(t, func() {
 			NewWriteClient(nil, privateKey)
 		})
 	})
-	
+
 	t.Run("EmptyPrivateKey", func(t *testing.T) {
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
@@ -413,7 +413,7 @@ func TestWriteClient_EdgeCases(t *testing.T) {
 				},
 			},
 		}
-		
+
 		// Should fail when creating receiver client with empty private key
 		writeClient, err := NewWriteClient(cfg, "")
 		assert.Error(t, err)
@@ -421,7 +421,7 @@ func TestWriteClient_EdgeCases(t *testing.T) {
 		// Error should be about RPC connection since that happens first
 		assert.Contains(t, err.Error(), "failed to connect to destination chain")
 	})
-	
+
 	t.Run("MultipleEnabledContracts", func(t *testing.T) {
 		cfg := &config.DestinationConfig{
 			ChainID: 1337,
@@ -436,16 +436,16 @@ func TestWriteClient_EdgeCases(t *testing.T) {
 					Enabled: true,
 				},
 				{
-					Name:    "SecondReceiver", 
+					Name:    "SecondReceiver",
 					Address: "0x2222222222222222222222222222222222222222",
 					Type:    "pushoracle",
 					Enabled: true,
 				},
 			},
 		}
-		
+
 		privateKey := "0x1234567890123456789012345678901234567890123456789012345678901234"
-		
+
 		// Should use the first enabled receiver/pushoracle contract found
 		writeClient, err := NewWriteClient(cfg, privateKey)
 		assert.Error(t, err) // Will fail at RPC connection

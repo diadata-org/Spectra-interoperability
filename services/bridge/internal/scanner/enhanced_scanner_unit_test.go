@@ -2,7 +2,7 @@ package scanner
 
 import (
 	"math/big"
-	
+
 	"testing"
 	"time"
 
@@ -18,7 +18,7 @@ import (
 func TestCalculateEventSignature(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	// Create scanner with test config (we only need the eventDefinitions for this test)
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
@@ -37,7 +37,7 @@ func TestCalculateEventSignature(t *testing.T) {
 			description: "Should correctly calculate IntentRegistered event signature",
 		},
 		{
-			name:        "IntArraySet signature", 
+			name:        "IntArraySet signature",
 			eventABI:    eventDefs["IntArraySet"].ABI,
 			expectedSig: "IntArraySet(uint256,int256,string,string)",
 			description: "Should correctly calculate IntArraySet event signature",
@@ -48,7 +48,7 @@ func TestCalculateEventSignature(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			actualSig := scanner.calculateEventSignature(tt.eventABI)
 			expectedHash := crypto.Keccak256Hash([]byte(tt.expectedSig))
-			
+
 			assert.Equal(t, expectedHash, actualSig, tt.description)
 		})
 	}
@@ -57,7 +57,7 @@ func TestCalculateEventSignature(t *testing.T) {
 func TestExtractContractInfo(t *testing.T) {
 	// Create test configuration
 	_, sourceConfig, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		sourceConfig:     sourceConfig,
 		eventDefinitions: eventDefs,
@@ -68,16 +68,16 @@ func TestExtractContractInfo(t *testing.T) {
 
 	// Should have extracted 2 unique contract addresses
 	assert.Len(t, scanner.contractAddresses, 2, "Should extract 2 contract addresses")
-	
+
 	// Should have extracted 2 event signatures
 	assert.Len(t, scanner.eventSignatures, 2, "Should extract 2 event signatures")
-	
+
 	// Verify specific addresses are included
 	expectedAddresses := []common.Address{
 		common.HexToAddress(eventDefs["IntentRegistered"].Contract),
 		common.HexToAddress(eventDefs["IntArraySet"].Contract),
 	}
-	
+
 	for _, expected := range expectedAddresses {
 		found := false
 		for _, actual := range scanner.contractAddresses {
@@ -101,19 +101,19 @@ func TestExtractContractInfo_NoEventDefinitions(t *testing.T) {
 }
 
 func TestFindEventDefinition(t *testing.T) {
-	// Create test configuration  
+	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
 
 	tests := []struct {
-		name          string
-		signature     string
-		expectedName  string
-		shouldFind    bool
-		description   string
+		name         string
+		signature    string
+		expectedName string
+		shouldFind   bool
+		description  string
 	}{
 		{
 			name:         "IntentRegistered event",
@@ -142,7 +142,7 @@ func TestFindEventDefinition(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			eventSig := crypto.Keccak256Hash([]byte(tt.signature))
 			name, def := scanner.findEventDefinition(eventSig)
-			
+
 			if tt.shouldFind {
 				assert.Equal(t, tt.expectedName, name, tt.description)
 				assert.NotNil(t, def, "Event definition should not be nil")
@@ -157,7 +157,7 @@ func TestFindEventDefinition(t *testing.T) {
 func TestParseIntentRegisteredEvent(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -165,7 +165,7 @@ func TestParseIntentRegisteredEvent(t *testing.T) {
 	// Create mock log for IntentRegistered event
 	intentHash := common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
 	symbolHash := crypto.Keccak256Hash([]byte("BTC"))
-	
+
 	mockLog := types.Log{
 		Address: common.HexToAddress(eventDefs["IntentRegistered"].Contract),
 		Topics: []common.Hash{
@@ -211,7 +211,7 @@ func TestParseIntentRegisteredEvent(t *testing.T) {
 func TestParseIntArraySetEvent(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -219,7 +219,7 @@ func TestParseIntArraySetEvent(t *testing.T) {
 	// Create mock log for IntArraySet event
 	round := big.NewInt(2000)
 	requestId := big.NewInt(466)
-	
+
 	mockLog := types.Log{
 		Address: common.HexToAddress(eventDefs["IntArraySet"].Contract),
 		Topics: []common.Hash{
@@ -251,7 +251,7 @@ func TestParseIntArraySetEvent(t *testing.T) {
 	assert.Equal(t, round, parsedEvent.Round, "Round should match")
 	assert.Equal(t, requestId, parsedEvent.RequestId, "RequestId should match")
 	assert.Equal(t, mockLog.Data, parsedEvent.RawData, "RawData should match")
-	
+
 	// Verify IntentHash is set from RequestId
 	expectedIntentHash := make([]byte, 32)
 	copy(expectedIntentHash[32-len(requestId.Bytes()):], requestId.Bytes())
@@ -261,7 +261,7 @@ func TestParseIntArraySetEvent(t *testing.T) {
 func TestParseLog_IntentRegistered(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -292,7 +292,7 @@ func TestParseLog_IntentRegistered(t *testing.T) {
 func TestParseLog_IntArraySet(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -322,7 +322,7 @@ func TestParseLog_IntArraySet(t *testing.T) {
 func TestParseLog_UnknownEvent(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -343,7 +343,7 @@ func TestParseLog_UnknownEvent(t *testing.T) {
 func TestParseLog_NoTopics(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -362,7 +362,7 @@ func TestParseLog_NoTopics(t *testing.T) {
 func TestShouldProcessEvent(t *testing.T) {
 	// Create test configuration
 	_, _, eventDefs := CreateTestConfig()
-	
+
 	scanner := &EnhancedBlockScanner{
 		eventDefinitions: eventDefs,
 	}
@@ -383,7 +383,7 @@ func TestCalculateEventSignature_InvalidJSON(t *testing.T) {
 	// Test with invalid JSON
 	invalidABI := `{"name":"Event","type":"event","inputs":[invalid json}`
 	result := scanner.calculateEventSignature(invalidABI)
-	
+
 	// Should return zero hash for invalid JSON
 	assert.Equal(t, common.Hash{}, result, "Should return zero hash for invalid ABI JSON")
 }
@@ -403,17 +403,15 @@ func TestNewEnhancedBlockScanner_Structure(t *testing.T) {
 	assert.Equal(t, eventDefs, scanner.eventDefinitions)
 }
 
-
-
-// Test basic scanner operations 
+// Test basic scanner operations
 func TestBasicScannerOperations(t *testing.T) {
 	_, sourceConfig, eventDefs := CreateTestConfig()
 
 	scanner := &EnhancedBlockScanner{
 		sourceConfig:     sourceConfig,
 		eventDefinitions: eventDefs,
-		stopChan:        make(chan struct{}),
-		stoppedChan:     make(chan struct{}),
+		stopChan:         make(chan struct{}),
+		stoppedChan:      make(chan struct{}),
 	}
 
 	// Test extractContractInfo
@@ -456,15 +454,15 @@ func TestStop(t *testing.T) {
 // Test logging progress
 func TestLogProgress(t *testing.T) {
 	scanner := &EnhancedBlockScanner{
-		headBlock:            2100,
-		headEventsFound:      3,
-		lastHeadUpdate:       time.Now().Add(-30 * time.Second),
-		forwardBlock:         1000,
-		backwardBlock:        2000,
-		forwardEventsFound:   10,
-		backwardEventsFound:  5,
-		totalBlocksScanned:   500,
-		backwardScanning:     true,
+		headBlock:           2100,
+		headEventsFound:     3,
+		lastHeadUpdate:      time.Now().Add(-30 * time.Second),
+		forwardBlock:        1000,
+		backwardBlock:       2000,
+		forwardEventsFound:  10,
+		backwardEventsFound: 5,
+		totalBlocksScanned:  500,
+		backwardScanning:    true,
 		converged:           false,
 	}
 
@@ -475,15 +473,13 @@ func TestLogProgress(t *testing.T) {
 	})
 }
 
-
-
 func TestParseIntentRegisteredEvent_InsufficientData(t *testing.T) {
 	scanner := &EnhancedBlockScanner{}
 
 	event := &bridgeTypes.EventData{
 		EventName: "IntentRegistered",
 	}
-	
+
 	mockLog := types.Log{
 		Topics: []common.Hash{
 			common.HexToHash("0x1234"),
@@ -493,7 +489,7 @@ func TestParseIntentRegisteredEvent_InsufficientData(t *testing.T) {
 	}
 
 	parsedEvent, err := scanner.parseIntentRegisteredEvent(event, mockLog)
-	
+
 	assert.NoError(t, err, "Should not error with insufficient data")
 	assert.Equal(t, [32]byte(common.HexToHash("0x5678")), parsedEvent.IntentHash, "Should extract IntentHash from topics[1]")
 	// Price, Timestamp, and Signer should be nil/zero since data is insufficient
@@ -505,7 +501,7 @@ func TestParseIntArraySetEvent_EmptyData(t *testing.T) {
 	event := &bridgeTypes.EventData{
 		EventName: "IntArraySet",
 	}
-	
+
 	mockLog := types.Log{
 		Topics: []common.Hash{
 			common.HexToHash("0x1234"),
@@ -515,7 +511,7 @@ func TestParseIntArraySetEvent_EmptyData(t *testing.T) {
 	}
 
 	parsedEvent, err := scanner.parseIntArraySetEvent(event, mockLog)
-	
+
 	assert.NoError(t, err, "Should not error with empty data")
 	assert.Equal(t, big.NewInt(2000), parsedEvent.Round, "Should extract round from topics[1]")
 	assert.Nil(t, parsedEvent.RequestId, "RequestId should be nil with empty data")

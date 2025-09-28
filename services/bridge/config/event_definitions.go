@@ -7,10 +7,10 @@ import (
 
 // EventDefinition defines how to process a specific event type
 type EventDefinition struct {
-	Contract       string                   `json:"contract"`
-	ABI            string                   `json:"abi"`
-	DataExtraction map[string]string        `json:"data_extraction"`
-	Enrichment     *EnrichmentConfig        `json:"enrichment,omitempty"`
+	Contract       string            `json:"contract"`
+	ABI            string            `json:"abi"`
+	DataExtraction map[string]string `json:"data_extraction"`
+	Enrichment     *EnrichmentConfig `json:"enrichment,omitempty"`
 }
 
 // EnrichmentConfig defines how to enrich event data with additional calls

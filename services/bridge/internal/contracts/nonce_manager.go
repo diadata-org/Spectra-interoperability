@@ -7,18 +7,18 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
-	
+
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 )
 
 // NonceManager manages nonces for transaction sending
 type NonceManager struct {
-	client      *ethclient.Client
-	address     common.Address
-	mu          sync.Mutex
-	currentNonce uint64
+	client        *ethclient.Client
+	address       common.Address
+	mu            sync.Mutex
+	currentNonce  uint64
 	pendingNonces map[uint64]bool
-	retryCount   map[uint64]int  // Track retry attempts per nonce
+	retryCount    map[uint64]int // Track retry attempts per nonce
 }
 
 // NewNonceManager creates a new nonce manager
@@ -84,14 +84,14 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 func (nm *NonceManager) ReturnNonce(nonce uint64) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	
+
 	delete(nm.pendingNonces, nonce)
-	
+
 	// If this was the current nonce, decrement
 	if nonce+1 == nm.currentNonce && len(nm.pendingNonces) == 0 {
 		nm.currentNonce = nonce
 	}
-	
+
 	logger.Debugf("NonceManager: Returned nonce %d for address %s", nonce, nm.address.Hex())
 }
 
@@ -99,7 +99,7 @@ func (nm *NonceManager) ReturnNonce(nonce uint64) {
 func (nm *NonceManager) ConfirmNonce(nonce uint64) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	
+
 	delete(nm.pendingNonces, nonce)
 	delete(nm.retryCount, nonce)
 	logger.Debugf("NonceManager: Confirmed nonce %d for address %s", nonce, nm.address.Hex())
@@ -116,7 +116,7 @@ func (nm *NonceManager) GetRetryCount(nonce uint64) int {
 func (nm *NonceManager) Reset() {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
-	
+
 	nm.currentNonce = 0
 	nm.pendingNonces = make(map[uint64]bool)
 	nm.retryCount = make(map[uint64]int)
@@ -128,9 +128,9 @@ func (nm *NonceManager) HandleError(ctx context.Context, err error, usedNonce ui
 	if err == nil {
 		return
 	}
-	
+
 	errStr := err.Error()
-	
+
 	// Handle different error types
 	if strings.Contains(errStr, "nonce too low") {
 		logger.Warnf("NonceManager: Nonce too low error for nonce %d, resetting", usedNonce)

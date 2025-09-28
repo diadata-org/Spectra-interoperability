@@ -8,12 +8,12 @@ import (
 
 // RateLimiter implements a token bucket rate limiter
 type RateLimiter struct {
-	mu            sync.Mutex
-	tokens        int
-	maxTokens     int
-	refillRate    int
-	refillPeriod  time.Duration
-	lastRefill    time.Time
+	mu           sync.Mutex
+	tokens       int
+	maxTokens    int
+	refillRate   int
+	refillPeriod time.Duration
+	lastRefill   time.Time
 }
 
 // NewRateLimiter creates a new rate limiter
@@ -63,17 +63,17 @@ func (rl *RateLimiter) TryAcquire() bool {
 func (rl *RateLimiter) refillTokens() {
 	now := time.Now()
 	elapsed := now.Sub(rl.lastRefill)
-	
+
 	if elapsed >= rl.refillPeriod {
 		// Calculate how many periods have passed
 		periods := int(elapsed / rl.refillPeriod)
 		tokensToAdd := periods * rl.refillRate
-		
+
 		rl.tokens += tokensToAdd
 		if rl.tokens > rl.maxTokens {
 			rl.tokens = rl.maxTokens
 		}
-		
+
 		rl.lastRefill = now
 	}
 }
@@ -82,7 +82,7 @@ func (rl *RateLimiter) refillTokens() {
 func (rl *RateLimiter) GetAvailableTokens() int {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	
+
 	rl.refillTokens()
 	return rl.tokens
 }

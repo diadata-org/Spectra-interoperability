@@ -104,11 +104,11 @@ func (m *MockSubscription) SendError(err error) {
 // CreateTestConfig creates a test configuration for scanners
 func CreateTestConfig() (*config.BlockScannerConfig, *config.SourceConfig, map[string]*config.EventDefinition) {
 	scannerConfig := &config.BlockScannerConfig{
-		Enabled:       true,
-		ScanInterval:  config.Duration(5 * time.Second),
-		BlockRange:    100,
-		MaxBlockGap:   1000,
-		BackwardSync:  false,
+		Enabled:      true,
+		ScanInterval: config.Duration(5 * time.Second),
+		BlockRange:   100,
+		MaxBlockGap:  1000,
+		BackwardSync: false,
 	}
 
 	sourceConfig := &config.SourceConfig{
@@ -142,7 +142,7 @@ func CreateTestLog(eventName string, blockNumber uint64, logIndex uint) types.Lo
 		topics = []common.Hash{
 			common.HexToHash("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"),
 			common.HexToHash("0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"), // intentHash
-			common.HexToHash("0x" + common.Bytes2Hex([]byte("BTC"))),                                    // symbol hash
+			common.HexToHash("0x" + common.Bytes2Hex([]byte("BTC"))),                               // symbol hash
 		}
 		// Non-indexed data: price (32 bytes) + timestamp (32 bytes) + signer (32 bytes, padded)
 		price := new(big.Int)

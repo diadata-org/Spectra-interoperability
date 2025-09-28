@@ -15,7 +15,7 @@ func (db *DB) InitializeChainState(chainID int64, chainName string, startBlock u
 		ON CONFLICT (chain_id) DO UPDATE SET
 			chain_name = COALESCE(EXCLUDED.chain_name, chain_state.chain_name),
 			updated_at = EXCLUDED.updated_at`
-	
+
 	_, err := db.Exec(query,
 		chainID,
 		chainName,
@@ -25,10 +25,10 @@ func (db *DB) InitializeChainState(chainID int64, chainName string, startBlock u
 		0,
 		time.Now(),
 	)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to initialize chain state: %w", err)
 	}
-	
+
 	return nil
 }
