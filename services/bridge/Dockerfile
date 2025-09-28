@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install dependencies
 RUN apk add --no-cache git
@@ -16,7 +16,7 @@ COPY go.mod go.sum ./
 WORKDIR /bridge
 
 # Copy bridge go mod files
-COPY bridge/go.mod bridge/go.sum ./
+COPY services/bridge/go.mod services/bridge/go.sum ./
 
 # Install protoc and Go plugins
 RUN apk add --no-cache protobuf protobuf-dev && \
@@ -30,7 +30,7 @@ RUN cd /proto && protoc --go_out=. --go-grpc_out=. bridge.proto
 RUN go mod download
 
 # Copy bridge source code
-COPY bridge ./
+COPY services/bridge ./
 
 # Tidy dependencies and build the application
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bridge ./cmd/bridge

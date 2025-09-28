@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.3
-// source: proto/bridge.proto
+// source: bridge.proto
 
 package proto
 
@@ -203,5 +203,5 @@ var BridgeService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/bridge.proto",
+	Metadata: "bridge.proto",
 }

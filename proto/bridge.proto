@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package bridge;
 
-option go_package = "github.com/diadata.org/Spectra-interoperability/services/bridge/proto";
+option go_package = "github.com/diadata.org/Spectra-interoperability/proto";
 
 // The Bridge service definition
 service BridgeService {

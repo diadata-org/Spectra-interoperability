@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make
@@ -15,13 +15,13 @@ COPY go.mod go.sum ./
 WORKDIR /app
 
 # Copy attestor go mod files
-COPY attestor/go.mod attestor/go.sum ./
+COPY services/attestor/go.mod services/attestor/go.sum ./
 
 # Download dependencies
 RUN go mod download
 
 # Copy source code
-COPY attestor .
+COPY services/attestor .
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o attestor .

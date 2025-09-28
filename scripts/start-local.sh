@@ -87,27 +87,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-# Migrate from old .cache/.wallets structure to new .local-stack structure
-migrate_to_local_stack() {
-    if [ -d "${ROOT_DIR}/.cache" ] || [ -d "${ROOT_DIR}/.wallets" ]; then
-        log_info "Migrating existing files to new .local-stack structure..."
 
-        # Create new directories
-        mkdir -p "${LOCAL_STACK_DIR}" "${CONTRACTS_ADDR_DIR}" "${WALLETS_DIR}" "${CONFIG_DIR}"
-
-        # Migrate contract addresses
-        if [ -d "${ROOT_DIR}/.cache" ]; then
-            cp "${ROOT_DIR}/.cache"/*.addr "${CONTRACTS_ADDR_DIR}/" 2>/dev/null || true
-        fi
-
-        # Migrate wallets
-        if [ -d "${ROOT_DIR}/.wallets" ]; then
-            cp "${ROOT_DIR}/.wallets"/* "${WALLETS_DIR}/" 2>/dev/null || true
-        fi
-
-        log_success "Migration completed. Old .cache and .wallets directories can be removed manually if desired."
-    fi
-}
 
 # Step 1: Start Anvil
 start_anvil() {
@@ -143,255 +123,11 @@ setup_and_deploy_contracts() {
 
     # Create local stack directories
     mkdir -p "${LOCAL_STACK_DIR}" "${CONTRACTS_ADDR_DIR}" "${WALLETS_DIR}" "${CONFIG_DIR}" "${ROOT_DIR}/.temp"
- 
 
     # Deploy all contracts
     deploy_all_contracts
 }
 
-# Use local contracts when remote is not available
-use_local_contracts() {
-    log_info "Setting up local contracts environment..."
-
-    # Ensure local contracts directory exists
-    mkdir -p "${LOCAL_CONTRACTS_DIR}"
-
- 
-
-    # Set up minimal Foundry environment in local contracts directory
-    setup_local_foundry
-
-    # Update CONTRACTS_DIR to point to local directory
-    CONTRACTS_DIR="${LOCAL_CONTRACTS_DIR}"
-
-    # Deploy contracts using local setup
-    deploy_local_contracts
-}
-
-# Set up minimal Foundry environment for local contracts
-setup_local_foundry() {
-    log_info "Setting up local Foundry environment..."
-
-    cd "${ROOT_DIR}/contracts"
-
-    # Create foundry.toml for local contracts
-    cat <<FOUNDRY > "${ROOT_DIR}/contracts/foundry.toml"
-[profile.default]
-src = "contracts/contracts"
-out = "out"
-libs = ["lib"]
-solc = "0.8.29"
-
-[rpc_endpoints]
-anvil = "http://localhost:8545"
-FOUNDRY
-
-    # Initialize as Foundry project if not already done
-    if [ ! -d "lib" ] || [ ! -d "lib/openzeppelin-contracts" ]; then
-        log_info "Initializing Foundry project and installing dependencies..."
-
-        # Clean and initialize
-        rm -rf lib out cache
-        mkdir -p lib
-
-        # Initialize forge (this creates basic structure)
-        forge init --no-git --force .
-
-        # Install OpenZeppelin contracts
-        log_info "Installing OpenZeppelin contracts..."
-        if ! forge install OpenZeppelin/openzeppelin-contracts --no-git --no-commit; then
-            log_warning "Failed to install via forge, trying git clone..."
-            git clone https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
-        fi
-    fi
-
-    # Create remappings.txt for OpenZeppelin
-    cat <<REMAPPINGS > "${ROOT_DIR}/contracts/remappings.txt"
-@openzeppelin/=lib/openzeppelin-contracts/
-REMAPPINGS
-
-    # Verify OpenZeppelin installation
-    if [ ! -f "lib/openzeppelin-contracts/contracts/access/AccessControl.sol" ]; then
-        log_error "OpenZeppelin AccessControl.sol not found after installation"
-        return 1
-    fi
-
-    log_success "Local Foundry environment set up with OpenZeppelin"
-}
-
-# Deploy contracts using local setup
-deploy_local_contracts() {
-    log_info "Deploying contracts using local setup..."
-
-    # Deploy DIAOracleV2
-    deploy_dia_oracle_local
-
-    # Deploy OracleIntentRegistry
-    deploy_registry_local
-
-    # Deploy ProtocolFeeHook
-    deploy_protocol_fee_hook_local
-
-    # Deploy PushOracleReceiverV2
-    deploy_receiver_local
-
-    # Configure contracts
-    configure_contracts_local
-
-    # Fund receiver
-    fund_receiver
-}
-
-# Deploy DIAOracleV2 from local contracts
-deploy_dia_oracle_local() {
-    log_info "🚀 Deploying DIAOracleV2 from local contracts..."
-    local output
-    cd "${ROOT_DIR}/contracts"
-    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
-        --rpc-url "${ANVIL_RPC}" \
-        --private-key "${DEFAULT_KEY}" \
-        --broadcast \
-        "contracts/DIAOracleV2.sol:DIAOracleV2" 2>&1); then
-        log_error "Failed to deploy DIAOracleV2"
-        echo "$output" >&2
-        return 1
-    fi
-
-    local address
-    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
-    if [ -z "$address" ]; then
-        log_error "Failed to capture DIAOracleV2 address"
-        echo "$output" >&2
-        return 1
-    fi
-
-    echo "$address" > "${DIA_ORACLE_ADDR_FILE}"
-    log_success "DIAOracleV2 deployed at $address"
-}
-
-# Deploy OracleIntentRegistry from local contracts
-deploy_registry_local() {
-    log_info "🚀 Deploying OracleIntentRegistry from local contracts..."
-    local output
-    cd "${ROOT_DIR}/contracts"
-    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
-        --rpc-url "${ANVIL_RPC}" \
-        --private-key "${DEFAULT_KEY}" \
-        --broadcast \
-        --via-ir \
-        "contracts/OracleIntentRegistry.sol:OracleIntentRegistry" \
-        --constructor-args "DIA Oracle" "1.0" 2>&1); then
-        log_error "Failed to deploy OracleIntentRegistry"
-        echo "$output" >&2
-        return 1
-    fi
-
-    local address
-    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
-    if [ -z "$address" ]; then
-        log_error "Failed to capture OracleIntentRegistry address"
-        echo "$output" >&2
-        return 1
-    fi
-
-    echo "$address" > "${REGISTRY_ADDR_FILE}"
-    log_success "OracleIntentRegistry deployed at $address"
-}
-
-# Deploy ProtocolFeeHook from local contracts
-deploy_protocol_fee_hook_local() {
-    log_info "🚀 Deploying ProtocolFeeHook from local contracts..."
-    local output
-    cd "${ROOT_DIR}"
-    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
-        --rpc-url "${ANVIL_RPC}" \
-        --private-key "${DEFAULT_KEY}" \
-        --broadcast \
-        "packages/contracts-spectra/ProtocolFeeHook.sol:ProtocolFeeHook" 2>&1); then
-        log_error "Failed to deploy ProtocolFeeHook"
-        echo "$output" >&2
-        return 1
-    fi
-
-    local address
-    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
-    if [ -z "$address" ]; then
-        log_error "Failed to capture ProtocolFeeHook address"
-        echo "$output" >&2
-        return 1
-    fi
-
-    echo "$address" > "${PROTOCOL_FEE_HOOK_FILE}"
-    log_success "ProtocolFeeHook deployed at $address"
-}
-
-# Deploy PushOracleReceiverV2 from local contracts
-deploy_receiver_local() {
-    local registry_addr
-    registry_addr=$(cat "${REGISTRY_ADDR_FILE}")
-    log_info "🚀 Deploying PushOracleReceiverV2 from local contracts with registry $registry_addr..."
-
-    local output
-    cd "${ROOT_DIR}/contracts"
-    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
-        --rpc-url "${ANVIL_RPC}" \
-        --private-key "${DEFAULT_KEY}" \
-        --broadcast \
-        "contracts/PushOracleReceiverV2.sol:PushOracleReceiverV2" \
-        --constructor-args "SpectraIntents" "1.0" 31337 "$registry_addr" 2>&1); then
-        log_error "Failed to deploy PushOracleReceiverV2"
-        echo "$output" >&2
-        return 1
-    fi
-
-    local address
-    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
-    if [ -z "$address" ]; then
-        log_error "Failed to capture PushOracleReceiverV2 address"
-        echo "$output" >&2
-        return 1
-    fi
-
-    echo "$address" > "${RECEIVER_ADDR_FILE}"
-    log_success "PushOracleReceiverV2 deployed at $address"
-}
-
-# Configure contracts for local deployment
-configure_contracts_local() {
-    log_info "🔧 Configuring local contracts..."
-
-    local receiver_addr fee_hook_addr registry_addr
-    receiver_addr=$(cat "${RECEIVER_ADDR_FILE}")
-    fee_hook_addr=$(cat "${PROTOCOL_FEE_HOOK_FILE}")
-    registry_addr=$(cat "${REGISTRY_ADDR_FILE}")
-
-    # Set payment hook in PushOracleReceiverV2
-    log_info "Setting payment hook in PushOracleReceiverV2..."
-    if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
-        --rpc-url "${ANVIL_RPC}" \
-        --private-key "${DEFAULT_KEY}" \
-        "$receiver_addr" \
-        "setPaymentHook(address)" \
-        "$fee_hook_addr"; then
-        log_warning "Failed to set payment hook (method might not exist)"
-    else
-        log_success "Payment hook configured"
-    fi
-
-    # Authorize signer in registry
-    log_info "Authorizing signer in registry ($DEFAULT_ADDRESS)..."
-    if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
-        --rpc-url "${ANVIL_RPC}" \
-        --private-key "${DEFAULT_KEY}" \
-        "$registry_addr" \
-        "setSignerAuthorization(address,bool)" \
-        "$DEFAULT_ADDRESS" \
-        true; then
-        log_warning "Failed to authorize signer (method might not exist)"
-    else
-        log_success "Signer authorized: $DEFAULT_ADDRESS"
-    fi
-}
 
 # Deploy all contracts
 deploy_all_contracts() {
@@ -444,7 +180,7 @@ deploy_registry() {
         --private-key "${DEFAULT_KEY}" \
         --broadcast \
         "contracts/OracleIntentRegistry.sol:OracleIntentRegistry" \
-        --constructor-args "SpectraIntents" "1.0" 2>&1); then
+        --constructor-args "DIA Oracle" "1.0" 2>&1); then
         log_error "Failed to deploy OracleIntentRegistry"
         echo "$output" >&2
         return 1
@@ -553,7 +289,21 @@ configure_contracts() {
         true; then
         log_warning "Failed to authorize signer (method might not exist)"
     else
-        log_success "Signer authorized: $DEFAULT_ADDRESS"
+        log_success "Signer authorized in registry: $DEFAULT_ADDRESS"
+    fi
+
+    # Authorize signer in PushOracleReceiverV2
+    log_info "Authorizing signer in PushOracleReceiverV2 ($DEFAULT_ADDRESS)..."
+    if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        "$receiver_addr" \
+        "setSignerAuthorization(address,bool)" \
+        "$DEFAULT_ADDRESS" \
+        true; then
+        log_warning "Failed to authorize signer in receiver (method might not exist)"
+    else
+        log_success "Signer authorized in PushOracleReceiverV2: $DEFAULT_ADDRESS"
     fi
 }
 
@@ -888,6 +638,14 @@ start_docker_services() {
     export POSTGRES_DB="${POSTGRES_DB}"
     export POSTGRES_DSN="${POSTGRES_DSN}"
 
+    # Build images first
+    log_info "Building Docker images..."
+    if ! docker compose -f "${COMPOSE_FILE}" build --no-cache attestor bridge; then
+        log_error "Failed to build Docker images"
+        return 1
+    fi
+    log_success "Docker images built successfully"
+
     # Start only the services (not anvil since we have it running on host)
     if ! docker compose -f "${COMPOSE_FILE}" up -d postgres attestor bridge; then
         log_error "Failed to start Docker services"
@@ -930,7 +688,7 @@ start_price_updater() {
     oracle_addr=$(cat "${DIA_ORACLE_ADDR_FILE}")
 
     # Start price updater in background
-    nohup "${ROOT_DIR}/.temp/price-updater.sh" "$oracle_addr" "$DEFAULT_KEY" "$ANVIL_RPC" > "${ROOT_DIR}/.temp/price-updater.log" 2>&1 &
+    nohup "${ROOT_DIR}/scripts/price-updater.sh" "$oracle_addr" "$DEFAULT_KEY" "$ANVIL_RPC" > "${ROOT_DIR}/.temp/price-updater.log" 2>&1 &
     PRICE_UPDATER_PID=$!
 
     # Store PID for cleanup
@@ -991,8 +749,7 @@ main() {
     log_info "🚀 Starting Spectra Local Development Environment"
     echo ""
 
-    # Migrate to new directory structure if needed
-    migrate_to_local_stack
+
 
     # Step 1: Start Anvil blockchain
     start_anvil
