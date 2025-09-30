@@ -51,6 +51,9 @@ type Bridge struct {
 	stats              *bridgetypes.BridgeStats
 	lastProcessedBlock uint64
 
+	// Goroutine coordination
+	wg sync.WaitGroup
+
 	// Worker management
 	workerPool *WorkerPool
 
@@ -283,9 +286,6 @@ func (b *Bridge) Start(ctx context.Context) error {
 	// Start worker pool
 	b.workerPool.Start(ctx)
 
-	// Start monitoring goroutines
-	var wg sync.WaitGroup
-
 	// Start block scanner if enabled
 	if b.blockScanner != nil {
 		if err := b.blockScanner.Start(ctx); err != nil {
@@ -302,53 +302,64 @@ func (b *Bridge) Start(ctx context.Context) error {
 		}
 
 		// Start error handler
-		wg.Add(1)
+		b.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer b.wg.Done()
 			b.handleErrors(ctx)
 		}()
 	}
 
 	// Start update processor
-	wg.Add(1)
+	b.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer b.wg.Done()
 		b.processUpdates(ctx)
 	}()
 
 	// Start health checker
-	wg.Add(1)
+	b.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer b.wg.Done()
 		b.healthCheck(ctx)
 	}()
 
 	// Start metrics server
-	wg.Add(1)
+	b.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer b.wg.Done()
 		b.startMetricsServer(ctx)
 	}()
 
-	// Wait for all goroutines to finish
-	wg.Wait()
-
+	logger.Info("All bridge components started successfully")
 	return nil
 }
 
 // Stop stops the bridge service
 func (b *Bridge) Stop(ctx context.Context) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	if !b.running {
+		b.mu.Unlock()
 		return fmt.Errorf("bridge is not running")
 	}
+	b.mu.Unlock()
 
 	logger.Info("Stopping bridge service")
 
 	// Signal shutdown
 	close(b.shutdownChan)
+
+	done := make(chan struct{})
+	go func() {
+		b.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		logger.Info("All bridge goroutines stopped gracefully")
+	case <-ctx.Done():
+		logger.Warn("Bridge shutdown timeout reached, some goroutines may still be running")
+	}
 
 	// Stop block scanner if running
 	if b.blockScanner != nil {
@@ -366,8 +377,16 @@ func (b *Bridge) Stop(ctx context.Context) error {
 		destClient.client.Close()
 	}
 
+	b.mu.Lock()
 	b.running = false
+	b.mu.Unlock()
+
 	return nil
+}
+
+// Wait waits for all bridge goroutines to finish
+func (b *Bridge) Wait() {
+	b.wg.Wait()
 }
 
 // processUpdates processes update requests
@@ -1241,9 +1260,6 @@ func (b *Bridge) checkChainHealth(ctx context.Context, client rpc.EthClient, cha
 
 // startMetricsServer starts the metrics server
 func (b *Bridge) startMetricsServer(ctx context.Context) {
-	// Import the api package when we implement this
-	// For now, just log that it would start
-	// Log that metrics would be available if enabled
 	if b.config.Metrics.Enabled {
 		logger.Info("Metrics collection is enabled")
 	}
@@ -1281,6 +1297,15 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 				}
 			}()
 		}
+	}
+
+	select {
+	case <-ctx.Done():
+		logger.Info("Metrics server stopping due to context cancellation")
+		return
+	case <-b.shutdownChan:
+		logger.Info("Metrics server stopping due to shutdown signal")
+		return
 	}
 }
 
