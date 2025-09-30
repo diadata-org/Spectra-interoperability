@@ -13,14 +13,15 @@ import (
 
 // CreateBlockScanner creates the enhanced block scanner
 func CreateBlockScanner(
-	cfg *config.Config,
+	cfgService *config.ConfigService,
 	client rpc.EthClient,
 	db *database.DB,
 	eventChan chan<- *bridgeTypes.EventData,
 	errorChan chan<- error,
 ) (BlockScanner, error) {
 	// Always use enhanced scanner for all scenarios
-	if !cfg.BlockScanner.Enabled {
+	infrastructure := cfgService.GetInfrastructure()
+	if !infrastructure.BlockScanner.Enabled {
 		return nil, fmt.Errorf("block scanner is disabled")
 	}
 
@@ -33,11 +34,17 @@ func CreateBlockScanner(
 		return nil, fmt.Errorf("failed to get eth client: %w", err)
 	}
 
+	// Collect all event definitions
+	eventDefinitions := make(map[string]*config.EventDefinition)
+	for name, eventDef := range cfgService.GetEventDefinitions() {
+		eventDefinitions[name] = eventDef
+	}
+
 	// Create enhanced scanner
 	enhancedScanner, err := scanner.NewEnhancedBlockScanner(
-		&cfg.BlockScanner,
-		&cfg.Source,
-		cfg.EventDefinitions,
+		&infrastructure.BlockScanner,
+		&infrastructure.Source,
+		eventDefinitions,
 		ethClient,
 		dbAdapter,
 		eventChan,

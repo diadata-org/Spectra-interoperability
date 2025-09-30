@@ -307,7 +307,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				}
 
 				// Find contract config
-				var contractConfig *config.ContractConfig
+				var contractConfig *config.LegacyContractConfig
 				for i := range destConfig.Contracts {
 					if destConfig.Contracts[i].Address == dest.Contract {
 						contractConfig = &destConfig.Contracts[i]

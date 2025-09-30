@@ -62,7 +62,15 @@ type FailoverStatus struct {
 // NewFailoverHandler creates a new failover handler
 func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *metrics.Metrics, intentMetrics *metrics.IntentMetrics) (*FailoverHandler, error) {
 	// Parse private key
-	privateKey, err := crypto.HexToECDSA(cfg.PrivateKey[2:]) // Remove 0x prefix
+	privateKeyHex := cfg.PrivateKey
+	if len(privateKeyHex) == 0 {
+		return nil, fmt.Errorf("private key is required")
+	}
+	// Remove 0x prefix if present
+	if strings.HasPrefix(privateKeyHex, "0x") {
+		privateKeyHex = privateKeyHex[2:]
+	}
+	privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse private key: %w", err)
 	}

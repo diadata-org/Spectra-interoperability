@@ -22,16 +22,16 @@ type EnrichmentConfig struct {
 	Returns  map[string]string `json:"returns"`
 }
 
-// RouterConfig represents a generic event router configuration
-type RouterConfig struct {
-	ID           string              `json:"id"`
-	Name         string              `json:"name"`
-	Type         string              `json:"type"`
-	Enabled      bool                `json:"enabled"`
-	PrivateKey   string              `json:"private_key"`
-	Triggers     RouterTriggers      `json:"triggers"`
-	Processing   ProcessingConfig    `json:"processing"`
-	Destinations []RouterDestination `json:"destinations"`
+// LegacyRouterConfig
+type LegacyRouterConfig struct {
+	ID           string                    `json:"id"`
+	Name         string                    `json:"name"`
+	Type         string                    `json:"type"`
+	Enabled      bool                      `json:"enabled"`
+	PrivateKey   string                    `json:"private_key"`
+	Triggers     RouterTriggers            `json:"triggers"`
+	Processing   ProcessingConfig          `json:"processing"`
+	Destinations []LegacyRouterDestination `json:"destinations"`
 }
 
 // RouterTriggers defines what events trigger this router
@@ -62,7 +62,7 @@ type Transformation struct {
 }
 
 // RouterDestination represents where to route the event
-type RouterDestination struct {
+type LegacyRouterDestination struct {
 	ChainID       int64                   `json:"chain_id"`
 	Contract      string                  `json:"contract"`
 	Method        DestinationMethodConfig `json:"method"`

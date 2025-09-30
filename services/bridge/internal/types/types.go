@@ -255,7 +255,7 @@ type UpdateRequest struct {
 	Intent           *OracleIntent             `json:"intent"`
 	Event            *EventData                `json:"event"`
 	DestinationChain *config.DestinationConfig `json:"destination_chain"`
-	Contract         *config.ContractConfig    `json:"contract"`
+	Contract         *config.LegacyContractConfig    `json:"contract"`
 	Priority         int                       `json:"priority"`
 	Retries          int                       `json:"retries"`
 	CreatedAt        time.Time                 `json:"created_at"`

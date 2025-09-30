@@ -33,11 +33,13 @@ import (
 
 // Bridge represents the main bridge service
 type Bridge struct {
-	config         *config.Config
-	db             *database.DB
-	readClient     rpc.EthClient
-	registryClient *contracts.RegistryClient
-	writeClients   map[int64]*WriteClient
+	modularConfig      *config.ModularConfig
+	configService      *config.ConfigService
+	legacyDestinations map[int64]*config.DestinationConfig // temporary for API compatibility
+	db                 *database.DB
+	readClient         rpc.EthClient
+	registryClient     *contracts.RegistryClient
+	writeClients       map[int64]*WriteClient
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -75,7 +77,8 @@ type Bridge struct {
 
 // WriteClient represents a client for write operations to a destination chain
 type WriteClient struct {
-	config         *config.DestinationConfig
+	chainConfig    *config.ChainConfig
+	contracts      []*config.ContractConfig
 	client         rpc.EthClient
 	receiverClient *contracts.ReceiverClient
 	lastUpdate     map[string]time.Time // symbol -> last update time
@@ -83,19 +86,20 @@ type WriteClient struct {
 }
 
 // NewBridge creates a new bridge instance
-func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Collector) (*Bridge, error) {
+func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigService, db *database.DB, metricsCollector *metrics.Collector) (*Bridge, error) {
 	// Connect to source chain with multiple RPC support
-	readClient, err := rpc.NewMultiClient(cfg.Source.RPCURLs)
+	sourceConfig := cfgService.GetInfrastructure().Source
+	readClient, err := rpc.NewMultiClient(sourceConfig.RPCURLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to source chain: %w", err)
 	}
-	logger.Infof("Connected to source chain %s via %s", cfg.Source.Name, readClient.GetCurrentRPCURL())
+	logger.Infof("Connected to source chain %s via %s", sourceConfig.Name, readClient.GetCurrentRPCURL())
 
 	// Create registry client
 	// For new config, registry address would come from event definitions
 	// Extract registry address from event definitions
 	registryAddress := ""
-	for _, eventDef := range cfg.EventDefinitions {
+	for _, eventDef := range modularCfg.Events {
 		if eventDef.Contract != "" {
 			// Use the contract address from the IntentRegistered event
 			registryAddress = eventDef.Contract
@@ -123,13 +127,18 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 
 	// Create destination clients
 	destClients := make(map[int64]*WriteClient)
-	for _, destConfig := range cfg.GetEnabledDestinations() {
-		destClient, err := NewWriteClient(destConfig, cfg.PrivateKey)
+	for _, chainConfig := range cfgService.GetEnabledChains() {
+		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
+		if len(contracts) == 0 {
+			continue // Skip chains with no contracts
+		}
+
+		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey)
 		if err != nil {
-			logger.Errorf("Failed to create destination client for chain %d: %v", destConfig.ChainID, err)
+			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
 			continue
 		}
-		destClients[destConfig.ChainID] = destClient
+		destClients[chainConfig.ChainID] = destClient
 	}
 
 	if len(destClients) == 0 {
@@ -137,11 +146,41 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 	}
 
 	// Create worker pool with configured size
-	workerPool := NewWorkerPool(cfg.WorkerPool.MaxWorkers)
+	workerPool := NewWorkerPool(cfgService.GetInfrastructure().WorkerPool.MaxWorkers)
 
 	// Create router registry and load routers
 	routerRegistry := router.NewGenericRegistry()
-	if err := routerRegistry.LoadRouters(cfg.Routers); err != nil {
+	// Load routers directly (convert pointers to values for registry)
+	enabledRouterPointers := cfgService.GetEnabledRouters()
+
+	var enabledRouters []config.RouterConfig
+	for _, routerPtr := range enabledRouterPointers {
+		// Create a copy of the router config
+		routerCfg := *routerPtr
+
+		// Resolve contract references in destinations
+		for i := range routerCfg.Destinations {
+			dest := &routerCfg.Destinations[i]
+
+			// If using contract_ref, resolve it to get ChainID and Contract address
+			if dest.ContractRef != "" {
+				contract := cfgService.GetContractConfig(dest.ContractRef)
+				if contract != nil {
+					// Populate the legacy fields from the contract config
+					dest.ChainID = contract.ChainID
+					dest.Contract = contract.Address
+					logger.Debugf("Resolved contract_ref %s to chain %d contract %s",
+						dest.ContractRef, dest.ChainID, dest.Contract)
+				} else {
+					logger.Warnf("Contract reference %s not found for router %s",
+						dest.ContractRef, routerCfg.ID)
+				}
+			}
+		}
+
+		enabledRouters = append(enabledRouters, routerCfg)
+	}
+	if err := routerRegistry.LoadRouters(enabledRouters); err != nil {
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
@@ -155,35 +194,6 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		metricsTracker = NewMetricsTracker(metricsCollector)
 	}
 
-	bridge := &Bridge{
-		config:         cfg,
-		db:             db,
-		readClient:     readClient,
-		registryClient: registryClient,
-		writeClients:   destClients,
-		updateChan:     make(chan *bridgetypes.UpdateRequest, 1000),
-		eventChan:      eventChan,
-		errorChan:      errorChan,
-		shutdownChan:   make(chan struct{}),
-		stats: &bridgetypes.BridgeStats{
-			ChainStats: make(map[int64]*bridgetypes.ChainStatus),
-			StartTime:  time.Now(),
-		},
-		lastProcessedBlock: cfg.Source.StartBlock,
-		workerPool:         workerPool,
-		routerRegistry:     routerRegistry,
-		metricsTracker:     metricsTracker,
-	}
-
-	// Create block scanner if enabled
-	if cfg.BlockScanner.Enabled {
-		scanner, err := CreateBlockScanner(cfg, readClient, db, eventChan, errorChan)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create block scanner: %w", err)
-		}
-		bridge.blockScanner = scanner
-	}
-
 	// Get destination eth clients for event processor
 	destEthClients := make(map[int64]*ethclient.Client)
 	for chainID, destClient := range destClients {
@@ -194,11 +204,72 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 		destEthClients[chainID] = ethClient
 	}
 
+	// Create legacy destinations for processor (temporary)
+	legacyDestinations := make(map[int64]*config.DestinationConfig)
+	for _, chain := range cfgService.GetEnabledChains() {
+		contracts := cfgService.GetContractsForChain(chain.ChainID)
+		var legacyContracts []config.LegacyContractConfig
+		for _, contract := range contracts {
+			legacyContract := config.LegacyContractConfig{
+				Name:          contract.Address, // Use address as name for compatibility
+				Address:       contract.Address,
+				Type:          contract.Type,
+				Enabled:       contract.Enabled,
+				ABI:           contract.ABI,
+				GasLimit:      contract.GasLimit,
+				GasMultiplier: contract.GasMultiplier,
+				MaxGasPrice:   contract.MaxGasPrice,
+				Methods:       contract.Methods,
+			}
+			legacyContracts = append(legacyContracts, legacyContract)
+		}
+
+		legacyDestinations[chain.ChainID] = &config.DestinationConfig{
+			ChainID:   chain.ChainID,
+			Name:      chain.Name,
+			RPCURLs:   chain.RPCURLs,
+			Enabled:   chain.Enabled,
+			Contracts: legacyContracts,
+		}
+	}
+
+	// Create bridge instance now that we have all dependencies
+	bridge := &Bridge{
+		modularConfig:      modularCfg,
+		configService:      cfgService,
+		legacyDestinations: legacyDestinations,
+		db:                 db,
+		readClient:         readClient,
+		registryClient:     registryClient,
+		writeClients:       destClients,
+		updateChan:         make(chan *bridgetypes.UpdateRequest, 1000),
+		eventChan:          eventChan,
+		errorChan:          errorChan,
+		shutdownChan:       make(chan struct{}),
+		stats: &bridgetypes.BridgeStats{
+			ChainStats: make(map[int64]*bridgetypes.ChainStatus),
+			StartTime:  time.Now(),
+		},
+		lastProcessedBlock: cfgService.GetInfrastructure().Source.StartBlock,
+		workerPool:         workerPool,
+		routerRegistry:     routerRegistry,
+		metricsTracker:     metricsTracker,
+	}
+
+	// Create block scanner if enabled
+	if cfgService.GetInfrastructure().BlockScanner.Enabled {
+		scanner, err := CreateBlockScanner(cfgService, readClient, db, eventChan, errorChan)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create block scanner: %w", err)
+		}
+		bridge.blockScanner = scanner
+	}
+
 	// Create generic event processor
 	eventProcessor, err := processor.NewGenericEventProcessor(
-		&cfg.EventProcessor,
-		cfg.EventDefinitions,
-		cfg.Destinations,
+		&cfgService.GetInfrastructure().EventProcessor,
+		cfgService.GetEventDefinitions(),
+		legacyDestinations,
 		db,
 		routerRegistry,
 		ethClient,
@@ -227,18 +298,18 @@ func NewBridge(cfg *config.Config, db *database.DB, metricsCollector *metrics.Co
 }
 
 // NewWriteClient creates a new write client for destination operations
-func NewWriteClient(cfg *config.DestinationConfig, privateKey string) (*WriteClient, error) {
+func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.ContractConfig, privateKey string) (*WriteClient, error) {
 	// Connect to destination chain with multiple RPC support
-	client, err := rpc.NewMultiClient(cfg.RPCURLs)
+	client, err := rpc.NewMultiClient(chainConfig.RPCURLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to destination chain: %w", err)
 	}
-	logger.Infof("Connected to destination chain %s via %s", cfg.Name, client.GetCurrentRPCURL())
+	logger.Infof("Connected to destination chain %s via %s", chainConfig.Name, client.GetCurrentRPCURL())
 
 	// Create receiver client
 	// Note: ReceiverAddress should be extracted from destination contracts
 	var receiverAddress string
-	for _, contract := range cfg.Contracts {
+	for _, contract := range contractConfigs {
 		if (contract.Type == "receiver" || contract.Type == "pushoracle") && contract.Enabled {
 			receiverAddress = contract.Address
 			break
@@ -264,7 +335,8 @@ func NewWriteClient(cfg *config.DestinationConfig, privateKey string) (*WriteCli
 	}
 
 	return &WriteClient{
-		config:         cfg,
+		chainConfig:    chainConfig,
+		contracts:      contractConfigs,
 		client:         client,
 		receiverClient: receiverClient,
 		lastUpdate:     make(map[string]time.Time),
@@ -1115,7 +1187,7 @@ func (b *Bridge) getGasPrice(ctx context.Context, destClient *WriteClient) (*big
 
 	// Apply gas price cap from contract config if available
 	// Note: This would need to be per-contract in production
-	for _, contract := range destClient.config.Contracts {
+	for _, contract := range destClient.contracts {
 		if contract.MaxGasPrice != "" {
 			maxGasPrice := new(big.Int)
 			maxGasPrice, ok := maxGasPrice.SetString(contract.MaxGasPrice, 10)
@@ -1168,17 +1240,18 @@ func (b *Bridge) waitForReceipt(ctx context.Context, client rpc.EthClient, txHas
 // initializeChainStats initializes chain statistics
 func (b *Bridge) initializeChainStats() {
 	// Source chain stats
-	b.stats.ChainStats[b.config.Source.ChainID] = &bridgetypes.ChainStatus{
-		ChainID:   b.config.Source.ChainID,
-		Name:      b.config.Source.Name,
+	sourceConfig := b.configService.GetInfrastructure().Source
+	b.stats.ChainStats[sourceConfig.ChainID] = &bridgetypes.ChainStatus{
+		ChainID:   sourceConfig.ChainID,
+		Name:      sourceConfig.Name,
 		Connected: true,
 	}
 
 	// Destination chain stats
 	for _, destClient := range b.writeClients {
-		b.stats.ChainStats[destClient.config.ChainID] = &bridgetypes.ChainStatus{
-			ChainID:   destClient.config.ChainID,
-			Name:      destClient.config.Name,
+		b.stats.ChainStats[destClient.chainConfig.ChainID] = &bridgetypes.ChainStatus{
+			ChainID:   destClient.chainConfig.ChainID,
+			Name:      destClient.chainConfig.Name,
 			Connected: true,
 		}
 	}
@@ -1202,7 +1275,7 @@ func (b *Bridge) updateStats() {
 // healthCheck performs periodic health checks
 func (b *Bridge) healthCheck(ctx context.Context) {
 	// Use HealthCheck interval from config
-	ticker := time.NewTicker(b.config.HealthCheck.CheckInterval.Duration())
+	ticker := time.NewTicker(b.configService.GetInfrastructure().HealthCheck.CheckInterval.Duration())
 	defer ticker.Stop()
 
 	for {
@@ -1220,14 +1293,15 @@ func (b *Bridge) healthCheck(ctx context.Context) {
 // performHealthCheck performs health checks on all chains
 func (b *Bridge) performHealthCheck(ctx context.Context) {
 	// Check source chain
-	if err := b.checkChainHealth(ctx, b.readClient, b.config.Source.ChainID); err != nil {
+	sourceConfig := b.configService.GetInfrastructure().Source
+	if err := b.checkChainHealth(ctx, b.readClient, sourceConfig.ChainID); err != nil {
 		logger.Errorf("Source chain health check failed: %v", err)
 	}
 
 	// Check destination chains
 	for _, destClient := range b.writeClients {
-		if err := b.checkChainHealth(ctx, destClient.client, destClient.config.ChainID); err != nil {
-			logger.Errorf("Destination chain %d health check failed: %v", destClient.config.ChainID, err)
+		if err := b.checkChainHealth(ctx, destClient.client, destClient.chainConfig.ChainID); err != nil {
+			logger.Errorf("Destination chain %d health check failed: %v", destClient.chainConfig.ChainID, err)
 		}
 	}
 }
@@ -1260,12 +1334,12 @@ func (b *Bridge) checkChainHealth(ctx context.Context, client rpc.EthClient, cha
 
 // startMetricsServer starts the metrics server
 func (b *Bridge) startMetricsServer(ctx context.Context) {
-	if b.config.Metrics.Enabled {
+	if b.configService.GetInfrastructure().Metrics.Enabled {
 		logger.Info("Metrics collection is enabled")
 	}
 
 	// Start API server if configured
-	if b.config.API.ListenAddr != "" {
+	if b.configService.GetInfrastructure().API.ListenAddr != "" {
 		// Create metrics collector for API
 		var metricsCollector *metrics.Collector
 		if b.metrics != nil {
@@ -1275,8 +1349,17 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 			metricsCollector.FailoverMetrics = b.metrics
 		}
 
-		// API server needs nil health monitor and router registry for now
-		apiServer := api.NewServer(b.config, b.db, nil, metricsCollector, b.routerRegistry)
+		// API server needs legacy config format (temporary)
+		// Create minimal legacy config for API server
+		legacyConfig := &config.Config{
+			Database:         b.configService.GetInfrastructure().Database,
+			Source:           b.configService.GetInfrastructure().Source,
+			PrivateKey:       b.configService.GetInfrastructure().PrivateKey,
+			EventDefinitions: b.configService.GetEventDefinitions(),
+			API:              b.configService.GetInfrastructure().API,
+			Destinations:     b.legacyDestinations,
+		}
+		apiServer := api.NewServer(legacyConfig, b.db, nil, metricsCollector, b.routerRegistry)
 
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
