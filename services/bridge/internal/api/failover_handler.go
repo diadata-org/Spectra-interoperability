@@ -20,7 +20,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/sirupsen/logrus"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
@@ -98,7 +97,7 @@ func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *met
 			}
 
 			if receiverAddr == "" {
-				logrus.Warnf("No receiver contract found for chain %d", dest.ChainID)
+				logger.Warnf("No receiver contract found for chain %d", dest.ChainID)
 				continue
 			}
 
@@ -112,7 +111,7 @@ func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *met
 			if len(dest.RPCURLs) > 0 {
 				client, err := ethclient.Dial(dest.RPCURLs[0])
 				if err != nil {
-					logrus.Errorf("Failed to connect to chain %d: %v", dest.ChainID, err)
+					logger.Errorf("Failed to connect to chain %d: %v", dest.ChainID, err)
 					continue
 				}
 				handler.clients[dest.ChainID] = client
@@ -176,7 +175,7 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	// Debug log the raw request
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"body_size": len(bodyBytes),
 		"body":      string(bodyBytes),
 	}).Info("Raw failover request body")
@@ -209,7 +208,7 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 		)
 	}
 
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"request_id":  requestID,
 		"message_id":  req.MessageID,
 		"intent_hash": req.IntentHash,
@@ -249,7 +248,7 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 		if req.IntentData.Signature != nil {
 			sigHex = fmt.Sprintf("0x%x", req.IntentData.Signature)
 		}
-		logger.WithFields(logrus.Fields{
+		logger.WithFields(logger.Fields{
 			"intent_type":   req.IntentData.IntentType,
 			"symbol":        req.IntentData.Symbol,
 			"signature_len": len(req.IntentData.Signature),
@@ -277,7 +276,7 @@ func (h *FailoverHandler) TriggerFailover(w http.ResponseWriter, r *http.Request
 // intentToContractStruct converts a bridgeTypes.OracleIntent to the contract struct format
 func (h *FailoverHandler) intentToContractStruct(intent *bridgetypes.OracleIntent) interface{} {
 	// Debug log all fields
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"intentType":    intent.IntentType,
 		"version":       intent.Version,
 		"chainId":       intent.ChainID,
@@ -372,7 +371,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	}
 
 	// Log intent data for debugging
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"intent_type":   intentData.IntentType,
 		"symbol":        intentData.Symbol,
 		"chainId":       intentData.ChainID,
@@ -432,7 +431,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			}
 
 			// Log phase durations
-			logger.WithFields(logrus.Fields{
+			logger.WithFields(logger.Fields{
 				"intent_hash":             intentHash,
 				"receiver_key":            receiverKey,
 				"intent_to_event":         intentToEventDuration,
@@ -444,7 +443,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			}).Info("Phase tracking metrics")
 		}
 
-		logger.WithFields(logrus.Fields{
+		logger.WithFields(logger.Fields{
 			"intent_hash":        intentHash,
 			"intent_age_seconds": intentAge,
 			"intent_timestamp":   intentTime.Format(time.RFC3339),
@@ -459,7 +458,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 	}
 
 	// Log the signature before packing
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"signature_hex": fmt.Sprintf("0x%x", intentData.Signature),
 		"signature_len": len(intentData.Signature),
 		"signer":        intentData.Signer.Hex(),
@@ -554,7 +553,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 		h.intentMetrics.RecordIntentSubmitted(lifecycle)
 	}
 
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"request_id": requestID,
 		"tx_hash":    txHash,
 		"chain_id":   destConfig.ChainID,
@@ -646,7 +645,7 @@ func (h *FailoverHandler) processFailover(requestID string, req FailoverRequest,
 			h.intentMetrics.RecordIntentConfirmed(lifecycle, receipt.GasUsed)
 		}
 
-		logger.WithFields(logrus.Fields{
+		logger.WithFields(logger.Fields{
 			"request_id": requestID,
 			"tx_hash":    txHash,
 			"gas_used":   receipt.GasUsed,

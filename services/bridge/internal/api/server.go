@@ -8,7 +8,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/sirupsen/logrus"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
@@ -54,40 +53,40 @@ func NewServer(
 		router:         mux.NewRouter(),
 	}
 
-	logrus.Info("Creating failover handler")
+	logger.Info("Creating failover handler")
 
 	var failoverMetrics *metrics.Metrics
 	var intentMetrics *metrics.IntentMetrics
 	if metricsCollector != nil {
 		if metricsCollector.FailoverMetrics != nil {
 			failoverMetrics = metricsCollector.FailoverMetrics
-			logrus.Info("Using shared metrics instance for failover handler")
+			logger.Info("Using shared metrics instance for failover handler")
 		}
 		if metricsCollector.IntentMetrics != nil {
 			intentMetrics = metricsCollector.IntentMetrics
-			logrus.Info("Using shared intent metrics instance for failover handler")
+			logger.Info("Using shared intent metrics instance for failover handler")
 		}
 	} else {
-		logrus.Warn("Metrics collector not available, failover handler will run without metrics")
+		logger.Warn("Metrics collector not available, failover handler will run without metrics")
 	}
 
 	failoverHandler, err := NewFailoverHandler(cfg, db, failoverMetrics, intentMetrics)
 	if err != nil {
-		logrus.WithError(err).Error("Failed to create failover handler")
+		logger.WithError(err).Error("Failed to create failover handler")
 	} else {
 		s.failoverHandler = failoverHandler
 		if failoverMetrics != nil && intentMetrics != nil {
-			logrus.Info("Failover handler created successfully with integrated metrics and intent metrics")
+			logger.Info("Failover handler created successfully with integrated metrics and intent metrics")
 		} else if failoverMetrics != nil {
-			logrus.Info("Failover handler created successfully with integrated metrics only")
+			logger.Info("Failover handler created successfully with integrated metrics only")
 		} else {
-			logrus.Info("Failover handler created successfully without metrics")
+			logger.Info("Failover handler created successfully without metrics")
 		}
 	}
 
-	logrus.Info("Setting up routes")
+	logger.Info("Setting up routes")
 	s.setupRoutes()
-	logrus.Info("Routes setup complete")
+	logger.Info("Routes setup complete")
 
 	s.httpServer = &http.Server{
 		Addr:         s.config.ListenAddr,
@@ -172,11 +171,11 @@ func (s *Server) setupRoutes() {
 
 	// Failover endpoints (if available)
 	if s.failoverHandler != nil {
-		logrus.Info("Registering failover routes - handler is NOT nil")
+		logger.Info("Registering failover routes - handler is NOT nil")
 		s.failoverHandler.RegisterRoutes(v1)
-		logrus.Info("Failover routes registered with v1 subrouter")
+		logger.Info("Failover routes registered with v1 subrouter")
 	} else {
-		logrus.Warn("Failover handler is nil, not registering failover routes")
+		logger.Warn("Failover handler is nil, not registering failover routes")
 	}
 
 	// Middleware

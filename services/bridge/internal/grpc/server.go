@@ -9,17 +9,15 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	pb "github.com/diadata.org/Spectra-interoperability/proto"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
-
-var logger = logrus.WithField("component", "grpc-server")
 
 // Server implements the gRPC BridgeService
 type Server struct {
@@ -56,14 +54,14 @@ func (s *Server) Start(port int) error {
 // loggingInterceptor logs all incoming gRPC requests
 func loggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	start := time.Now()
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"method": info.FullMethod,
 		"start":  start.Format(time.RFC3339),
 	}).Info("gRPC request received")
 
 	resp, err := handler(ctx, req)
 
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"method":   info.FullMethod,
 		"duration": time.Since(start).String(),
 		"error":    err,
@@ -74,7 +72,7 @@ func loggingInterceptor(ctx context.Context, req interface{}, info *grpc.UnarySe
 
 // TriggerFailover handles failover requests via gRPC
 func (s *Server) TriggerFailover(ctx context.Context, req *pb.FailoverRequest) (*pb.FailoverResponse, error) {
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logger.Fields{
 		"message_id":                 req.MessageId,
 		"intent_hash":                req.IntentHash,
 		"source":                     req.SourceChainId,
