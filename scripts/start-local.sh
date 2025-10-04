@@ -469,157 +469,190 @@ YAML
 
 # Create bridge config
 create_bridge_config() {
-    log_info "Creating bridge configuration..."
-    cat <<JSON > "${CONFIG_DIR}/bridge.json"
-{
-  "database": {
-    "driver": "postgres",
-    "dsn": "${POSTGRES_DSN}"
-  },
-  "source": {
-    "chain_id": 31337,
-    "name": "Anvil Local",
-    "rpc_urls": ["http://host.docker.internal:8545"],
-    "ws_url": "ws://host.docker.internal:8545",
-    "start_block": 0
-  },
-  "event_definitions": {
-    "IntentRegistered": {
-      "contract": "$(cat "${REGISTRY_ADDR_FILE}")",
-      "abi": "{\"name\":\"IntentRegistered\",\"type\":\"event\",\"inputs\":[{\"name\":\"intentHash\",\"type\":\"bytes32\",\"indexed\":true},{\"name\":\"symbol\",\"type\":\"string\",\"indexed\":true},{\"name\":\"price\",\"type\":\"uint256\",\"indexed\":true},{\"name\":\"timestamp\",\"type\":\"uint256\",\"indexed\":false},{\"name\":\"signer\",\"type\":\"address\",\"indexed\":false}]}",
-      "data_extraction": {
-        "intentHash": "topics[1]",
-        "symbol": "topics[2]",
-        "price": "topics[3]",
-        "timestamp": "timestamp",
-        "signer": "signer"
-      },
-      "enrichment": {
-        "method": "getIntent",
-        "abi": "{\"name\":\"getIntent\",\"type\":\"function\",\"inputs\":[{\"name\":\"intentHash\",\"type\":\"bytes32\"}],\"outputs\":[{\"name\":\"intent\",\"type\":\"tuple\",\"components\":[{\"name\":\"intentType\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"nonce\",\"type\":\"uint256\"},{\"name\":\"expiry\",\"type\":\"uint256\"},{\"name\":\"symbol\",\"type\":\"string\"},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"signature\",\"type\":\"bytes\"},{\"name\":\"signer\",\"type\":\"address\"}]}]}",
-        "params": ["\${event.intentHash}"],
-        "returns": {
-          "fullIntent": "0"
-        }
-      }
-    }
-  },
-  "destinations": {
-    "31337": {
-      "chain_id": 31337,
-      "name": "Anvil Local",
-      "rpc_urls": ["http://host.docker.internal:8545"],
-      "enabled": true,
-      "contracts": [
-        {
-          "name": "push_oracle_receiver",
-          "address": "$(cat "${RECEIVER_ADDR_FILE}")",
-          "type": "pushoracle",
-          "enabled": true,
-          "gas_limit": 300000,
-          "gas_multiplier": 1.2,
-          "max_gas_price": "100000000000",
-          "abi": "[{\"name\":\"handleIntentUpdate\",\"type\":\"function\",\"inputs\":[{\"name\":\"intent\",\"type\":\"tuple\",\"components\":[{\"name\":\"intentType\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"nonce\",\"type\":\"uint256\"},{\"name\":\"expiry\",\"type\":\"uint256\"},{\"name\":\"symbol\",\"type\":\"string\"},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"signature\",\"type\":\"bytes\"},{\"name\":\"signer\",\"type\":\"address\"}]}]}]",
-          "methods": {
-            "intent_update": {
-              "method_name": "handleIntentUpdate",
-              "fields_mapping": {
-                "intent": "fullIntent"
-              },
-              "gas_limit": 300000
-            }
-          }
-        }
-      ]
-    }
-  },
-  "routers": [
-    {
-      "id": "oracle_intent_router_001",
-      "name": "oracle_intent_router",
-      "type": "event",
-      "enabled": true,
-      "private_key": "${DEFAULT_KEY}",
-      "triggers": {
-        "events": ["IntentRegistered"],
-        "conditions": []
-      },
-      "processing": {
-        "data_source": "enrichment",
-        "transformations": []
-      },
-      "destinations": [
-        {
-          "chain_id": 31337,
-          "contract": "$(cat "${RECEIVER_ADDR_FILE}")",
-          "method": {
-            "name": "handleIntentUpdate",
-            "abi": "{\"name\":\"handleIntentUpdate\",\"type\":\"function\",\"inputs\":[{\"name\":\"intent\",\"type\":\"tuple\",\"components\":[{\"name\":\"intentType\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"nonce\",\"type\":\"uint256\"},{\"name\":\"expiry\",\"type\":\"uint256\"},{\"name\":\"symbol\",\"type\":\"string\"},{\"name\":\"price\",\"type\":\"uint256\"},{\"name\":\"timestamp\",\"type\":\"uint256\"},{\"name\":\"source\",\"type\":\"string\"},{\"name\":\"signature\",\"type\":\"bytes\"},{\"name\":\"signer\",\"type\":\"address\"}]}]}",
-            "params": {
-              "intent": "\${enrichment.fullIntent}"
-            },
-            "value": "0",
-            "gas_limit": 300000,
-            "gas_multiplier": 1.2
-          },
-          "condition": ""
-        }
-      ]
-    }
-  ],
-  "event_monitor": {
-    "enabled": true,
-    "reconnect_interval": "5s",
-    "max_reconnect_attempts": 10
-  },
-  "block_scanner": {
-    "enabled": true,
-    "scan_interval": "10s",
-    "block_range": 100,
-    "max_block_gap": 1000,
-    "backward_sync": true
-  },
-  "event_processor": {
-    "batch_size": 10,
-    "validation_timeout": "30s",
-    "dedup_cache_size": 1000,
-    "dedup_cache_ttl": "1h"
-  },
-  "worker_pool": {
-    "max_workers": 5,
-    "task_queue_size": 100,
-    "task_timeout": "2m",
-    "retry_delay": "10s",
-    "max_retries": 3
-  },
-  "health_check": {
-    "enabled": true,
-    "check_interval": "30s",
-    "timeout": "10s",
-    "max_processing_lag": "2m",
-    "max_queue_size": 50
-  },
-  "recovery": {
-    "enabled": true,
-    "min_failures": 3,
-    "max_attempts": 5,
-    "retry_interval": "30s",
-    "recovery_timeout": "5m"
-  },
-  "api": {
-    "enabled": true,
-    "listen_addr": ":8080",
-    "enable_cors": true
-  },
-  "metrics": {
-    "enabled": true,
-    "namespace": "oracle_bridge"
-  },
-  "private_key": "${DEFAULT_KEY}",
-  "dry_run": false
-}
-JSON
-    log_success "Bridge configuration created"
+    log_info "Creating bridge modular YAML configuration..."
+
+    # Create modular config directory structure
+    local BRIDGE_CONFIG_DIR="${CONFIG_DIR}/bridge-modular"
+    local ROUTERS_DIR="${BRIDGE_CONFIG_DIR}/routers"
+    mkdir -p "${ROUTERS_DIR}"
+
+    # 1. Create infrastructure.yaml
+    cat <<YAML > "${BRIDGE_CONFIG_DIR}/infrastructure.yaml"
+database:
+    driver: postgres
+    dsn_env: DATABASE_DSN
+source:
+    chain_id: 31337
+    name: Anvil Local
+    rpc_urls:
+        - env:SOURCE_RPC_URL
+    ws_url: ws://host.docker.internal:8545
+    start_block: 0
+private_key_env: PRIVATE_KEY
+event_monitor:
+    enabled: true
+    reconnectinterval: 5s
+    maxreconnectattempts: 10
+block_scanner:
+    enabled: true
+    scaninterval: 10s
+    blockrange: 100
+    maxblockgap: 1000
+    backwardsync: true
+event_processor:
+    batchsize: 10
+    validationtimeout: 30s
+    dedupcachesize: 1000
+    dedupcachettl: 1h
+    enableparallelmode: false
+worker_pool:
+    maxworkers: 5
+    taskqueuesize: 100
+    tasktimeout: 2m
+    retrydelay: 10s
+    maxretries: 3
+health_check:
+    enabled: true
+    checkinterval: 30s
+    timeout: 10s
+    maxprocessinglag: 2m
+    maxqueuesize: 50
+recovery:
+    enabled: true
+    minfailures: 3
+    maxattempts: 5
+    retryinterval: 30s
+    recoverytimeout: 5m
+api:
+    enabled: true
+    listenaddr: :8080
+    enablecors: true
+metrics:
+    enabled: true
+    namespace: oracle_bridge
+dry_run: false
+YAML
+
+    # 2. Create chains.yaml
+    cat <<YAML > "${BRIDGE_CONFIG_DIR}/chains.yaml"
+chains:
+    "31337":
+        chain_id: 31337
+        name: Anvil Local
+        rpc_urls:
+            - http://host.docker.internal:8545
+        enabled: true
+        default_gas_limit: 300000
+        gas_multiplier: 1.2
+        max_gas_price: "100000000000"
+YAML
+
+    # 3. Create contracts.yaml
+    cat <<YAML > "${BRIDGE_CONFIG_DIR}/contracts.yaml"
+contracts:
+    push_oracle_receiver:
+        chain_id: 31337
+        address: $(cat "${RECEIVER_ADDR_FILE}")
+        type: pushoracle
+        enabled: true
+        abi: '[{"name":"handleIntentUpdate","type":"function","inputs":[{"name":"intent","type":"tuple","components":[{"name":"intentType","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"expiry","type":"uint256"},{"name":"symbol","type":"string"},{"name":"price","type":"uint256"},{"name":"timestamp","type":"uint256"},{"name":"source","type":"string"},{"name":"signature","type":"bytes"},{"name":"signer","type":"address"}]}]}]'
+        gas_limit: 300000
+        gas_multiplier: 1.2
+        max_gas_price: "100000000000"
+        methods:
+            intent_update:
+                methodname: handleIntentUpdate
+                fieldsmapping:
+                    intent: fullIntent
+                gaslimit: 300000
+YAML
+
+    # 4. Create events.yaml
+    cat <<YAML > "${BRIDGE_CONFIG_DIR}/events.yaml"
+event_definitions:
+    IntentRegistered:
+        contract: $(cat "${REGISTRY_ADDR_FILE}")
+        abi: '{"name":"IntentRegistered","type":"event","inputs":[{"name":"intentHash","type":"bytes32","indexed":true},{"name":"symbol","type":"string","indexed":true},{"name":"price","type":"uint256","indexed":true},{"name":"timestamp","type":"uint256","indexed":false},{"name":"signer","type":"address","indexed":false}]}'
+        dataextraction:
+            intentHash: topics[1]
+            symbol: topics[2]
+            price: topics[3]
+            timestamp: timestamp
+            signer: signer
+        enrichment:
+            contract: ""
+            method: getIntent
+            abi: '{"name":"getIntent","type":"function","inputs":[{"name":"intentHash","type":"bytes32"}],"outputs":[{"name":"intent","type":"tuple","components":[{"name":"intentType","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"expiry","type":"uint256"},{"name":"symbol","type":"string"},{"name":"price","type":"uint256"},{"name":"timestamp","type":"uint256"},{"name":"source","type":"string"},{"name":"signature","type":"bytes"},{"name":"signer","type":"address"}]}]}'
+            params:
+                - \${event.intentHash}
+            returns:
+                fullIntent: "0"
+YAML
+
+    # 5. Create router configs
+    local router_files=(
+        "oracle_intent_router_btc.yaml"
+        "oracle_intent_router_eth.yaml"
+        "oracle_intent_router_sol.yaml"
+        "oracle_intent_router.yaml"
+    )
+    local router_names=(
+        "oracle_intent_router_btc"
+        "oracle_intent_router_eth"
+        "oracle_intent_router_sol"
+        "oracle_intent_router"
+    )
+    local router_ids=(
+        "oracle_intent_router_btc_001"
+        "oracle_intent_router_eth_001"
+        "oracle_intent_router_sol_001"
+        "oracle_intent_router_001"
+    )
+    local router_thresholds=("1s" "1s" "1s" "2s")
+    local router_conditions=(
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ==\n              value: BTC/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ==\n              value: ETH/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ==\n              value: SOL/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: !=\n              value: BTC/USD\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: !=\n              value: ETH/USD\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: !=\n              value: SOL/USD\n'
+    )
+
+    for ((i = 0; i < ${#router_files[@]}; i++)); do
+        local file_path="${ROUTERS_DIR}/${router_files[$i]}"
+        local router_name="${router_names[$i]}"
+        local router_id="${router_ids[$i]}"
+        local time_threshold="${router_thresholds[$i]}"
+        local conditions_block="${router_conditions[$i]}"
+
+        cat <<YAML > "${file_path}"
+router:
+    id: ${router_id}
+    name: ${router_name}
+    type: event
+    enabled: true
+    private_key_env: PRIVATE_KEY
+    triggers:
+        events:
+            - IntentRegistered
+${conditions_block}
+    processing:
+        datasource: enrichment
+        transformations: []
+        validationenabled: true
+    destinations:
+        - contract_ref: push_oracle_receiver
+          time_threshold: ${time_threshold}
+          method:
+            name: handleIntentUpdate
+            abi: '{"name":"handleIntentUpdate","type":"function","inputs":[{"name":"intent","type":"tuple","components":[{"name":"intentType","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"expiry","type":"uint256"},{"name":"symbol","type":"string"},{"name":"price","type":"uint256"},{"name":"timestamp","type":"uint256"},{"name":"source","type":"string"},{"name":"signature","type":"bytes"},{"name":"signer","type":"address"}]}]}'
+            params:
+                intent: \${enrichment.fullIntent}
+            value: "0"
+            gaslimit: 300000
+            gasmultiplier: 1.2
+YAML
+    done
+
+    log_success "Bridge modular YAML configuration created at ${BRIDGE_CONFIG_DIR} with ${#router_files[@]} routers"
 }
 
 # Step 4: Start Docker services
@@ -715,7 +748,16 @@ show_summary() {
     echo "🔧 Configuration Files:"
     echo "  ⚖️  Attestor env: ${CONFIG_DIR}/attestor.env"
     echo "  📋 Attestor config: ${CONFIG_DIR}/attestor-local.yaml"
-    echo "  🌉 Bridge config: ${CONFIG_DIR}/bridge.json"
+    echo "  🌉 Bridge config: ${CONFIG_DIR}/bridge-modular/"
+    echo "    ├── infrastructure.yaml"
+    echo "    ├── chains.yaml"
+    echo "    ├── contracts.yaml"
+    echo "    ├── events.yaml"
+    echo "    └── routers/"
+    echo "        ├── oracle_intent_router_btc.yaml"
+    echo "        ├── oracle_intent_router_eth.yaml"
+    echo "        ├── oracle_intent_router_sol.yaml"
+    echo "        └── oracle_intent_router.yaml"
     echo "  📄 Contract addresses: ${CONTRACTS_ADDR_DIR}/"
     echo "  🔑 Wallets: ${WALLETS_DIR}/"
     echo ""
@@ -735,6 +777,7 @@ show_summary() {
     echo "🌉 Bridge Router Configuration:"
     echo "  📝 Event: IntentRegistered from OracleIntentRegistry"
     echo "  🎯 Destination: PushOracleReceiverV2.handleIntentUpdate()"
+    echo "  🧭 Routers: BTC, ETH, SOL dedicated routers plus a fallback router"
     echo "  🔐 Router Signer: $DEFAULT_ADDRESS (authorized in registry)"
     echo ""
     log_info "Anvil is running with PID: $ANVIL_PID"

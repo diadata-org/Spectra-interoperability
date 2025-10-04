@@ -29,6 +29,7 @@ type Config struct {
 type DatabaseConfig struct {
 	Driver string `yaml:"driver" json:"driver"`
 	DSN    string `yaml:"dsn" json:"dsn"`
+	DSNEnv string `yaml:"dsn_env,omitempty" json:"dsn_env,omitempty"`
 }
 
 // SourceConfig represents source chain configuration

@@ -24,7 +24,7 @@ import (
 func main() {
 	// Command line flags
 	var (
-		configPath = flag.String("config", "config.json", "Path to configuration file")
+		configPath = flag.String("config", "config", "Path to configuration file or directory (supports YAML format)")
 		logLevel   = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	)
 	flag.Parse()
@@ -32,11 +32,14 @@ func main() {
 	// Initialize logger
 	logger.Init(*logLevel)
 
-	// Load configuration
-	cfg, err := config.Load(*configPath)
+	// Load modular configuration
+	modularCfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Create configuration service for easy access
+	cfgService := config.NewConfigService(modularCfg)
 
 	// Log if using environment variable for private key
 	if os.Getenv("BRIDGE_PRIVATE_KEY") != "" {
@@ -61,14 +64,14 @@ func main() {
 	}()
 
 	// Create database connection
-	db, err := database.NewDB(cfg.Database.Driver, cfg.Database.DSN)
+	db, err := database.NewDB(modularCfg.Infrastructure.Database.Driver, modularCfg.Infrastructure.Database.DSN)
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer db.Close()
 
 	// Create bridge service
-	bridgeService, err := bridge.NewBridge(cfg, db, metricsCollector)
+	bridgeService, err := bridge.NewBridge(modularCfg, cfgService, db, metricsCollector)
 	if err != nil {
 		log.Fatalf("Failed to create bridge service: %v", err)
 	}
@@ -84,26 +87,48 @@ func main() {
 	// Start bridge service
 	startTime := time.Now()
 	log.Printf("Starting DIA Oracle Bridge Service...")
-	log.Printf("Source chain: %s (Chain ID: %d)", cfg.Source.Name, cfg.Source.ChainID)
-	log.Printf("Monitoring %d destination chains", len(cfg.Destinations))
+	sourceConfig := cfgService.GetInfrastructure().Source
+	log.Printf("Source chain: %s (Chain ID: %d)", sourceConfig.Name, sourceConfig.ChainID)
+	log.Printf("Monitoring %d destination chains", len(cfgService.GetEnabledChains()))
 
-	// Start monitoring in a goroutine
+	// Start bridge service
+	if err := bridgeService.Start(ctx); err != nil {
+		log.Fatalf("Failed to start bridge service: %v", err)
+	}
+
+	// Start a goroutine to wait for bridge completion
+	bridgeDone := make(chan struct{})
 	go func() {
-		if err := bridgeService.Start(ctx); err != nil {
-			log.Printf("Bridge service error: %v", err)
-			cancel()
-		}
+		bridgeService.Wait() // Wait for all bridge goroutines to finish
+		close(bridgeDone)
 	}()
 
-	// Wait for shutdown signal
+	// Wait for shutdown signal or bridge completion
 	select {
 	case sig := <-sigChan:
 		uptime := utils.GetUptimeStringVerbose(startTime)
 		log.Printf("Received signal %v, shutting down gracefully... (uptime: %s)", sig, uptime)
+		cancel()
 	case <-ctx.Done():
 		uptime := utils.GetUptimeStringVerbose(startTime)
 		log.Printf("Context cancelled, shutting down... (uptime: %s)", uptime)
+	case <-bridgeDone:
+		uptime := utils.GetUptimeStringVerbose(startTime)
+		log.Printf("Bridge service completed, shutting down... (uptime: %s)", uptime)
 	}
+
+	// Set up force shutdown on second signal
+	go func() {
+		select {
+		case sig := <-sigChan:
+			log.Printf("Received second signal %v, forcing immediate shutdown!", sig)
+			os.Exit(1)
+		case <-time.After(30 * time.Second):
+			// Timeout protection - if graceful shutdown takes too long
+			log.Printf("Graceful shutdown timeout, forcing exit")
+			os.Exit(1)
+		}
+	}()
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

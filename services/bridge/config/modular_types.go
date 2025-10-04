@@ -17,6 +17,7 @@ type InfrastructureConfig struct {
 	Database       DatabaseConfig       `yaml:"database" json:"database"`
 	Source         SourceConfig         `yaml:"source" json:"source"`
 	PrivateKey     string               `yaml:"private_key,omitempty" json:"private_key,omitempty"`
+	PrivateKeyEnv  string               `yaml:"private_key_env,omitempty" json:"private_key_env,omitempty"`
 	EventMonitor   EventMonitorConfig   `yaml:"event_monitor" json:"event_monitor"`
 	BlockScanner   BlockScannerConfig   `yaml:"block_scanner" json:"block_scanner"`
 	EventProcessor EventProcessorConfig `yaml:"event_processor" json:"event_processor"`
@@ -57,14 +58,15 @@ type ContractConfig struct {
 }
 
 type RouterConfig struct {
-	ID           string              `yaml:"id" json:"id"`
-	Name         string              `yaml:"name" json:"name"`
-	Type         string              `yaml:"type" json:"type"`
-	Enabled      bool                `yaml:"enabled" json:"enabled"`
-	PrivateKey   string              `yaml:"private_key,omitempty" json:"private_key,omitempty"`
-	Triggers     RouterTriggers      `yaml:"triggers" json:"triggers"`
-	Processing   ProcessingConfig    `yaml:"processing" json:"processing"`
-	Destinations []RouterDestination `yaml:"destinations" json:"destinations"`
+	ID            string              `yaml:"id" json:"id"`
+	Name          string              `yaml:"name" json:"name"`
+	Type          string              `yaml:"type" json:"type"`
+	Enabled       bool                `yaml:"enabled" json:"enabled"`
+	PrivateKey    string              `yaml:"private_key,omitempty" json:"private_key,omitempty"`
+	PrivateKeyEnv string              `yaml:"private_key_env,omitempty" json:"private_key_env,omitempty"`
+	Triggers      RouterTriggers      `yaml:"triggers" json:"triggers"`
+	Processing    ProcessingConfig    `yaml:"processing" json:"processing"`
+	Destinations  []RouterDestination `yaml:"destinations" json:"destinations"`
 }
 
 type RouterDestination struct {
