@@ -81,6 +81,7 @@ type RouterDestination struct {
 	Method        DestinationMethodConfig `yaml:"method" json:"method"`
 	Condition     string                  `yaml:"condition,omitempty" json:"condition,omitempty"`
 	TimeThreshold Duration                `yaml:"time_threshold,omitempty" json:"time_threshold,omitempty"`
+	PriceDeviation string                 `yaml:"price_deviation,omitempty" json:"price_deviation,omitempty"` // e.g., "0.5%" or "1.0%"
 
 	// Gas configuration (from modular version)
 	GasLimit      uint64  `yaml:"gas_limit,omitempty" json:"gas_limit,omitempty"`
@@ -308,25 +309,27 @@ func (cs *ConfigService) ResolveRouterDestination(dest *RouterDestination) (*Res
 	}
 
 	return &ResolvedDestination{
-		ChainID:       contract.ChainID,
-		ChainName:     chain.Name,
-		ContractName:  dest.ContractRef,
-		ContractAddr:  contract.Address,
-		Method:        methodConfig,
-		Condition:     dest.Condition,
-		TimeThreshold: dest.TimeThreshold,
+		ChainID:        contract.ChainID,
+		ChainName:      chain.Name,
+		ContractName:   dest.ContractRef,
+		ContractAddr:   contract.Address,
+		Method:         methodConfig,
+		Condition:      dest.Condition,
+		TimeThreshold:  dest.TimeThreshold,
+		PriceDeviation: dest.PriceDeviation,
 	}, nil
 }
 
 // ResolvedDestination represents a router destination with all references resolved
 type ResolvedDestination struct {
 	ChainID       int64
-	ChainName     string
-	ContractName  string
-	ContractAddr  string
-	Method        DestinationMethodConfig
-	Condition     string
-	TimeThreshold Duration
+	ChainName      string
+	ContractName   string
+	ContractAddr   string
+	Method         DestinationMethodConfig
+	Condition      string
+	TimeThreshold  Duration
+	PriceDeviation string // e.g., "0.5%" or "1.0%"
 }
 
 // GetEnabledChains returns only enabled chain configurations

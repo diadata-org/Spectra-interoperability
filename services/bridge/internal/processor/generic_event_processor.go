@@ -289,11 +289,11 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 
 			// Process filtered destinations for this router
 			for _, dest := range filteredDestinations {
-				// Update destination time to prevent race conditions
-				if dest.TimeThreshold.Duration() > 0 {
+				// Update destination time and price to prevent race conditions
+				if dest.TimeThreshold.Duration() > 0 || dest.PriceDeviation != "" {
 					symbol := router.GetSymbolFromData(extractedData)
-					router.UpdateDestinationTime(dest, symbol)
-					logger.Debugf("Pre-emptively updated destination time for %d-%s-%s to prevent race conditions",
+					router.UpdateDestinationTime(dest, symbol, extractedData)
+					logger.Debugf("Pre-emptively updated destination time/price for %d-%s-%s to prevent race conditions",
 						dest.ChainID, dest.Contract, symbol)
 				}
 				destConfig, exists := gep.destinations[dest.ChainID]

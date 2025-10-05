@@ -38,7 +38,6 @@ type Bridge struct {
 	legacyDestinations map[int64]*config.DestinationConfig // temporary for API compatibility
 	db                 *database.DB
 	readClient         rpc.EthClient
-	registryClient     *contracts.RegistryClient
 	writeClients       map[int64]*WriteClient
 
 	// Channels for communication
@@ -95,34 +94,9 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 	logger.Infof("Connected to source chain %s via %s", sourceConfig.Name, readClient.GetCurrentRPCURL())
 
-	// Create registry client
-	// For new config, registry address would come from event definitions
-	// Extract registry address from event definitions
-	registryAddress := ""
-	for _, eventDef := range modularCfg.Events {
-		if eventDef.Contract != "" {
-			// Use the contract address from the IntentRegistered event
-			registryAddress = eventDef.Contract
-			break
-		}
-	}
-
-	if registryAddress == "" {
-		return nil, fmt.Errorf("no registry contract address found in event definitions")
-	}
-
-	// Get the underlying ethclient for contracts
 	ethClient, err := readClient.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get eth client: %w", err)
-	}
-
-	registryClient, err := contracts.NewRegistryClient(
-		ethClient,
-		common.HexToAddress(registryAddress),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create registry client: %w", err)
 	}
 
 	// Create destination clients
@@ -240,7 +214,6 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		legacyDestinations: legacyDestinations,
 		db:                 db,
 		readClient:         readClient,
-		registryClient:     registryClient,
 		writeClients:       destClients,
 		updateChan:         make(chan *bridgetypes.UpdateRequest, 1000),
 		eventChan:          eventChan,

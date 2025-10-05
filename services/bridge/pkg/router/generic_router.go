@@ -26,7 +26,8 @@ type GenericRouter struct {
 
 	mu               sync.RWMutex
 	stats            GenericRouterStats
-	destinationTimes map[string]time.Time // Tracks last update time for each destination (key: "chainID-contract-symbol")
+	destinationTimes map[string]time.Time   // Tracks last update time for each destination (key: "chainID-contract-symbol")
+	destinationPrices map[string]string     // Tracks last price for each destination (key: "chainID-contract-symbol", value: price as string)
 }
 
 // GenericRouterStats tracks router statistics
@@ -45,9 +46,10 @@ func NewGenericRouter(cfg *config.RouterConfig) (*GenericRouter, error) {
 	}
 
 	router := &GenericRouter{
-		config:           cfg,
-		triggerEvents:    triggerEvents,
-		destinationTimes: make(map[string]time.Time),
+		config:            cfg,
+		triggerEvents:     triggerEvents,
+		destinationTimes:  make(map[string]time.Time),
+		destinationPrices: make(map[string]string),
 	}
 
 	if cfg.PrivateKey != "" {
@@ -308,6 +310,17 @@ func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config
 				dest.Contract, gr.GetSymbolFromData(data))
 		}
 
+		// Check price deviation if configured
+		if dest.PriceDeviation != "" {
+			if !gr.checkPriceDeviation(dest, data) {
+				logger.Debugf("Price deviation threshold not met for destination %s (symbol: %s), skipping",
+					dest.Contract, gr.GetSymbolFromData(data))
+				continue
+			}
+			logger.Debugf("Price deviation threshold met for destination %s (symbol: %s), proceeding",
+				dest.Contract, gr.GetSymbolFromData(data))
+		}
+
 		filteredDestinations = append(filteredDestinations, dest)
 	}
 
@@ -350,6 +363,68 @@ func (gr *GenericRouter) checkTimeThreshold(dest config.RouterDestination, data 
 	return thresholdMet
 }
 
+// checkPriceDeviation checks if price has changed by the configured deviation percentage
+func (gr *GenericRouter) checkPriceDeviation(dest config.RouterDestination, data *config.ExtractedData) bool {
+	symbol := gr.GetSymbolFromData(data)
+	currentPrice := gr.GetPriceFromData(data)
+
+	if currentPrice == "" {
+		logger.Debugf("No price found in data for symbol %s, allowing update", symbol)
+		return true // Allow if we can't determine price
+	}
+
+	// Create unique key for this destination + symbol
+	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
+
+	gr.mu.RLock()
+	lastPrice, exists := gr.destinationPrices[destKey]
+	gr.mu.RUnlock()
+
+	if !exists {
+		// First time, allow it
+		logger.Debugf("No previous price for %s, allowing update", destKey)
+		return true
+	}
+
+	// Parse deviation percentage (e.g., "0.5%" -> 0.5)
+	deviationStr := strings.TrimSuffix(dest.PriceDeviation, "%")
+	deviationPercent, err := strconv.ParseFloat(deviationStr, 64)
+	if err != nil {
+		logger.Warnf("Invalid price_deviation format '%s': %v, allowing update", dest.PriceDeviation, err)
+		return true
+	}
+
+	// Calculate percentage change
+	percentChange := gr.calculatePriceChangePercent(lastPrice, currentPrice)
+	deviationMet := percentChange >= deviationPercent
+
+	if deviationMet {
+		logger.Debugf("Price deviation met for %s: %.2f%% >= %.2f%% (last: %s, current: %s)",
+			destKey, percentChange, deviationPercent, lastPrice, currentPrice)
+	} else {
+		logger.Debugf("Price deviation not met for %s: %.2f%% < %.2f%% (last: %s, current: %s)",
+			destKey, percentChange, deviationPercent, lastPrice, currentPrice)
+	}
+
+	return deviationMet
+}
+
+// calculatePriceChangePercent calculates the percentage change between two price strings
+func (gr *GenericRouter) calculatePriceChangePercent(oldPriceStr, newPriceStr string) float64 {
+	oldPrice, err1 := strconv.ParseFloat(oldPriceStr, 64)
+	newPrice, err2 := strconv.ParseFloat(newPriceStr, 64)
+
+	if err1 != nil || err2 != nil || oldPrice == 0 {
+		return 0
+	}
+
+	change := ((newPrice - oldPrice) / oldPrice) * 100
+	if change < 0 {
+		change = -change // Return absolute value
+	}
+	return change
+}
+
 // Helper to get map keys for debugging
 func getKeys(m map[string]interface{}) []string {
 	keys := make([]string, 0, len(m))
@@ -357,6 +432,37 @@ func getKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// GetPriceFromData extracts price from enriched data
+func (gr *GenericRouter) GetPriceFromData(data *config.ExtractedData) string {
+	if data == nil || data.Enrichment == nil {
+		return ""
+	}
+
+	// Try to extract from fullIntent structure
+	if fullIntentRaw, ok := data.Enrichment["fullIntent"]; ok {
+		// Try as struct with reflection
+		if intentValue := reflect.ValueOf(fullIntentRaw); intentValue.IsValid() {
+			if intentValue.Kind() == reflect.Ptr && !intentValue.IsNil() {
+				intentValue = intentValue.Elem()
+			}
+			if intentValue.Kind() == reflect.Struct {
+				priceField := intentValue.FieldByName("Price")
+				if priceField.IsValid() {
+					// Convert big.Int to string if that's the type
+					return fmt.Sprintf("%v", priceField.Interface())
+				}
+			}
+		}
+	}
+
+	// Try direct price key from enrichment
+	if price, ok := data.Enrichment["price"]; ok {
+		return fmt.Sprintf("%v", price)
+	}
+
+	return ""
 }
 
 // GetSymbolFromData extracts symbol from enriched data
@@ -400,14 +506,24 @@ func (gr *GenericRouter) GetSymbolFromData(data *config.ExtractedData) string {
 }
 
 // UpdateDestinationTime updates the last update time for a destination
-func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, symbol string) {
+func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, symbol string, data ...*config.ExtractedData) {
 	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
 
 	gr.mu.Lock()
 	gr.destinationTimes[destKey] = time.Now()
-	gr.mu.Unlock()
 
-	logger.Debugf("Updated destination time for %s", destKey)
+	// Also update price if data is provided
+	if len(data) > 0 && data[0] != nil {
+		if price := gr.GetPriceFromData(data[0]); price != "" {
+			gr.destinationPrices[destKey] = price
+			logger.Debugf("Updated destination time and price for %s (price: %s)", destKey, price)
+		} else {
+			logger.Debugf("Updated destination time for %s (no price available)", destKey)
+		}
+	} else {
+		logger.Debugf("Updated destination time for %s", destKey)
+	}
+	gr.mu.Unlock()
 }
 
 // GetPrivateKey returns the router's private key

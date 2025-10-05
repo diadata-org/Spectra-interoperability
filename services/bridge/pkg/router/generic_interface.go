@@ -17,6 +17,6 @@ type GenericRouterInterface interface {
 	ProcessingConfig() *config.ProcessingConfig
 	OnRouted(eventName string, data *config.ExtractedData)
 	GetStats() GenericRouterStats
-	UpdateDestinationTime(dest config.RouterDestination, symbol string)
+	UpdateDestinationTime(dest config.RouterDestination, symbol string, data ...*config.ExtractedData)
 	GetSymbolFromData(data *config.ExtractedData) string
 }
