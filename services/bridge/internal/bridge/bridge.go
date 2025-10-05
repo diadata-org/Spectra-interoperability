@@ -28,6 +28,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/processor"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/utils"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/worker"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
 )
 
@@ -56,7 +57,7 @@ type Bridge struct {
 	wg sync.WaitGroup
 
 	// Worker management
-	workerPool *WorkerPool
+	workerPool *worker.WorkerPool
 
 	// Router system
 	routerRegistry *router.GenericRegistry
@@ -120,7 +121,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 
 	// Create worker pool with configured size
-	workerPool := NewWorkerPool(cfgService.GetInfrastructure().WorkerPool.MaxWorkers)
+	workerPool := worker.NewWorkerPool(cfgService.GetInfrastructure().WorkerPool.MaxWorkers)
 
 	// Create router registry and load routers
 	routerRegistry := router.NewGenericRegistry()
@@ -467,7 +468,7 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 				taskID = fmt.Sprintf("unknown-%d-%d", updateReq.DestinationChain.ChainID, time.Now().Unix())
 			}
 
-			b.workerPool.Submit(&WorkerTask{
+			b.workerPool.Submit(&worker.WorkerTask{
 				ID:      taskID,
 				Request: updateReq,
 				Handler: b.handleUpdateRequest,
@@ -477,7 +478,7 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 }
 
 // handleUpdateRequest handles a single update request
-func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) error {
+func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTask) error {
 	updateReq := task.Request
 	destClient := b.writeClients[updateReq.DestinationChain.ChainID]
 	if destClient == nil {
