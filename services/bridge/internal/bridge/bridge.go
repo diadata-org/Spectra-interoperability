@@ -272,6 +272,17 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 
 // NewWriteClient creates a new write client for destination operations
 func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.ContractConfig, privateKey string) (*WriteClient, error) {
+	// Validate inputs
+	if chainConfig == nil {
+		return nil, fmt.Errorf("chain config cannot be nil")
+	}
+	if contractConfigs == nil {
+		return nil, fmt.Errorf("contract configs cannot be nil")
+	}
+	if privateKey == "" {
+		return nil, fmt.Errorf("private key cannot be empty")
+	}
+
 	// Connect to destination chain with multiple RPC support
 	client, err := rpc.NewMultiClient(chainConfig.RPCURLs)
 	if err != nil {
