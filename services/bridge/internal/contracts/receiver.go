@@ -430,7 +430,6 @@ func (r *ReceiverClient) GetAuth() *bind.TransactOpts {
 	return r.auth
 }
 
-
 // intentToContractStruct converts a bridgeTypes.OracleIntent to the contract struct format
 func (r *ReceiverClient) intentToContractStruct(intent *bridgeTypes.OracleIntent) interface{} {
 	return struct {
