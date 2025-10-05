@@ -37,17 +37,17 @@ type SourceConfig struct {
 	ChainID    int64    `yaml:"chain_id" json:"chain_id"`
 	Name       string   `yaml:"name" json:"name"`
 	RPCURLs    []string `yaml:"rpc_urls" json:"rpc_urls"` // Multiple RPC URLs for failover
-	WsURL      string   `yaml:"ws_url" json:"ws_url"`   // WebSocket URL for event monitoring
+	WsURL      string   `yaml:"ws_url" json:"ws_url"`     // WebSocket URL for event monitoring
 	StartBlock uint64   `yaml:"start_block" json:"start_block"`
 }
 
 // DestinationConfig represents destination chain configuration
 type DestinationConfig struct {
-	ChainID   int64                   `json:"chain_id"`
-	Name      string                  `json:"name"`
-	RPCURLs   []string                `json:"rpc_urls"` // Multiple RPC URLs for failover
-	Enabled   bool                    `json:"enabled"`
-	Contracts []LegacyContractConfig  `json:"contracts"`
+	ChainID   int64                  `json:"chain_id"`
+	Name      string                 `json:"name"`
+	RPCURLs   []string               `json:"rpc_urls"` // Multiple RPC URLs for failover
+	Enabled   bool                   `json:"enabled"`
+	Contracts []LegacyContractConfig `json:"contracts"`
 }
 
 // LegacyContractConfig represents a legacy contract configuration (for compatibility)

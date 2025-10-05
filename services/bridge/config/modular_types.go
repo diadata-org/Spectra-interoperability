@@ -78,10 +78,10 @@ type RouterDestination struct {
 	ContractRef string `yaml:"contract_ref,omitempty" json:"contract_ref,omitempty"`
 
 	// Common fields
-	Method        DestinationMethodConfig `yaml:"method" json:"method"`
-	Condition     string                  `yaml:"condition,omitempty" json:"condition,omitempty"`
-	TimeThreshold Duration                `yaml:"time_threshold,omitempty" json:"time_threshold,omitempty"`
-	PriceDeviation string                 `yaml:"price_deviation,omitempty" json:"price_deviation,omitempty"` // e.g., "0.5%" or "1.0%"
+	Method         DestinationMethodConfig `yaml:"method" json:"method"`
+	Condition      string                  `yaml:"condition,omitempty" json:"condition,omitempty"`
+	TimeThreshold  Duration                `yaml:"time_threshold,omitempty" json:"time_threshold,omitempty"`
+	PriceDeviation string                  `yaml:"price_deviation,omitempty" json:"price_deviation,omitempty"` // e.g., "0.5%" or "1.0%"
 
 	// Gas configuration (from modular version)
 	GasLimit      uint64  `yaml:"gas_limit,omitempty" json:"gas_limit,omitempty"`
@@ -322,7 +322,7 @@ func (cs *ConfigService) ResolveRouterDestination(dest *RouterDestination) (*Res
 
 // ResolvedDestination represents a router destination with all references resolved
 type ResolvedDestination struct {
-	ChainID       int64
+	ChainID        int64
 	ChainName      string
 	ContractName   string
 	ContractAddr   string

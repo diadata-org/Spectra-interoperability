@@ -174,7 +174,7 @@ func (ml *ModularLoader) loadEvents(path string, config *ModularConfig) error {
 
 func (ml *ModularLoader) loadRouters(routerPaths []string, config *ModularConfig) error {
 	for _, routerPath := range routerPaths {
-			if strings.Contains(routerPath, "*") {
+		if strings.Contains(routerPath, "*") {
 			matches, err := filepath.Glob(routerPath)
 			if err != nil {
 				return fmt.Errorf("failed to expand router path pattern %s: %w", routerPath, err)
@@ -331,4 +331,3 @@ func LoadConfig(configPath string) (*ModularConfig, error) {
 
 	return &config, nil
 }
-

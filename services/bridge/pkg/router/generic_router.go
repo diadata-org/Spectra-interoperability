@@ -24,10 +24,10 @@ type GenericRouter struct {
 	privateKey    *ecdsa.PrivateKey
 	address       common.Address
 
-	mu               sync.RWMutex
-	stats            GenericRouterStats
-	destinationTimes map[string]time.Time   // Tracks last update time for each destination (key: "chainID-contract-symbol")
-	destinationPrices map[string]string     // Tracks last price for each destination (key: "chainID-contract-symbol", value: price as string)
+	mu                sync.RWMutex
+	stats             GenericRouterStats
+	destinationTimes  map[string]time.Time // Tracks last update time for each destination (key: "chainID-contract-symbol")
+	destinationPrices map[string]string    // Tracks last price for each destination (key: "chainID-contract-symbol", value: price as string)
 }
 
 // GenericRouterStats tracks router statistics
