@@ -139,7 +139,8 @@ func (gr *GenericRouter) evaluateCondition(condition config.TriggerCondition, da
 	case "in":
 		return compareIn(value, condition.Value)
 	default:
-		logger.Warnf("Unknown operator: %s", condition.Operator)
+		logger.Warnf("[Router %s] Unknown operator '%s' for condition: field=%s, value=%v (check YAML config - operators like != must be quoted)",
+			gr.config.ID, condition.Operator, condition.Field, condition.Value)
 		return false
 	}
 }
@@ -349,10 +350,18 @@ func (gr *GenericRouter) checkTimeThreshold(dest config.RouterDestination, data 
 	return thresholdMet
 }
 
+// Helper to get map keys for debugging
+func getKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 // GetSymbolFromData extracts symbol from enriched data
 func (gr *GenericRouter) GetSymbolFromData(data *config.ExtractedData) string {
 	if data == nil || data.Enrichment == nil {
-		logger.Debugf("GetSymbolFromData called with nil data or enrichment, using fallback")
 		return "unknown"
 	}
 

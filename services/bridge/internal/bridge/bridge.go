@@ -577,6 +577,20 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 	}
 
 	// Send transaction using router method configuration or fallback to legacy
+	// Extract symbol once for use in all logs - try Intent first, then enrichment data
+	symbol := "unknown"
+	if updateReq.Intent != nil && updateReq.Intent.Symbol != "" {
+		symbol = updateReq.Intent.Symbol
+	} else if updateReq.ExtractedData != nil && updateReq.RouterID != "" {
+		// Try to extract from enrichment data via router
+		if router := b.routerRegistry.GetRouterByID(updateReq.RouterID); router != nil {
+			extracted := router.GetSymbolFromData(updateReq.ExtractedData)
+			if extracted != "" && extracted != "unknown" {
+				symbol = extracted
+			}
+		}
+	}
+
 	var tx *types.Transaction
 	if updateReq.DestinationMethodConfig != nil {
 		// Use router-specified method (e.g., fulfillRandomInt for randomness)
@@ -585,13 +599,14 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 			gasLimit = uint64(updateReq.DestinationMethodConfig.GasLimit)
 		}
 
-		logger.Infof("Sending transaction for %s on chain %d using method %s with gas limit %d",
-			identifier, updateReq.DestinationChain.ChainID, updateReq.DestinationMethodConfig.Name, gasLimit)
+		logger.Infof("Sending transaction for %s on chain %d using method %s with gas limit %d, router=%s, symbol=%s",
+			identifier, updateReq.DestinationChain.ChainID, updateReq.DestinationMethodConfig.Name, gasLimit, updateReq.RouterID, symbol)
 
 		tx, err = b.callRouterMethod(ctx, destClient, updateReq, gasPrice, gasLimit)
 	} else {
 		// Fallback to legacy HandleIntentUpdate for oracle intents
-		logger.Infof("Sending transaction for %s on chain %d with gas limit 300000 (legacy)", identifier, updateReq.DestinationChain.ChainID)
+		logger.Infof("Sending transaction for %s on chain %d with gas limit 300000 (legacy), router=%s, symbol=%s",
+			identifier, updateReq.DestinationChain.ChainID, updateReq.RouterID, symbol)
 		tx, err = destClient.receiverClient.HandleIntentUpdate(
 			ctx,
 			updateReq.Intent,
@@ -616,7 +631,8 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		return fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	logger.Infof("Transaction sent: %s for %s on chain %d", tx.Hash().Hex(), identifier, updateReq.DestinationChain.ChainID)
+	logger.Infof("Transaction sent: %s for %s on chain %d, router=%s, symbol=%s",
+		tx.Hash().Hex(), identifier, updateReq.DestinationChain.ChainID, updateReq.RouterID, symbol)
 
 	// Add a defer to catch any panics
 	defer func() {
@@ -637,7 +653,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		logger.Debugf("Intent submission recorded for tx %s", tx.Hash().Hex())
 	}
 
-	logger.Infof("About to wait for receipt for tx %s", tx.Hash().Hex())
+	logger.Infof("About to wait for receipt for tx %s, router=%s, symbol=%s", tx.Hash().Hex(), updateReq.RouterID, symbol)
 
 	// Wait for transaction receipt
 	receipt, err := b.waitForReceipt(ctx, destClient.client, tx.Hash())
@@ -652,7 +668,19 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		if b.metricsTracker != nil && updateReq.Intent != nil {
 			b.metricsTracker.RecordIntentFailed(updateReq.Intent, "confirmation", "transaction_reverted")
 		}
-		return fmt.Errorf("transaction failed: %s", tx.Hash().Hex())
+
+		// Enhanced error logging for failed transactions
+		symbol := "unknown"
+		if updateReq.Intent != nil {
+			symbol = updateReq.Intent.Symbol
+		}
+		logger.Errorf("Transaction REVERTED: hash=%s, symbol=%s, gas_used=%d, chain=%d - Likely causes: InvalidSignature, insufficient gas, or contract revert",
+			tx.Hash().Hex(), symbol, receipt.GasUsed, updateReq.DestinationChain.ChainID)
+		logger.Debugf("Failed transaction details: router=%s, method=%s, contract=%s",
+			updateReq.RouterID, updateReq.Contract.Address, updateReq.Contract.Address)
+
+		return fmt.Errorf("transaction reverted (status: 0): hash=%s, symbol=%s, gas=%d - check contract logs or simulate with cast",
+			tx.Hash().Hex(), symbol, receipt.GasUsed)
 	}
 
 	// Track confirmation
@@ -665,8 +693,8 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *WorkerTask) erro
 		destClient.updateLastUpdate(updateReq.Intent.Symbol)
 	}
 
-	logger.Infof("Successfully updated %s on chain %d, gas used: %d",
-		identifier, updateReq.DestinationChain.ChainID, receipt.GasUsed)
+	logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d, router=%s, symbol=%s",
+		tx.Hash().Hex(), receipt.Status, receipt.GasUsed, updateReq.RouterID, symbol)
 
 	// Call router's OnRouted callback to update time tracking
 	if updateReq.RouterID != "" {

@@ -120,9 +120,13 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 
 	select {
 	case wp.taskQueue <- task:
-		logger.Debugf("Task %s queued", task.ID)
+		logger.Debugf("Task %s queued (queue: %d/%d)", task.ID, len(wp.taskQueue), cap(wp.taskQueue))
 	default:
-		logger.Warnf("Task queue full, dropping task %s", task.ID)
+		queueLen := len(wp.taskQueue)
+		queueCap := cap(wp.taskQueue)
+		logger.Errorf("CRITICAL: Task queue full (%d/%d), DROPPING task %s for symbol %s - consider increasing queue size or worker count",
+			queueLen, queueCap, task.ID, task.Request.Intent.Symbol)
+		// TODO: Add metric for dropped tasks
 	}
 }
 

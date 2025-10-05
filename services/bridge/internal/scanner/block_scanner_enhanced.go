@@ -628,7 +628,14 @@ func (bs *EnhancedBlockScanner) logProgress() {
 	}
 
 	logger.Infof("  - Total blocks scanned: %d", bs.totalBlocksScanned)
-	logger.Infof("  - Total events found: %d", bs.forwardEventsFound+bs.backwardEventsFound+bs.headEventsFound)
+	totalEvents := bs.forwardEventsFound + bs.backwardEventsFound + bs.headEventsFound
+	logger.Infof("  - Total events found: %d (Forward: %d, Backward: %d, Head: %d, WebSocket: active)",
+		totalEvents, bs.forwardEventsFound, bs.backwardEventsFound, bs.headEventsFound)
+
+	// Add health status
+	if time.Since(bs.lastHeadUpdate) > 30*time.Second {
+		logger.Warnf("  WARNING: Head tracker hasn't updated in %s - may be stuck", time.Since(bs.lastHeadUpdate).Round(time.Second))
+	}
 }
 
 // gapDetectionLoop periodically checks for gaps in processed blocks

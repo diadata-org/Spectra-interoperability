@@ -287,19 +287,15 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				continue
 			}
 
-			// Immediately update destination times to prevent race conditions
-			// This ensures subsequent events for the same symbol are properly blocked
-			symbol := router.GetSymbolFromData(extractedData)
+			// Process filtered destinations for this router
 			for _, dest := range filteredDestinations {
+				// Update destination time to prevent race conditions
 				if dest.TimeThreshold.Duration() > 0 {
+					symbol := router.GetSymbolFromData(extractedData)
 					router.UpdateDestinationTime(dest, symbol)
 					logger.Debugf("Pre-emptively updated destination time for %d-%s-%s to prevent race conditions",
 						dest.ChainID, dest.Contract, symbol)
 				}
-			}
-
-			// Process filtered destinations for this router
-			for _, dest := range filteredDestinations {
 				destConfig, exists := gep.destinations[dest.ChainID]
 				if !exists || destConfig == nil {
 					logger.Warnf("Destination config not found for chain %d", dest.ChainID)
@@ -346,12 +342,15 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				select {
 				case gep.updateChan <- updateReq:
 					routersUsed++
-					logger.Infof("Queued update for event %s via router %s to chain %d contract %s",
-						event.EventName, result.RouterID, dest.ChainID, dest.Contract)
+					symbol := router.GetSymbolFromData(extractedData)
+					logger.Infof("Queued update: event=%s, router=%s, symbol=%s, chain=%d, contract=%s",
+						event.EventName, result.RouterID, symbol, dest.ChainID, dest.Contract)
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
-					logger.Warnf("Update channel full, dropping request for router %s", result.RouterID)
+					symbol := router.GetSymbolFromData(extractedData)
+					logger.Errorf("CRITICAL: Update channel full (%d/%d), DROPPING request for router %s, symbol %s",
+						len(gep.updateChan), cap(gep.updateChan), result.RouterID, symbol)
 				}
 			}
 		} else {
