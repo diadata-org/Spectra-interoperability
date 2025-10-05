@@ -80,31 +80,6 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	return nonce, nil
 }
 
-// ReturnNonce returns a nonce that failed to send
-func (nm *NonceManager) ReturnNonce(nonce uint64) {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-
-	delete(nm.pendingNonces, nonce)
-
-	// If this was the current nonce, decrement
-	if nonce+1 == nm.currentNonce && len(nm.pendingNonces) == 0 {
-		nm.currentNonce = nonce
-	}
-
-	logger.Debugf("NonceManager: Returned nonce %d for address %s", nonce, nm.address.Hex())
-}
-
-// ConfirmNonce marks a nonce as confirmed
-func (nm *NonceManager) ConfirmNonce(nonce uint64) {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-
-	delete(nm.pendingNonces, nonce)
-	delete(nm.retryCount, nonce)
-	logger.Debugf("NonceManager: Confirmed nonce %d for address %s", nonce, nm.address.Hex())
-}
-
 // GetRetryCount returns the retry count for a nonce
 func (nm *NonceManager) GetRetryCount(nonce uint64) int {
 	nm.mu.Lock()

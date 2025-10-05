@@ -242,20 +242,9 @@ func NewConfigService(config *ModularConfig) *ConfigService {
 	}
 }
 
-// GetChainConfig returns chain configuration by chain ID
-func (cs *ConfigService) GetChainConfig(chainID int64) *ChainConfig {
-	chainIDStr := fmt.Sprintf("%d", chainID)
-	return cs.config.Chains[chainIDStr]
-}
-
 // GetContractConfig returns contract configuration by name
 func (cs *ConfigService) GetContractConfig(name string) *ContractConfig {
 	return cs.config.Contracts[name]
-}
-
-// GetRouterConfig returns router configuration by ID
-func (cs *ConfigService) GetRouterConfig(routerID string) *RouterConfig {
-	return cs.config.Routers[routerID]
 }
 
 // GetInfrastructure returns infrastructure configuration
@@ -263,73 +252,9 @@ func (cs *ConfigService) GetInfrastructure() *InfrastructureConfig {
 	return cs.config.Infrastructure
 }
 
-// GetEventDefinition returns event definition by name
-func (cs *ConfigService) GetEventDefinition(name string) *EventDefinition {
-	return cs.config.Events[name]
-}
-
 // GetEventDefinitions returns all event definitions
 func (cs *ConfigService) GetEventDefinitions() map[string]*EventDefinition {
 	return cs.config.Events
-}
-
-// ResolveRouterDestination resolves a router destination reference to actual contract details
-func (cs *ConfigService) ResolveRouterDestination(dest *RouterDestination) (*ResolvedDestination, error) {
-	contract := cs.GetContractConfig(dest.ContractRef)
-	if contract == nil {
-		return nil, fmt.Errorf("contract reference %s not found", dest.ContractRef)
-	}
-
-	chain := cs.GetChainConfig(contract.ChainID)
-	if chain == nil {
-		return nil, fmt.Errorf("chain %d not found for contract %s", contract.ChainID, dest.ContractRef)
-	}
-
-	methodConfig := dest.Method
-
-	// Apply gas settings inheritance: router override > contract default > chain default
-	if methodConfig.GasLimit == 0 {
-		if dest.GasLimit > 0 {
-			methodConfig.GasLimit = dest.GasLimit
-		} else if contract.GasLimit > 0 {
-			methodConfig.GasLimit = contract.GasLimit
-		} else if chain.DefaultGasLimit > 0 {
-			methodConfig.GasLimit = chain.DefaultGasLimit
-		}
-	}
-
-	if methodConfig.GasMultiplier == 0 {
-		if dest.GasMultiplier > 0 {
-			methodConfig.GasMultiplier = dest.GasMultiplier
-		} else if contract.GasMultiplier > 0 {
-			methodConfig.GasMultiplier = contract.GasMultiplier
-		} else if chain.GasMultiplier > 0 {
-			methodConfig.GasMultiplier = chain.GasMultiplier
-		}
-	}
-
-	return &ResolvedDestination{
-		ChainID:        contract.ChainID,
-		ChainName:      chain.Name,
-		ContractName:   dest.ContractRef,
-		ContractAddr:   contract.Address,
-		Method:         methodConfig,
-		Condition:      dest.Condition,
-		TimeThreshold:  dest.TimeThreshold,
-		PriceDeviation: dest.PriceDeviation,
-	}, nil
-}
-
-// ResolvedDestination represents a router destination with all references resolved
-type ResolvedDestination struct {
-	ChainID        int64
-	ChainName      string
-	ContractName   string
-	ContractAddr   string
-	Method         DestinationMethodConfig
-	Condition      string
-	TimeThreshold  Duration
-	PriceDeviation string // e.g., "0.5%" or "1.0%"
 }
 
 // GetEnabledChains returns only enabled chain configurations

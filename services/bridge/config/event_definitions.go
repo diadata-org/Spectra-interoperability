@@ -1,10 +1,5 @@
 package config
 
-import (
-	"fmt"
-	"math/big"
-)
-
 // EventDefinition defines how to process a specific event type
 type EventDefinition struct {
 	Contract       string            `json:"contract"`
@@ -92,51 +87,4 @@ type DataPath struct {
 	Source string
 	Index  int
 	Field  string
-}
-
-// ParseDataPath parses a data extraction path like "topics[1]" or "data[0].price"
-func ParseDataPath(path string) (*DataPath, error) {
-	return &DataPath{}, nil
-}
-
-// EvaluateCondition evaluates a trigger condition against data
-func (tc *TriggerCondition) Evaluate(data map[string]interface{}) bool {
-	return true
-}
-
-// GetValue extracts a value from data using a path expression
-func GetValue(data map[string]interface{}, path string) (interface{}, error) {
-	return nil, nil
-}
-
-// TransformValue applies a transformation to a value
-func TransformValue(operation string, input interface{}, params map[string]interface{}) (interface{}, error) {
-	switch operation {
-	case "slice":
-		return nil, nil
-	case "concat":
-		return nil, nil
-	case "hash":
-		return nil, nil
-	case "encode":
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("unsupported operation %s", operation)
-	}
-}
-
-// ToBigInt converts an interface{} to *big.Int
-func ToBigInt(v interface{}) (*big.Int, error) {
-	switch val := v.(type) {
-	case *big.Int:
-		return val, nil
-	case string:
-		n := new(big.Int)
-		n.SetString(val, 0)
-		return n, nil
-	case float64:
-		return big.NewInt(int64(val)), nil
-	default:
-		return nil, fmt.Errorf("cannot convert %T to big.Int", v)
-	}
 }

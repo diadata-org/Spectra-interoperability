@@ -27,7 +27,6 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/processor"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/utils"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/worker"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
 )
@@ -1270,21 +1269,6 @@ func (b *Bridge) initializeChainStats() {
 	}
 }
 
-// GetRouterRegistry returns the router registry
-func (b *Bridge) GetRouterRegistry() *router.GenericRegistry {
-	return b.routerRegistry
-}
-
-// updateStats updates bridge statistics
-func (b *Bridge) updateStats() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	b.stats.LastProcessedBlock = b.lastProcessedBlock
-	b.stats.Uptime = time.Since(b.stats.StartTime)
-	b.stats.UptimeFormatted = utils.FormatDuration(b.stats.Uptime)
-}
-
 // healthCheck performs periodic health checks
 func (b *Bridge) healthCheck(ctx context.Context) {
 	// Use HealthCheck interval from config
@@ -1372,7 +1356,7 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 			API:              b.configService.GetInfrastructure().API,
 			Destinations:     b.legacyDestinations,
 		}
-		apiServer := api.NewServer(legacyConfig, b.db, nil, metricsCollector, b.routerRegistry)
+		apiServer := api.NewServer(legacyConfig, b.db, metricsCollector, b.routerRegistry)
 
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
@@ -1430,20 +1414,3 @@ func (b *Bridge) handleErrors(ctx context.Context) {
 	}
 }
 
-// GetStats returns current bridge statistics
-func (b *Bridge) GetStats() *bridgetypes.BridgeStats {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	// Create a copy of stats and update uptime
-	stats := *b.stats
-	stats.Uptime = time.Since(b.stats.StartTime)
-	stats.UptimeFormatted = utils.FormatDuration(stats.Uptime)
-
-	// Add scanner stats if available
-	if b.blockScanner != nil {
-		stats.ScannerStats = b.blockScanner.GetStats()
-	}
-
-	return &stats
-}

@@ -12,7 +12,6 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/health"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 )
 
@@ -26,7 +25,6 @@ type Server struct {
 	config         *config.APIConfig
 	cfg            *config.Config // Full config for failover handler
 	db             *database.DB
-	healthMonitor  *health.HealthMonitor
 	metrics        *metrics.Collector
 	routerRegistry interface{} // Will be *router.Registry when available
 
@@ -39,7 +37,6 @@ type Server struct {
 func NewServer(
 	cfg *config.Config,
 	db *database.DB,
-	healthMonitor *health.HealthMonitor,
 	metricsCollector *metrics.Collector,
 	routerRegistry interface{}, // Pass as interface{} to avoid import cycle
 ) *Server {
@@ -47,7 +44,6 @@ func NewServer(
 		config:         &cfg.API,
 		cfg:            cfg,
 		db:             db,
-		healthMonitor:  healthMonitor,
 		metrics:        metricsCollector,
 		routerRegistry: routerRegistry,
 		router:         mux.NewRouter(),
@@ -110,16 +106,6 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 
 	return nil
-}
-
-// Stop gracefully stops the API server
-func (s *Server) Stop() error {
-	logger.Info("Stopping API server")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	return s.httpServer.Shutdown(ctx)
 }
 
 // GetFailoverHandler returns the failover handler instance
@@ -189,16 +175,10 @@ func (s *Server) setupRoutes() {
 // Health check handlers
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	health := s.healthMonitor.IsHealthy()
-
 	response := map[string]interface{}{
 		"status":    "ok",
-		"healthy":   health,
+		"healthy":   true,
 		"timestamp": time.Now().UTC(),
-	}
-
-	if !health {
-		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 
 	s.writeJSON(w, response)
@@ -206,15 +186,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	// Check if all components are ready
-	status := s.healthMonitor.GetStatus()
 	ready := true
-
-	for _, component := range status {
-		if !component.Healthy {
-			ready = false
-			break
-		}
-	}
 
 	if ready {
 		w.WriteHeader(http.StatusOK)
@@ -234,9 +206,6 @@ func (s *Server) handleLiveness(w http.ResponseWriter, r *http.Request) {
 // Status handlers
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	// Get overall system status
-	componentStatus := s.healthMonitor.GetStatus()
-
 	// Get basic statistics
 	stats, err := s.getSystemStats()
 	if err != nil {
@@ -248,7 +217,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"status":     "operational",
 		"version":    Version,
 		"uptime":     s.getUptime(),
-		"components": componentStatus,
 		"statistics": stats,
 	}
 
@@ -256,7 +224,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleComponentStatus(w http.ResponseWriter, r *http.Request) {
-	status := s.healthMonitor.GetStatus()
+	status := map[string]interface{}{"status": "ok"}
 	s.writeJSON(w, status)
 }
 

@@ -374,99 +374,6 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 	return signedTx, nil
 }
 
-// HandleBatchIntentUpdates sends multiple intent updates in a single transaction
-func (r *ReceiverClient) HandleBatchIntentUpdates(ctx context.Context, intents []*bridgeTypes.OracleIntent, gasLimit uint64, gasPrice *big.Int) (*types.Transaction, error) {
-	// Set gas parameters
-	r.auth.GasLimit = gasLimit
-	r.auth.GasPrice = gasPrice
-	r.auth.Context = ctx
-
-	// Convert intents to contract structs
-	contractIntents := make([]interface{}, len(intents))
-	symbols := make([]string, len(intents))
-	for i, intent := range intents {
-		contractIntents[i] = r.intentToContractStruct(intent)
-		symbols[i] = intent.Symbol
-	}
-
-	// Pack the intent data
-	input, err := r.abi.Pack("handleBatchIntentUpdates", contractIntents)
-	if err != nil {
-		logger.Errorf("Failed to pack batch intent data for symbols %v: %v", symbols, err)
-		return nil, err
-	}
-
-	// Simulate the transaction first to check for reverts
-	callMsg := ethereum.CallMsg{
-		From:     r.auth.From,
-		To:       &r.address,
-		Gas:      gasLimit,
-		GasPrice: gasPrice,
-		Value:    r.auth.Value,
-		Data:     input,
-	}
-
-	_, err = r.client.CallContract(ctx, callMsg, nil)
-	if err != nil {
-		logger.Errorf("Batch transaction simulation failed for symbols %v: %v", symbols, err)
-		// Try to extract revert reason
-		if revertReason := r.extractRevertReason(ctx, callMsg); revertReason != "" {
-			logger.Errorf("Revert reason for batch %v: %s", symbols, revertReason)
-		}
-		return nil, fmt.Errorf("simulation failed: %w", err)
-	}
-
-	// Log transaction details before sending
-	logger.Infof("Preparing batch transaction for %d intents (symbols: %v): nonce=%d, gas_limit=%d, gas_price=%s, from=%s, to=%s",
-		len(intents), symbols, r.auth.Nonce.Uint64(), gasLimit, gasPrice.String(),
-		r.auth.From.Hex(), r.address.Hex())
-
-	// Get chain ID for transaction
-	chainID, err := r.client.ChainID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	// Create EIP-1559 transaction for better compatibility
-	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   chainID,
-		Nonce:     r.auth.Nonce.Uint64(),
-		GasTipCap: gasPrice, // Use gasPrice as tip
-		GasFeeCap: gasPrice, // Use gasPrice as max fee
-		Gas:       gasLimit,
-		To:        &r.address,
-		Value:     r.auth.Value,
-		Data:      input,
-	})
-
-	// Sign transaction
-	signedTx, err := r.auth.Signer(r.auth.From, tx)
-	if err != nil {
-		logger.Errorf("Failed to sign batch transaction for symbols %v, nonce %d: %v",
-			symbols, r.auth.Nonce.Uint64(), err)
-		return nil, err
-	}
-
-	// Send transaction
-	usedNonce := r.auth.Nonce.Uint64()
-	err = r.client.SendTransaction(ctx, signedTx)
-	if err != nil {
-		logger.Errorf("Failed to send batch transaction for symbols %v, nonce %d, tx_hash %s: %v",
-			symbols, usedNonce, signedTx.Hash().Hex(), err)
-		// Handle the error appropriately
-		r.nonceManager.HandleError(ctx, err, usedNonce)
-		return nil, err
-	}
-
-	logger.Infof("Batch transaction sent successfully for symbols %v: tx_hash=%s, nonce=%d",
-		symbols, signedTx.Hash().Hex(), usedNonce)
-
-	// Confirm the nonce was used successfully
-	r.nonceManager.ConfirmNonce(usedNonce)
-
-	return signedTx, nil
-}
-
 // IsAuthorizedSigner checks if an address is an authorized signer
 func (r *ReceiverClient) IsAuthorizedSigner(ctx context.Context, signer common.Address) (bool, error) {
 	result, err := r.contract.Call(ctx, "isAuthorizedSigner", signer)
@@ -523,10 +430,6 @@ func (r *ReceiverClient) GetAuth() *bind.TransactOpts {
 	return r.auth
 }
 
-// GetFromAddress returns the transaction sender address
-func (r *ReceiverClient) GetFromAddress() common.Address {
-	return r.auth.From
-}
 
 // intentToContractStruct converts a bridgeTypes.OracleIntent to the contract struct format
 func (r *ReceiverClient) intentToContractStruct(intent *bridgeTypes.OracleIntent) interface{} {
