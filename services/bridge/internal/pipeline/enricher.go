@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"reflect"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
 // DataEnricher enriches event data with additional information from view calls
@@ -204,7 +206,20 @@ func (de *DataEnricher) processReturnValues(values []interface{}, mapping map[st
 		if err != nil {
 			return fmt.Errorf("failed to extract return value for %s: %w", fieldName, err)
 		}
-		output[fieldName] = value
+
+		if fieldName == "fullIntent" {
+			logger.Debugf("Converting fullIntent from runtime struct (type: %T) to *types.OracleIntent", value)
+			convertedValue, err := convertRuntimeStructToOracleIntent(value)
+			if err != nil {
+				logger.Warnf("Failed to convert fullIntent to typed struct: %v. Storing raw value.", err)
+				output[fieldName] = value
+			} else {
+				logger.Debugf("Successfully converted fullIntent to *types.OracleIntent")
+				output[fieldName] = convertedValue
+			}
+		} else {
+			output[fieldName] = value
+		}
 	}
 
 	return nil
@@ -320,4 +335,103 @@ func ConvertTypes(value interface{}) (interface{}, error) {
 	default:
 		return value, nil
 	}
+}
+
+// convertRuntimeStructToOracleIntent converts go-ethereum's runtime-generated struct to *types.OracleIntent
+// The go-ethereum ABI unpacker creates a struct at runtime with the correct fields but unknown type.
+// This function uses reflection to copy the fields to our known OracleIntent type.
+func convertRuntimeStructToOracleIntent(value interface{}) (*types.OracleIntent, error) {
+	// Check if already the right type
+	if intent, ok := value.(*types.OracleIntent); ok {
+		return intent, nil
+	}
+
+	val := reflect.ValueOf(value)
+	if !val.IsValid() {
+		return nil, fmt.Errorf("invalid value")
+	}
+
+	// Handle pointer to struct
+	if val.Kind() == reflect.Pointer {
+		if val.IsNil() {
+			return nil, fmt.Errorf("nil pointer")
+		}
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("expected struct, got %v", val.Kind())
+	}
+
+	intent := &types.OracleIntent{}
+
+	// Helper to get field value by name (case-insensitive)
+	getField := func(fieldName string) reflect.Value {
+		typ := val.Type()
+		for i := 0; i < typ.NumField(); i++ {
+			if strings.EqualFold(typ.Field(i).Name, fieldName) {
+				return val.Field(i)
+			}
+		}
+		return reflect.Value{}
+	}
+
+	// Copy string fields
+	if field := getField("IntentType"); field.IsValid() && field.Kind() == reflect.String {
+		intent.IntentType = field.String()
+	}
+	if field := getField("Version"); field.IsValid() && field.Kind() == reflect.String {
+		intent.Version = field.String()
+	}
+	if field := getField("Symbol"); field.IsValid() && field.Kind() == reflect.String {
+		intent.Symbol = field.String()
+	}
+	if field := getField("Source"); field.IsValid() && field.Kind() == reflect.String {
+		intent.Source = field.String()
+	}
+
+	// Copy *big.Int fields
+	if field := getField("ChainId"); field.IsValid() {
+		if bi, ok := field.Interface().(*big.Int); ok && bi != nil {
+			intent.ChainID = bi
+		}
+	}
+	if field := getField("Nonce"); field.IsValid() {
+		if bi, ok := field.Interface().(*big.Int); ok && bi != nil {
+			intent.Nonce = bi
+		}
+	}
+	if field := getField("Expiry"); field.IsValid() {
+		if bi, ok := field.Interface().(*big.Int); ok && bi != nil {
+			intent.Expiry = bi
+		}
+	}
+	if field := getField("Price"); field.IsValid() {
+		if bi, ok := field.Interface().(*big.Int); ok && bi != nil {
+			intent.Price = bi
+		}
+	}
+	if field := getField("Timestamp"); field.IsValid() {
+		if bi, ok := field.Interface().(*big.Int); ok && bi != nil {
+			intent.Timestamp = bi
+		}
+	}
+
+	// Copy signature ([]byte or []uint8)
+	if field := getField("Signature"); field.IsValid() {
+		if field.Kind() == reflect.Slice && field.Type().Elem().Kind() == reflect.Uint8 {
+			signature := make([]byte, field.Len())
+			reflect.Copy(reflect.ValueOf(signature), field)
+			intent.Signature = types.HexBytes(signature)
+		}
+	}
+
+	// Copy signer (common.Address)
+	if field := getField("Signer"); field.IsValid() {
+		if addr, ok := field.Interface().(common.Address); ok {
+			intent.Signer = addr
+		}
+	}
+
+	return intent, nil
 }
