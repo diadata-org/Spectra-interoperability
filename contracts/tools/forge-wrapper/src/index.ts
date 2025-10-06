@@ -11,7 +11,12 @@ import { registerDeploymentsCommand } from "./commands/deployments";
 import { registerVerifyCommand } from "./commands/verify";
 import { registerConfigureCommand } from "./commands/configure";
 import { registerIntentCommands } from "./commands/intents";
-import { getProjectRoot } from "./utils/paths";
+import {
+  getProjectRoot,
+  getDefaultCustomer,
+  getDeploymentsDir,
+  getKeysDir,
+} from "./utils/paths";
 import path from "path";
 import { readFileSync } from "fs";
 
@@ -28,6 +33,8 @@ function loadPackageVersion(): string {
 
 async function main(): Promise<void> {
   const program = new Command();
+
+  logStorageLocations();
   program.name("forge-wrapper").description("Utility CLI wrapping forge and cast").version(loadPackageVersion());
 
   registerDeployCommand(program);
@@ -61,3 +68,18 @@ main().catch((error) => {
   console.error(chalk.red(error?.message ?? error));
   process.exit(1);
 });
+
+function logStorageLocations(): void {
+  const defaultCustomer = getDefaultCustomer();
+  const deploymentsRoot = path.join(getProjectRoot(), "deployments");
+  const keysRoot = path.join(getProjectRoot(), "keys");
+  const defaultDeployments = getDeploymentsDir(defaultCustomer);
+  const defaultKeys = getKeysDir(defaultCustomer);
+
+  // eslint-disable-next-line no-console
+  console.log(
+    chalk.gray(
+      `Storage directories:\n  deployments root: ${deploymentsRoot}\n  keys root        : ${keysRoot}\n  default customer (${defaultCustomer}) deployments: ${defaultDeployments}\n  default customer (${defaultCustomer}) keys        : ${defaultKeys}`
+    )
+  );
+}
