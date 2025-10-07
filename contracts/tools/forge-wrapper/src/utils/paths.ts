@@ -1,11 +1,17 @@
 import path from "path";
+import { existsSync } from "fs";
 import { ensureDir } from "./fs";
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
+const CONFIG_PRIVATE_SUBMODULE = path.join(PROJECT_ROOT, "config-private");
 
 let storageRootOverride: string | undefined;
 let deploymentsRootOverride: string | undefined;
 let keysRootOverride: string | undefined;
+
+function hasSubmodule(): boolean {
+  return existsSync(path.join(CONFIG_PRIVATE_SUBMODULE, ".git"));
+}
 
 function sanitizeSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -37,7 +43,18 @@ function getEnvOverride(envKey: string): string | undefined {
 function resolveStorageRoot(subdir: "deployments" | "keys"): string {
   const envStorageRoot = getEnvOverride("FORGE_WRAPPER_STORAGE_ROOT");
   const baseFromOverride = storageRootOverride ?? envStorageRoot;
-  return baseFromOverride ? path.join(baseFromOverride, subdir) : path.join(PROJECT_ROOT, subdir);
+
+  if (baseFromOverride) {
+    return path.join(baseFromOverride, subdir);
+  }
+
+  // Check submodule first
+  if (hasSubmodule()) {
+    return path.join(CONFIG_PRIVATE_SUBMODULE, subdir);
+  }
+
+  // Fall back to local directories
+  return path.join(PROJECT_ROOT, subdir);
 }
 
 export function getDeploymentsRoot(): string {
@@ -51,6 +68,18 @@ export function getKeysRoot(): string {
 }
 
 export function getNetworksDir(): string {
+  const envNetworksDir = getEnvOverride("FORGE_WRAPPER_NETWORKS_DIR");
+
+  if (envNetworksDir) {
+    return envNetworksDir;
+  }
+
+  // Check submodule first
+  if (hasSubmodule()) {
+    return path.join(CONFIG_PRIVATE_SUBMODULE, "networks");
+  }
+
+  // Fall back to local directory
   return path.join(getProjectRoot(), "networks");
 }
 
