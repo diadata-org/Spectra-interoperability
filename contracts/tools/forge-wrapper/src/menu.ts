@@ -28,7 +28,7 @@ import {
   ContractFunctionFragment,
 } from "./commands/configure";
 import { registerOracleIntent, submitIntentToReceiver, compareDomainSeparators } from "./commands/intents";
-import { recordDeployment } from "./deployments";
+import { getDeployment, recordDeployment } from "./deployments";
 import { buildPresetChoices, getPreset } from "./utils/contracts";
 import { getTemplate } from "./utils/templates";
 import { loadDeployments } from "./deployments";
@@ -1467,8 +1467,49 @@ async function handleWriteFunction(args: {
     // ignore lookup failures; alias already validated earlier
   }
 
+  const callSummary = [
+    `network: ${args.network}`,
+    `contract: ${args.alias}`,
+    `function: ${args.fragment.signature}`,
+    params.length ? `params: [${params.map((value) => JSON.stringify(value)).join(", ")}]` : undefined,
+    value && value.length ? `value: ${value}` : undefined,
+    `account: ${accountDisplay}`,
+  ].filter(Boolean) as string[];
+
+  const deploymentForSummary = await getDeployment(args.customer, args.network, args.alias);
+  const commandArgs = [
+    "send",
+    deploymentForSummary?.address ?? "<resolved-address>",
+    args.fragment.signature,
+    ...params,
+  ];
+  if (value && value.length) {
+    commandArgs.push("--value", value);
+  }
+  commandArgs.push("--rpc-url", networkConfig.rpc_url, "--private-key", "***hidden***");
+  const printable = formatCommand("cast", commandArgs);
+
   // eslint-disable-next-line no-console
-  console.log(chalk.gray(`tx signer: ${accountDisplay}`));
+  console.log(chalk.gray("Configuration plan:"));
+  for (const line of callSummary) {
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`  • ${line}`));
+  }
+  // eslint-disable-next-line no-console
+  console.log(chalk.gray(`  • command: ${printable}`));
+
+  const confirmPlan = await promptWithContext(args.customer, args.network, {
+    type: "confirm",
+    name: "confirm",
+    message: "Proceed with transaction?",
+    initial: true,
+  });
+
+  if (confirmPlan.confirm === false) {
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray("Configuration cancelled."));
+    return;
+  }
 
   await executeContractSend({
     network: args.network,
@@ -2288,6 +2329,56 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
   }
   const privateKey = walletMeta.privateKey;
   const deployerAddress = walletMeta.address;
+
+  const classification = classifyNetwork(networkConfig);
+  const previewArgs = [
+    "create",
+    artifact,
+    "--rpc-url",
+    networkConfig.rpc_url,
+    "--private-key",
+    "***hidden***",
+    "--chain-id",
+    String(networkConfig.chain_id),
+    "--broadcast",
+  ];
+  if (sanitizedArgs.length > 0) {
+    previewArgs.push("--constructor-args", ...sanitizedArgs);
+  }
+  const previewCommand = formatCommand("forge", previewArgs);
+
+  const summaryLines = [
+    `network: ${network} (chainId ${networkConfig.chain_id}, ${classification})`,
+    `contract: ${alias} -> ${artifact}`,
+    sanitizedArgs.length
+      ? `constructor args: [${sanitizedArgs.map((arg) => JSON.stringify(arg)).join(", ")}]`
+      : undefined,
+    `account: ${resolvedAccount}${
+      deployerAddress ? ` (${deployerAddress})` : ""
+    }`,
+    forgeProfile ? `forge profile: ${forgeProfile}` : undefined,
+    `command: ${previewCommand}`,
+  ].filter(Boolean) as string[];
+
+  // eslint-disable-next-line no-console
+  console.log(chalk.gray("Deployment plan:"));
+  for (const line of summaryLines) {
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`  • ${line}`));
+  }
+
+  const finalConfirm = await promptWithContext(customer, network, {
+    type: "confirm",
+    name: "confirm",
+    message: "Proceed with deployment?",
+    initial: true,
+  });
+
+  if (finalConfirm.confirm === false) {
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray("Deployment cancelled"));
+    return;
+  }
 
   const deployRecord = await executeDeploy({
     alias,
