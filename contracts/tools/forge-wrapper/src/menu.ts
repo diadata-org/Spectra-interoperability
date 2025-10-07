@@ -12,7 +12,12 @@ import {
   StoredWalletMeta,
 } from "./services/keys";
 import { prepareCustomerEnvironment, loadNetworkConfig } from "./config";
-import { getDefaultCustomer, getDefaultNetwork, getProjectRoot } from "./utils/paths";
+import {
+  getDefaultCustomer,
+  getDefaultNetwork,
+  getProjectRoot,
+  normalizeNetworkFileName,
+} from "./utils/paths";
 import { listNetworkNames, createNetworkConfig } from "./services/networks";
 import { listDeployments } from "./services/deployments";
 import { executeDeploy } from "./commands/deploy";
@@ -1979,21 +1984,89 @@ async function interactiveAddNetwork(customer?: string, network?: string): Promi
       message: "Default account alias",
       initial: "deployer",
     },
+    {
+      type: "confirm",
+      name: "addVerification",
+      message: "Configure block explorer verification settings?",
+      initial: false,
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "text" : null),
+      name: "verificationVerifier",
+      message: "Verifier name (e.g. etherscan, blockscout)",
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "text" : null),
+      name: "verificationVerifierUrl",
+      message: "Verifier API URL",
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "text" : null),
+      name: "verificationExplorerUrl",
+      message: "Explorer URL template (use {address})",
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "text" : null),
+      name: "verificationChain",
+      message: "Verifier chain identifier (optional)",
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "confirm" : null),
+      name: "verificationWatch",
+      message: "Enable --watch by default?",
+      initial: false,
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "text" : null),
+      name: "verificationApiKeyEnv",
+      message: "API key environment variable (optional)",
+    },
+    {
+      type: (prev: boolean, values: Record<string, unknown>) => (values.addVerification ? "text" : null),
+      name: "verificationApiKeyValue",
+      message: "Inline API key value (optional)",
+    },
   ]);
 
   if (!answers.name) {
     return;
   }
 
+  const rawName = String(answers.name).trim();
+  const normalizedName = normalizeNetworkFileName(rawName);
+
   const filePath = await createNetworkConfig({
-    name: answers.name,
+    name: rawName,
     chainId: Number(answers.chainId),
     rpcUrl: String(answers.rpcUrl),
     forgeProfile: answers.forgeProfile ? String(answers.forgeProfile) : undefined,
     defaultAccountAlias: answers.addDefaultAccount ? String(answers.defaultAlias || "deployer") : undefined,
+    verification: answers.addVerification
+      ? {
+          verifier: answers.verificationVerifier ? String(answers.verificationVerifier).trim() || undefined : undefined,
+          verifierUrl: answers.verificationVerifierUrl
+            ? String(answers.verificationVerifierUrl).trim() || undefined
+            : undefined,
+          explorerUrl: answers.verificationExplorerUrl
+            ? String(answers.verificationExplorerUrl).trim() || undefined
+            : undefined,
+          chain: answers.verificationChain ? String(answers.verificationChain).trim() || undefined : undefined,
+          apiKeyEnv: answers.verificationApiKeyEnv
+            ? String(answers.verificationApiKeyEnv).trim() || undefined
+            : undefined,
+          apiKeyValue: answers.verificationApiKeyValue
+            ? String(answers.verificationApiKeyValue).trim() || undefined
+            : undefined,
+          watch: typeof answers.verificationWatch === "boolean" ? answers.verificationWatch : undefined,
+        }
+      : undefined,
   });
   // eslint-disable-next-line no-console
-  console.log(chalk.green(`Created network config at ${filePath}`));
+  console.log(chalk.green(`Created network config '${normalizedName}' at ${filePath}`));
+  if (normalizedName !== rawName) {
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`Note: input '${rawName}' normalized to '${normalizedName}' for file naming.`));
+  }
 }
 
 async function interactiveDeploy(customer: string, network: string): Promise<void> {

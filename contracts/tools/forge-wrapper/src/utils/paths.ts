@@ -17,6 +17,10 @@ function sanitizeSegment(input: string): string {
   return input.replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
+export function normalizeNetworkFileName(name: string): string {
+  return sanitizeSegment(name).toLowerCase();
+}
+
 function resolvedOverride(value: string | undefined): string | undefined {
   return value ? path.resolve(value) : undefined;
 }
@@ -85,7 +89,19 @@ export function getNetworksDir(): string {
 
 export function getNetworkConfigPath(network: string): string {
   const dir = getNetworksDir();
-  return path.join(dir, `${sanitizeSegment(network)}.yaml`);
+  const normalized = normalizeNetworkFileName(network);
+  const preferred = path.join(dir, `${normalized}.yaml`);
+  if (existsSync(preferred)) {
+    return preferred;
+  }
+
+  const legacy = path.join(dir, `${sanitizeSegment(network)}.yaml`);
+  if (existsSync(legacy)) {
+    return legacy;
+  }
+
+  const raw = path.join(dir, `${network}.yaml`);
+  return raw;
 }
 
 export function getDeploymentsDir(customer: string): string {

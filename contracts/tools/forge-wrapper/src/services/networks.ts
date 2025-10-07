@@ -1,6 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { getNetworksDir } from "../utils/paths";
+import { getNetworksDir, normalizeNetworkFileName } from "../utils/paths";
 import { loadNetworkConfig } from "../config";
 import { NetworkConfig } from "../types";
 import { writeYamlFile, pathExists, readYamlFile } from "../utils/fs";
@@ -38,16 +38,26 @@ export interface NewNetworkInput {
   rpcUrl: string;
   forgeProfile?: string;
   defaultAccountAlias?: string;
+  verification?: {
+    chain?: string;
+    verifier?: string;
+    verifierUrl?: string;
+    explorerUrl?: string;
+    apiKeyEnv?: string;
+    apiKeyValue?: string;
+    watch?: boolean;
+  };
 }
 
 export async function createNetworkConfig(input: NewNetworkInput): Promise<string> {
-  const filePath = path.join(getNetworksDir(), `${input.name}.yaml`);
+  const fileSafeName = normalizeNetworkFileName(input.name);
+  const filePath = path.join(getNetworksDir(), `${fileSafeName}.yaml`);
   if (await pathExists(filePath)) {
-    throw new Error(`Network config ${input.name} already exists`);
+    throw new Error(`Network config ${fileSafeName} already exists`);
   }
 
   const content = {
-    name: input.name,
+    name: fileSafeName,
     chain_id: input.chainId,
     rpc_url: input.rpcUrl,
     forge_profile: input.forgeProfile || undefined,
@@ -60,6 +70,17 @@ export async function createNetworkConfig(input: NewNetworkInput): Promise<strin
         }
       : undefined,
     default_contracts: {},
+    verification: input.verification
+      ? {
+          chain: input.verification.chain || undefined,
+          verifier: input.verification.verifier || undefined,
+          verifier_url: input.verification.verifierUrl || undefined,
+          explorer_url: input.verification.explorerUrl || undefined,
+          api_key_env: input.verification.apiKeyEnv || undefined,
+          api_key_value: input.verification.apiKeyValue || undefined,
+          watch: typeof input.verification.watch === "boolean" ? input.verification.watch : undefined,
+        }
+      : undefined,
   };
 
   await writeYamlFile(filePath, content);
