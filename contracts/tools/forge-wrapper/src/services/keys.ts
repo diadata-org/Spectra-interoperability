@@ -35,6 +35,13 @@ export interface StoredWalletMeta {
   metadataPath: string;
 }
 
+export interface KeySummary {
+  alias: string;
+  customer: string;
+  metadataPath: string;
+  address?: string;
+}
+
 export async function storePrivateKey(
   customer: string,
   name: string,
@@ -93,6 +100,29 @@ export async function readStoredWallet(customer: string, name: string): Promise<
   };
 }
 
+export async function listKeySummaries(customer: string): Promise<KeySummary[]> {
+  const aliases = await listKeyAliases(customer);
+  const summaries: KeySummary[] = [];
+  for (const alias of aliases) {
+    try {
+      const wallet = await readStoredWallet(customer, alias);
+      summaries.push({
+        alias,
+        customer,
+        metadataPath: wallet.metadataPath,
+        address: wallet.address,
+      });
+    } catch (error) {
+      summaries.push({
+        alias,
+        customer,
+        metadataPath: path.join(getKeysDir(customer), `${alias}.yaml`),
+      });
+    }
+  }
+  return summaries;
+}
+
 export function normalizePrivateKey(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("0x")) {
@@ -110,6 +140,18 @@ export function formatKeyList(keys: string[]): string {
     return chalk.gray("(none)");
   }
   return keys.map((key) => `- ${key}`).join("\n");
+}
+
+export function formatKeySummaries(keys: KeySummary[]): string {
+  if (keys.length === 0) {
+    return chalk.gray("(none)");
+  }
+  return keys
+    .map((key) => {
+      const addressLabel = key.address ?? chalk.gray("(address unknown)");
+      return `- ${key.alias} -> ${addressLabel}`;
+    })
+    .join("\n");
 }
 
 async function deriveAddressFromPrivateKey(privateKey: string): Promise<string> {

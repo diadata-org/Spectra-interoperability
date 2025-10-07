@@ -6,6 +6,7 @@ import { promises as fs } from "fs";
 import {
   generatePrivateKey,
   listKeyAliases,
+  listKeySummaries,
   storePrivateKey,
   readStoredWallet,
   StoredWalletMeta,
@@ -412,13 +413,16 @@ export async function runInteractiveMenu(): Promise<void> {
           break;
         }
         case "listKeys": {
-          const keys = await listKeyAliases(currentCustomer);
+          const keys = await listKeySummaries(currentCustomer);
           if (keys.length === 0) {
             // eslint-disable-next-line no-console
             console.log(chalk.gray(`No keys for ${currentCustomer}`));
           } else {
-            // eslint-disable-next-line no-console
-            console.log(keys.map((k) => `- ${k}`).join("\n"));
+            for (const key of keys) {
+              const addressLabel = key.address ?? chalk.gray("(address unknown)");
+              // eslint-disable-next-line no-console
+              console.log(`- ${key.alias}   ( ${addressLabel} )`);
+            }
           }
           logEquivalent(`forge-wrapper keys list --customer ${currentCustomer}`);
           break;

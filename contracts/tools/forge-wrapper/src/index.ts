@@ -16,6 +16,9 @@ import {
   getDefaultCustomer,
   getDeploymentsDir,
   getKeysDir,
+  setStorageOverrides,
+  getDeploymentsRoot,
+  getKeysRoot,
 } from "./utils/paths";
 import path from "path";
 import { readFileSync } from "fs";
@@ -34,8 +37,13 @@ function loadPackageVersion(): string {
 async function main(): Promise<void> {
   const program = new Command();
 
-  logStorageLocations();
-  program.name("forge-wrapper").description("Utility CLI wrapping forge and cast").version(loadPackageVersion());
+  program
+    .name("forge-wrapper")
+    .description("Utility CLI wrapping forge and cast")
+    .version(loadPackageVersion())
+    .option("--storage-root <path>", "Base directory to store keys/ deployments")
+    .option("--deployments-root <path>", "Directory to store deployment records (overrides storage root)")
+    .option("--keys-root <path>", "Directory to store keys (overrides storage root)");
 
   registerDeployCommand(program);
   registerCallCommand(program);
@@ -47,18 +55,34 @@ async function main(): Promise<void> {
   registerConfigureCommand(program);
   registerIntentCommands(program);
 
+  let storageLogged = false;
+
+  const applyStorageOptions = (opts: StorageOptionFlags): void => {
+    setStorageOverrides({
+      storageRoot: opts.storageRoot,
+      deploymentsRoot: opts.deploymentsRoot,
+      keysRoot: opts.keysRoot,
+    });
+    if (!storageLogged) {
+      logStorageLocations();
+      storageLogged = true;
+    }
+  };
+
+  program.hook("preAction", (thisCommand) => {
+    applyStorageOptions(thisCommand.optsWithGlobals() as StorageOptionFlags);
+  });
+
+  program.action(async () => {
+    await runInteractiveMenu();
+  });
+
   program.configureOutput({
     outputError: (str) => {
       // eslint-disable-next-line no-console
       console.error(chalk.red(str.trim()));
     },
   });
-
-  const args = process.argv.slice(2);
-  if (args.length === 0) {
-    await runInteractiveMenu();
-    return;
-  }
 
   await program.parseAsync(process.argv);
 }
@@ -71,8 +95,8 @@ main().catch((error) => {
 
 function logStorageLocations(): void {
   const defaultCustomer = getDefaultCustomer();
-  const deploymentsRoot = path.join(getProjectRoot(), "deployments");
-  const keysRoot = path.join(getProjectRoot(), "keys");
+  const deploymentsRoot = getDeploymentsRoot();
+  const keysRoot = getKeysRoot();
   const defaultDeployments = getDeploymentsDir(defaultCustomer);
   const defaultKeys = getKeysDir(defaultCustomer);
 
@@ -82,4 +106,10 @@ function logStorageLocations(): void {
       `Storage directories:\n  deployments root: ${deploymentsRoot}\n  keys root        : ${keysRoot}\n  default customer (${defaultCustomer}) deployments: ${defaultDeployments}\n  default customer (${defaultCustomer}) keys        : ${defaultKeys}`
     )
   );
+}
+
+interface StorageOptionFlags {
+  storageRoot?: string;
+  deploymentsRoot?: string;
+  keysRoot?: string;
 }

@@ -3,7 +3,12 @@ import { Command } from "commander";
 import { readFileSync } from "fs";
 import { getDefaultCustomer } from "../utils/paths";
 import { prepareCustomerEnvironment } from "../config";
-import { listKeyAliases, storePrivateKey, normalizePrivateKey } from "../services/keys";
+import {
+  listKeyAliases,
+  listKeySummaries,
+  storePrivateKey,
+  normalizePrivateKey,
+} from "../services/keys";
 
 function resolveKeyValue(options: {
   fromEnv?: string;
@@ -45,16 +50,17 @@ export function registerKeysCommand(program: Command): void {
     .action(async (cmdOptions) => {
       const customer = cmdOptions.customer ?? getDefaultCustomer();
       await prepareCustomerEnvironment(customer);
-      const aliases = await listKeyAliases(customer);
-      if (aliases.length === 0) {
+      const summaries = await listKeySummaries(customer);
+      if (summaries.length === 0) {
         // eslint-disable-next-line no-console
         console.log(chalk.gray(`No keys stored for customer '${customer}'.`));
       } else {
         // eslint-disable-next-line no-console
         console.log(chalk.green(`Keys for ${customer}:`));
-        for (const alias of aliases) {
+        for (const entry of summaries) {
+          const addressLabel = entry.address ?? chalk.gray("(address unknown)");
           // eslint-disable-next-line no-console
-          console.log(`- ${alias}`);
+          console.log(`- ${entry.alias}  ( ${addressLabel} )`);
         }
       }
     });
