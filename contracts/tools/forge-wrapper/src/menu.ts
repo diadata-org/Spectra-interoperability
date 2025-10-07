@@ -396,10 +396,28 @@ export async function runInteractiveMenu(): Promise<void> {
             // eslint-disable-next-line no-console
             console.log(chalk.gray("No networks defined"));
           } else {
+            const filterAnswer = await promptWithContext(currentCustomer, currentNetwork, {
+              type: "select",
+              name: "env",
+              message: "Select network environment",
+              choices: [
+                { title: "All", value: "all" },
+                { title: "Mainnet", value: "mainnet" },
+                { title: "Testnet", value: "testnet" },
+              ],
+              initial: 0,
+            });
+            const filterEnv = filterAnswer.env ?? "all";
             for (const net of networks) {
               try {
                 const config = await loadNetworkConfig(net);
                 const classification = classifyNetwork(config);
+                if (filterEnv === "mainnet" && classification !== "mainnet") {
+                  continue;
+                }
+                if (filterEnv === "testnet" && classification !== "testnet") {
+                  continue;
+                }
                 const suffix = classification === "unknown" ? "" : ` (${classification})`;
                 // eslint-disable-next-line no-console
                 console.log(`- ${net} :: chainId=${config.chain_id}${suffix}`);
@@ -408,8 +426,11 @@ export async function runInteractiveMenu(): Promise<void> {
                 console.log(`- ${net}`);
               }
             }
+            const filterFlag = filterEnv !== "all" ? ` --filter ${filterEnv}` : "";
+            logEquivalent(`forge-wrapper networks list${filterFlag}`);
+            break;
           }
-          logEquivalent("forge-wrapper networks list --details");
+          logEquivalent("forge-wrapper networks list");
           break;
         }
         case "addNetwork": {
@@ -589,6 +610,12 @@ async function listCustomers(): Promise<string[]> {
 }
 
 function classifyNetwork(config: NetworkConfig): "mainnet" | "testnet" | "unknown" {
+  if (config.environment === "mainnet") {
+    return "mainnet";
+  }
+  if (config.environment === "testnet") {
+    return "testnet";
+  }
   const name = config.name.toLowerCase();
   if (config.chain_id === 1 || MAINNET_KEYWORDS.some((keyword) => name.includes(keyword))) {
     return "mainnet";
@@ -600,7 +627,7 @@ function classifyNetwork(config: NetworkConfig): "mainnet" | "testnet" | "unknow
   ) {
     return "testnet";
   }
-  return "unknown";
+  return "testnet";
 }
 
 function contractNameFromArtifact(artifact: string): string {
@@ -1956,6 +1983,16 @@ async function interactiveAddNetwork(customer?: string, network?: string): Promi
       validate: (value: string) => (value && value.trim() ? true : "Required"),
     },
     {
+      type: "select",
+      name: "environment",
+      message: "Network environment",
+      choices: [
+        { title: "Testnet", value: "testnet" },
+        { title: "Mainnet", value: "mainnet" },
+      ],
+      initial: 0,
+    },
+    {
       type: "number",
       name: "chainId",
       message: "Chain ID",
@@ -2041,6 +2078,7 @@ async function interactiveAddNetwork(customer?: string, network?: string): Promi
     rpcUrl: String(answers.rpcUrl),
     forgeProfile: answers.forgeProfile ? String(answers.forgeProfile) : undefined,
     defaultAccountAlias: answers.addDefaultAccount ? String(answers.defaultAlias || "deployer") : undefined,
+    environment: answers.environment,
     verification: answers.addVerification
       ? {
           verifier: answers.verificationVerifier ? String(answers.verificationVerifier).trim() || undefined : undefined,

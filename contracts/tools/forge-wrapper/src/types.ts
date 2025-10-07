@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const networkEnvironmentSchema = z.enum(["mainnet", "testnet"]);
+export type NetworkEnvironment = z.infer<typeof networkEnvironmentSchema>;
+
 export const accountConfigSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("file"),
@@ -44,6 +47,7 @@ export const networkConfigSchema = z.object({
   chain_id: z.number().int().nonnegative(),
   rpc_url: z.string().min(1),
   forge_profile: z.string().optional(),
+  environment: networkEnvironmentSchema.optional(),
   accounts: z
     .record(accountConfigSchema)
     .optional()
