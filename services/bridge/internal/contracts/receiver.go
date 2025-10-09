@@ -288,12 +288,16 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 
 	// Simulate the transaction first to check for reverts
 	callMsg := ethereum.CallMsg{
-		From:     r.auth.From,
-		To:       &r.address,
-		Gas:      gasLimit,
-		GasPrice: gasPrice,
-		Value:    r.auth.Value,
-		Data:     input,
+		From:  r.auth.From,
+		To:    &r.address,
+		Gas:   gasLimit,
+		Value: r.auth.Value,
+		Data:  input,
+	}
+	if gasPrice != nil {
+		callMsg.GasPrice = gasPrice
+		callMsg.GasTipCap = gasPrice
+		callMsg.GasFeeCap = gasPrice
 	}
 
 	_, err = r.client.CallContract(ctx, callMsg, nil)

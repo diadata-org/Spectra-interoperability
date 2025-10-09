@@ -120,6 +120,12 @@ func (mc *MultiClient) failover() error {
 	originalIndex := mc.currentIndex
 	logger.Warnf("RPC failover triggered from %s", mc.urls[originalIndex])
 
+	if originalIndex >= 0 && originalIndex < len(mc.clients) && mc.clients[originalIndex] != nil {
+		mc.clients[originalIndex].Close()
+		mc.clients[originalIndex] = nil
+		logger.Debugf("Closed failed client at index %d", originalIndex)
+	}
+
 	// Try next RPCs in order
 	for i := 0; i < len(mc.clients); i++ {
 		nextIndex := (originalIndex + i + 1) % len(mc.clients)
@@ -154,6 +160,12 @@ func (mc *MultiClient) failover() error {
 			mc.currentIndex = nextIndex
 			logger.Infof("Failed over to RPC: %s", mc.urls[nextIndex])
 			return nil
+		} else {
+			if mc.clients[nextIndex] != nil {
+				mc.clients[nextIndex].Close()
+				mc.clients[nextIndex] = nil
+				logger.Debugf("Closed failed client at index %d during test", nextIndex)
+			}
 		}
 	}
 
@@ -259,6 +271,9 @@ func isNetworkError(err error) bool {
 		"dial tcp",
 		"read tcp",
 		"write tcp",
+		"429",
+		"Too Many Requests",
+		"rate limit",
 	}
 
 	for _, netErr := range networkErrors {

@@ -312,8 +312,14 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				}
 
 				if contractConfig == nil {
-					logger.Warnf("Contract config not found for %s", dest.Contract)
-					continue
+					logger.Debugf("Contract config not found for %s, creating minimal config from router destination", dest.Contract)
+					contractConfig = &config.LegacyContractConfig{
+						Address:       dest.Contract,
+						Enabled:       true,
+						GasLimit:      dest.GasLimit,
+						GasMultiplier: dest.GasMultiplier,
+						MaxGasPrice:   dest.MaxGasPrice,
+					}
 				}
 
 				// Create update request using the router's method configuration
