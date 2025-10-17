@@ -117,13 +117,38 @@ export async function buildVerifyContext(options: {
 }
 
 export async function verifyDeployment(context: VerifyContext): Promise<void> {
+  // Check if this is an etherscan verifier - if so, use API directly to work around forge bug
+  if (context.verifier === "etherscan" && context.apiKey) {
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray("Using Etherscan API directly (workaround for forge bug)..."));
+    const { verifyViaEtherscanAPI } = await import("../utils/etherscan-api");
+    await verifyViaEtherscanAPI(
+      context.record,
+      context.networkConfig,
+      context.apiKey,
+      context.watch || false
+    );
+    return;
+  }
+
+  // Fall back to forge for other verifiers (blockscout, sourcify, etc.)
   const { args, env, masked } = await buildForgeVerifyArgs(context);
   // eslint-disable-next-line no-console
   console.log(chalk.gray(masked));
 
-  const result = await runForge(args, {
-    env,
-  });
+  let result;
+  try {
+    result = await runForge(args, {
+      env,
+    });
+  } catch (error: any) {
+    // Log stderr to help debug verification failures
+    if (error?.stderr) {
+      // eslint-disable-next-line no-console
+      console.error(chalk.red(error.stderr.trim()));
+    }
+    throw error;
+  }
 
   const stdout = result.stdout.trim();
   if (stdout.length) {
@@ -192,6 +217,9 @@ async function buildForgeVerifyArgs(context: VerifyContext): Promise<ForgeVerify
   const env: Record<string, string> = {};
   if (networkConfig.forge_profile) {
     env.FOUNDRY_PROFILE = networkConfig.forge_profile;
+  }
+  if (context.apiKey) {
+    env.ETHERSCAN_API_KEY = context.apiKey;
   }
 
   const maskedArgs = maskArgs(args);
