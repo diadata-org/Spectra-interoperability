@@ -39,28 +39,48 @@ update_price() {
         2>/dev/null || echo "Failed to update $symbol"
 }
 
-# Generate realistic but mock prices
+# Generate realistic but mock prices with configurable deviation
 generate_eth_price() {
-    # ETH around $2000-2500 with some volatility
+    local force_deviation=${1:-"false"}
     python3 -c "
 import random
-import math
 base_price = 2250
-volatility = 0.05
-change = random.uniform(-volatility, volatility)
+force_deviation = '$force_deviation' == 'true'
+
+if force_deviation:
+    # Force a deviation > 0.5% (between 0.6% and 2%)
+    deviation = random.uniform(0.006, 0.02)
+    if random.random() > 0.5:
+        deviation = -deviation
+    change = deviation
+else:
+    # Normal volatility (sometimes < 0.5%, sometimes > 0.5%)
+    volatility = 0.05
+    change = random.uniform(-volatility, volatility)
+
 price = base_price * (1 + change)
 print(f'{price:.2f}')
 "
 }
 
 generate_btc_price() {
-    # BTC around $40000-50000 with some volatility
+    local force_deviation=${1:-"false"}
     python3 -c "
 import random
-import math
 base_price = 45000
-volatility = 0.03
-change = random.uniform(-volatility, volatility)
+force_deviation = '$force_deviation' == 'true'
+
+if force_deviation:
+    # Force a deviation > 0.5% (between 0.6% and 2%)
+    deviation = random.uniform(0.006, 0.02)
+    if random.random() > 0.5:
+        deviation = -deviation
+    change = deviation
+else:
+    # Normal volatility (sometimes < 0.5%, sometimes > 0.5%)
+    volatility = 0.03
+    change = random.uniform(-volatility, volatility)
+
 price = base_price * (1 + change)
 print(f'{price:.2f}')
 "
@@ -68,16 +88,32 @@ print(f'{price:.2f}')
 
 # Main loop
 echo "Starting continuous price updates (Ctrl+C to stop)..."
+echo "Price deviation threshold: 0.5%"
+echo "Time threshold: 2 minutes"
+echo ""
+
+counter=0
 while true; do
-    # Generate new prices
-    eth_price=$(generate_eth_price)
-    btc_price=$(generate_btc_price)
+    counter=$((counter + 1))
+
+    # Every 4th update (every 40 seconds), force a large deviation to test deviation-based routing
+    # Other updates use normal volatility which may or may not exceed 0.5%
+    if [ $((counter % 4)) -eq 0 ]; then
+        echo "[DEVIATION TEST] Forcing >0.5% price deviation..."
+        eth_price=$(generate_eth_price "true")
+        btc_price=$(generate_btc_price "true")
+    else
+        echo "[NORMAL UPDATE] Regular price update..."
+        eth_price=$(generate_eth_price "false")
+        btc_price=$(generate_btc_price "false")
+    fi
 
     # Update prices
     update_price "ETH/USD" "$eth_price"
     update_price "BTC/USD" "$btc_price"
 
     echo "Updated: ETH/USD=$eth_price, BTC/USD=$btc_price"
+    echo ""
 
     # Wait 10 seconds before next update
     sleep 10

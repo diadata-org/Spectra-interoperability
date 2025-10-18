@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -497,7 +498,7 @@ func (b *Bridge) callRouterMethod(ctx context.Context, destClient *WriteClient, 
 	}
 
 	contractAddress := common.HexToAddress(updateReq.Contract.Address)
-	return b.callContractMethod(ctx, destClient, contractAddress, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit)
+	return b.callContractMethod(ctx, destClient, contractAddress, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit, updateReq)
 }
 
 // buildMethodParams builds method parameters from router configuration using generic param mapping
@@ -651,7 +652,7 @@ func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.Upd
 }
 
 // callContractMethod calls a generic contract method
-func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient, contractAddress common.Address, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64) (*types.Transaction, error) {
+func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient, contractAddress common.Address, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64, updateReq *bridgetypes.UpdateRequest) (*types.Transaction, error) {
 	// Parse the method ABI
 	parsedABI, err := abi.JSON(strings.NewReader(fmt.Sprintf(`[%s]`, abiJSON)))
 	if err != nil {
@@ -670,48 +671,115 @@ func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient
 	auth.Context = ctx
 
 	// DEBUG: Log parameter types before ABI packing
-	logger.Infof("🔍 [PARAM-DEBUG] Method: %s, Contract: %s, ParamCount: %d", methodName, contractAddress.Hex(), len(params))
+	logger.Infof("[PARAM-DEBUG] Method: %s, Contract: %s, ParamCount: %d", methodName, contractAddress.Hex(), len(params))
 
 	// Log each parameter type
 	for i, param := range params {
 		if param == nil {
-			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: NIL", i)
+			logger.Infof("[PARAM-DEBUG] params[%d]: NIL", i)
 			continue
 		}
 
 		switch v := param.(type) {
 		case []*big.Int:
-			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=[]*big.Int, Len=%d", i, len(v))
+			logger.Infof("[PARAM-DEBUG] params[%d]: Type=[]*big.Int, Len=%d", i, len(v))
 			if len(v) > 0 && len(v) <= 5 {
 				for j, val := range v {
-					logger.Infof("🔍 [PARAM-DEBUG]   [%d]=%s", j, val.String())
+					logger.Infof("[PARAM-DEBUG]   [%d]=%s", j, val.String())
 				}
 			}
 		case []interface{}:
-			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=[]interface{}, Len=%d ⚠️ NOT CONVERTED!", i, len(v))
+			logger.Infof("[PARAM-DEBUG] params[%d]: Type=[]interface{}, Len=%d - NOT CONVERTED!", i, len(v))
 			if len(v) > 0 && len(v) <= 5 {
 				for j, val := range v {
-					logger.Infof("🔍 [PARAM-DEBUG]   [%d]=%T: %v", j, val, val)
+					logger.Infof("[PARAM-DEBUG]   [%d]=%T: %v", j, val, val)
 				}
 			}
 		case *big.Int:
-			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=*big.Int, Value=%s", i, v.String())
+			logger.Infof("[PARAM-DEBUG] params[%d]: Type=*big.Int, Value=%s", i, v.String())
 		default:
-			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=%T, Value=%v", i, param, param)
+			logger.Infof("[PARAM-DEBUG] params[%d]: Type=%T, Value=%v", i, param, param)
 		}
 	}
 
-	logger.Infof("🔍 [PARAM-DEBUG] About to call Transact()...")
+	// Pack the method call data for simulation
+	callData, err := parsedABI.Pack(methodName, params...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack method call: %w", err)
+	}
+
+	// Get the from address for simulation
+	fromAddress := auth.From
+
+	// Simulate the transaction before sending
+	logger.Infof("Simulating transaction for method %s on contract %s", methodName, contractAddress.Hex())
+	callMsg := ethereum.CallMsg{
+		From:     fromAddress,
+		To:       &contractAddress,
+		Gas:      gasLimit,
+		GasPrice: gasPrice,
+		Value:    big.NewInt(0), // Assuming no value transfer
+		Data:     callData,
+	}
+
+	ethClient, err := destClient.client.GetClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get eth client for simulation: %w", err)
+	}
+
+	if _, err := ethClient.CallContract(ctx, callMsg, nil); err != nil {
+		revertReason := extractRevertReason(err)
+		if revertReason != "" {
+			logger.Errorf("Transaction simulation reverted for method %s on contract %s: %s",
+				methodName, contractAddress.Hex(), revertReason)
+		} else {
+			logger.Errorf("Transaction simulation failed for method %s on contract %s: %v",
+				methodName, contractAddress.Hex(), err)
+		}
+		return nil, fmt.Errorf("transaction simulation failed: %w", err)
+	}
+
+	logger.Infof("Transaction simulation successful, proceeding to send transaction")
 
 	// Create transaction using the provided contract address
 	tx, err := bind.NewBoundContract(contractAddress, parsedABI, destClient.client, destClient.client, destClient.client).Transact(auth, methodName, params...)
 	if err != nil {
-		logger.Errorf("❌ [PARAM-DEBUG] Transaction failed: %v", err)
+		logger.Errorf("Transaction failed: %v", err)
 		return nil, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	logger.Infof("✅ [PARAM-DEBUG] Transaction sent successfully: %s", tx.Hash().Hex())
+	// Extract symbol from Intent or use "unknown"
+	symbol := "unknown"
+	if updateReq.Intent != nil {
+		symbol = updateReq.Intent.Symbol
+	}
+
+	// Get chain ID from destination chain
+	chainID := int64(0)
+	if updateReq.DestinationChain != nil {
+		chainID = updateReq.DestinationChain.ChainID
+	}
+
+	logger.Infof("Transaction sent successfully: %s, router=%s, chain=%d, contract=%s, symbol=%s",
+		tx.Hash().Hex(), updateReq.RouterID, chainID, contractAddress.Hex(), symbol)
 	return tx, nil
+}
+
+// extractRevertReason extracts the revert reason from an error message
+func extractRevertReason(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	msg := err.Error()
+	const revertedPrefix = "execution reverted:"
+	if strings.Contains(msg, revertedPrefix) {
+		parts := strings.SplitN(msg, revertedPrefix, 2)
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
 }
 
 // updateLastUpdate updates the last update time for a symbol

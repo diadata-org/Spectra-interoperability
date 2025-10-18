@@ -295,33 +295,62 @@ func (gr *GenericRouter) GetDestinations(data *config.ExtractedData) []config.Ro
 }
 
 // FilterDestinationsByTimeThreshold filters destinations based on time thresholds after enrichment
+// Uses OR logic: update if EITHER time_threshold is met OR price_deviation is met
 func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData) []config.RouterDestination {
 	var filteredDestinations []config.RouterDestination
 
 	for _, dest := range destinations {
-		// Check time threshold if configured
-		if dest.TimeThreshold.Duration() > 0 {
-			if !gr.checkTimeThreshold(dest, data) {
-				logger.Debugf("Time threshold not met for destination %s (symbol: %s), skipping",
-					dest.Contract, gr.GetSymbolFromData(data))
-				continue
-			}
-			logger.Debugf("Time threshold met for destination %s (symbol: %s), proceeding",
-				dest.Contract, gr.GetSymbolFromData(data))
+		hasTimeThreshold := dest.TimeThreshold.Duration() > 0
+		hasPriceDeviation := dest.PriceDeviation != ""
+
+		// If neither threshold is configured, allow the update
+		if !hasTimeThreshold && !hasPriceDeviation {
+			filteredDestinations = append(filteredDestinations, dest)
+			continue
 		}
 
-		// Check price deviation if configured
-		if dest.PriceDeviation != "" {
-			if !gr.checkPriceDeviation(dest, data) {
-				logger.Debugf("Price deviation threshold not met for destination %s (symbol: %s), skipping",
+		// Check both conditions
+		timeThresholdMet := false
+		priceDeviationMet := false
+
+		if hasTimeThreshold {
+			timeThresholdMet = gr.checkTimeThreshold(dest, data)
+			if timeThresholdMet {
+				logger.Debugf("Time threshold met for destination %s (symbol: %s)",
 					dest.Contract, gr.GetSymbolFromData(data))
-				continue
+			} else {
+				logger.Debugf("Time threshold not met for destination %s (symbol: %s)",
+					dest.Contract, gr.GetSymbolFromData(data))
 			}
-			logger.Debugf("Price deviation threshold met for destination %s (symbol: %s), proceeding",
-				dest.Contract, gr.GetSymbolFromData(data))
 		}
 
-		filteredDestinations = append(filteredDestinations, dest)
+		if hasPriceDeviation {
+			priceDeviationMet = gr.checkPriceDeviation(dest, data)
+			if priceDeviationMet {
+				logger.Debugf("Price deviation threshold met for destination %s (symbol: %s)",
+					dest.Contract, gr.GetSymbolFromData(data))
+			} else {
+				logger.Debugf("Price deviation threshold not met for destination %s (symbol: %s)",
+					dest.Contract, gr.GetSymbolFromData(data))
+			}
+		}
+
+		if timeThresholdMet || priceDeviationMet {
+			if timeThresholdMet && priceDeviationMet {
+				logger.Infof("Update allowed for %s (symbol: %s): BOTH time threshold AND price deviation met",
+					dest.Contract, gr.GetSymbolFromData(data))
+			} else if timeThresholdMet {
+				logger.Infof("Update allowed for %s (symbol: %s): time threshold met (price deviation not required or not met)",
+					dest.Contract, gr.GetSymbolFromData(data))
+			} else {
+				logger.Infof("Update allowed for %s (symbol: %s): price deviation met (time threshold not required or not met)",
+					dest.Contract, gr.GetSymbolFromData(data))
+			}
+			filteredDestinations = append(filteredDestinations, dest)
+		} else {
+			logger.Debugf("Update blocked for %s (symbol: %s): NEITHER time threshold NOR price deviation met",
+				dest.Contract, gr.GetSymbolFromData(data))
+		}
 	}
 
 	return filteredDestinations

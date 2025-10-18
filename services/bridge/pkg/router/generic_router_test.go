@@ -889,3 +889,404 @@ func TestRealWorldTimeThresholdScenario(t *testing.T) {
 func timePtr(t time.Time) *time.Time {
 	return &t
 }
+
+// TestFilterDestinationsByTimeThreshold_ORLogic tests the OR logic for time threshold and price deviation
+func TestFilterDestinationsByTimeThreshold_ORLogic(t *testing.T) {
+	gr := &GenericRouter{
+		destinationTimes:  make(map[string]time.Time),
+		destinationPrices: make(map[string]string),
+	}
+
+	type TestOracleIntent struct {
+		Symbol string
+		Price  uint64
+	}
+
+	tests := []struct {
+		name              string
+		dest              config.RouterDestination
+		data              *config.ExtractedData
+		setupTime         *time.Time
+		setupPrice        string
+		expectedFiltered  bool
+		description       string
+	}{
+		{
+			name: "first update - no previous data",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(2 * time.Minute),
+				PriceDeviation: "0.5%",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  100000,
+					},
+				},
+			},
+			setupTime:        nil,
+			setupPrice:       "",
+			expectedFiltered: false,
+			description:      "first update should always pass",
+		},
+		{
+			name: "time threshold met, price deviation not met",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(2 * time.Minute),
+				PriceDeviation: "0.5%",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  100100, // 0.1% change, less than 0.5%
+					},
+				},
+			},
+			setupTime:        timePtr(time.Now().Add(-3 * time.Minute)), // 3 min ago, threshold is 2min
+			setupPrice:       "100000",
+			expectedFiltered: false,
+			description:      "should pass with OR logic when time threshold met even if price deviation not met",
+		},
+		{
+			name: "price deviation met, time threshold not met",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(2 * time.Minute),
+				PriceDeviation: "0.5%",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  101000, // 1% change, greater than 0.5%
+					},
+				},
+			},
+			setupTime:        timePtr(time.Now().Add(-30 * time.Second)), // 30 sec ago, threshold is 2min
+			setupPrice:       "100000",
+			expectedFiltered: false,
+			description:      "should pass with OR logic when price deviation met even if time threshold not met",
+		},
+		{
+			name: "both time threshold and price deviation met",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(2 * time.Minute),
+				PriceDeviation: "0.5%",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  102000, // 2% change
+					},
+				},
+			},
+			setupTime:        timePtr(time.Now().Add(-3 * time.Minute)), // 3 min ago
+			setupPrice:       "100000",
+			expectedFiltered: false,
+			description:      "should pass when both conditions met",
+		},
+		{
+			name: "neither time threshold nor price deviation met - should block",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(2 * time.Minute),
+				PriceDeviation: "0.5%",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  100100, // 0.1% change, less than 0.5%
+					},
+				},
+			},
+			setupTime:        timePtr(time.Now().Add(-30 * time.Second)), // 30 sec ago, less than 2min
+			setupPrice:       "100000",
+			expectedFiltered: true,
+			description:      "should block when NEITHER condition is met",
+		},
+		{
+			name: "only time threshold configured - should use time threshold",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(2 * time.Minute),
+				PriceDeviation: "",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  100000,
+					},
+				},
+			},
+			setupTime:        timePtr(time.Now().Add(-3 * time.Minute)),
+			setupPrice:       "",
+			expectedFiltered: false,
+			description:      "should pass when only time threshold configured and met",
+		},
+		{
+			name: "only price deviation configured - should use price deviation",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(0),
+				PriceDeviation: "0.5%",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  101000, // 1% change
+					},
+				},
+			},
+			setupTime:        nil,
+			setupPrice:       "100000",
+			expectedFiltered: false,
+			description:      "should pass when only price deviation configured and met",
+		},
+		{
+			name: "neither configured - should always pass",
+			dest: config.RouterDestination{
+				ChainID:        84532,
+				Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+				TimeThreshold:  config.Duration(0),
+				PriceDeviation: "",
+			},
+			data: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "SKI/USD",
+						Price:  100000,
+					},
+				},
+			},
+			setupTime:        nil,
+			setupPrice:       "",
+			expectedFiltered: false,
+			description:      "should always pass when no thresholds configured",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset maps
+			gr.destinationTimes = make(map[string]time.Time)
+			gr.destinationPrices = make(map[string]string)
+
+			// Setup previous state
+			destKey := "84532-0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E-SKI/USD"
+			if tt.setupTime != nil {
+				gr.destinationTimes[destKey] = *tt.setupTime
+			}
+			if tt.setupPrice != "" {
+				gr.destinationPrices[destKey] = tt.setupPrice
+			}
+
+			// Filter destinations
+			filtered := gr.FilterDestinationsByTimeThreshold([]config.RouterDestination{tt.dest}, tt.data)
+
+			wasFiltered := len(filtered) == 0
+			if wasFiltered != tt.expectedFiltered {
+				t.Errorf("FilterDestinationsByTimeThreshold() filtered=%v, want filtered=%v - %s",
+					wasFiltered, tt.expectedFiltered, tt.description)
+			}
+		})
+	}
+}
+
+// TestFilterDestinationsByTimeThreshold_MultipleDestinationsORLogic tests OR logic with multiple destinations
+func TestFilterDestinationsByTimeThreshold_MultipleDestinationsORLogic(t *testing.T) {
+	gr := &GenericRouter{
+		destinationTimes:  make(map[string]time.Time),
+		destinationPrices: make(map[string]string),
+	}
+
+	type TestOracleIntent struct {
+		Symbol string
+		Price  uint64
+	}
+
+	destinations := []config.RouterDestination{
+		{
+			ChainID:        84532,
+			Contract:       "0xDest1",
+			TimeThreshold:  config.Duration(2 * time.Minute),
+			PriceDeviation: "0.5%",
+		},
+		{
+			ChainID:        421614,
+			Contract:       "0xDest2",
+			TimeThreshold:  config.Duration(5 * time.Minute),
+			PriceDeviation: "1.0%",
+		},
+		{
+			ChainID:        11155111,
+			Contract:       "0xDest3",
+			TimeThreshold:  config.Duration(1 * time.Minute),
+			PriceDeviation: "0.1%",
+		},
+	}
+
+	data := &config.ExtractedData{
+		Enrichment: map[string]interface{}{
+			"fullIntent": TestOracleIntent{
+				Symbol: "ETH/USD",
+				Price:  101500, // Will test various deviation scenarios
+			},
+		},
+	}
+
+	// Setup:
+	// Dest1: time threshold met (3min ago), price deviation met (0.5% needed, have 1.5%)
+	gr.destinationTimes["84532-0xDest1-ETH/USD"] = time.Now().Add(-3 * time.Minute)
+	gr.destinationPrices["84532-0xDest1-ETH/USD"] = "100000"
+
+	// Dest2: time threshold not met (2min ago, need 5min), price deviation met (1.0% needed, have 1.5%)
+	gr.destinationTimes["421614-0xDest2-ETH/USD"] = time.Now().Add(-2 * time.Minute)
+	gr.destinationPrices["421614-0xDest2-ETH/USD"] = "100000"
+
+	// Dest3: time threshold not met (30sec ago, need 1min), price deviation NOT met (0.1% needed, only 0.05% change)
+	gr.destinationTimes["11155111-0xDest3-ETH/USD"] = time.Now().Add(-30 * time.Second)
+	gr.destinationPrices["11155111-0xDest3-ETH/USD"] = "101450" // Only ~0.05% change from 101500
+
+	filtered := gr.FilterDestinationsByTimeThreshold(destinations, data)
+
+	// Expected: Dest1 (BOTH met) + Dest2 (price met, time not met) = 2
+	// Dest3 should be blocked because NEITHER condition is met
+	if len(filtered) != 2 {
+		t.Errorf("Expected 2 destinations to pass with OR logic, got %d", len(filtered))
+		for _, dest := range filtered {
+			t.Logf("Passed destination: chainID=%d, contract=%s", dest.ChainID, dest.Contract)
+		}
+	}
+}
+
+// TestCheckPriceDeviation tests price deviation calculation
+func TestCheckPriceDeviation(t *testing.T) {
+	gr := &GenericRouter{
+		destinationPrices: make(map[string]string),
+	}
+
+	dest := config.RouterDestination{
+		ChainID:        84532,
+		Contract:       "0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E",
+		PriceDeviation: "0.5%",
+	}
+
+	type TestOracleIntent struct {
+		Symbol string
+		Price  uint64
+	}
+
+	tests := []struct {
+		name        string
+		setupPrice  string
+		currentData *config.ExtractedData
+		expected    bool
+		description string
+	}{
+		{
+			name:       "first time - no previous price",
+			setupPrice: "",
+			currentData: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "ETH/USD",
+						Price:  100000,
+					},
+				},
+			},
+			expected:    true,
+			description: "should pass when no previous price",
+		},
+		{
+			name:       "price deviation exactly met",
+			setupPrice: "100000",
+			currentData: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "ETH/USD",
+						Price:  100500, // Exactly 0.5% increase
+					},
+				},
+			},
+			expected:    true,
+			description: "should pass when deviation exactly 0.5%",
+		},
+		{
+			name:       "price deviation exceeded",
+			setupPrice: "100000",
+			currentData: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "ETH/USD",
+						Price:  102000, // 2% increase
+					},
+				},
+			},
+			expected:    true,
+			description: "should pass when deviation > 0.5%",
+		},
+		{
+			name:       "price deviation not met",
+			setupPrice: "100000",
+			currentData: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "ETH/USD",
+						Price:  100100, // 0.1% increase, less than 0.5%
+					},
+				},
+			},
+			expected:    false,
+			description: "should block when deviation < 0.5%",
+		},
+		{
+			name:       "price decrease deviation met",
+			setupPrice: "100000",
+			currentData: &config.ExtractedData{
+				Enrichment: map[string]interface{}{
+					"fullIntent": TestOracleIntent{
+						Symbol: "ETH/USD",
+						Price:  99000, // 1% decrease (absolute value)
+					},
+				},
+			},
+			expected:    true,
+			description: "should pass when deviation met with price decrease",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset map
+			gr.destinationPrices = make(map[string]string)
+
+			// Setup previous price
+			destKey := "84532-0x927ccBd9107bD63F8279Af83b96E7DAF924b9a7E-ETH/USD"
+			if tt.setupPrice != "" {
+				gr.destinationPrices[destKey] = tt.setupPrice
+			}
+
+			result := gr.checkPriceDeviation(dest, tt.currentData)
+			if result != tt.expected {
+				t.Errorf("checkPriceDeviation() = %v, want %v - %s",
+					result, tt.expected, tt.description)
+			}
+		})
+	}
+}
