@@ -502,13 +502,43 @@ func (b *Bridge) callRouterMethod(ctx context.Context, destClient *WriteClient, 
 
 // buildMethodParams builds method parameters from router configuration using generic param mapping
 func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig, updateReq *bridgetypes.UpdateRequest) ([]interface{}, error) {
-	var params []interface{}
+	logger.Infof("🔍 [BUILD-PARAMS] Building params for method: %s", methodConfig.Name)
 
-	// Build parameters based on config mapping
-	for paramName, paramSource := range methodConfig.Params {
+	// Parse the ABI to get parameter order
+	parsedABI, err := abi.JSON(strings.NewReader(fmt.Sprintf(`[%s]`, methodConfig.ABI)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse method ABI: %w", err)
+	}
+
+	method, exists := parsedABI.Methods[methodConfig.Name]
+	if !exists {
+		return nil, fmt.Errorf("method %s not found in ABI", methodConfig.Name)
+	}
+
+	// Build parameters in the order specified by the ABI
+	params := make([]interface{}, len(method.Inputs))
+	for i, input := range method.Inputs {
+		paramName := input.Name
+		paramSource, exists := methodConfig.Params[paramName]
+		if !exists {
+			return nil, fmt.Errorf("parameter %s (position %d) not found in config", paramName, i)
+		}
+
+		logger.Infof("🔍 [BUILD-PARAMS] [%d] Resolving param: %s from source: %s", i, paramName, paramSource)
+
 		value, err := b.resolveParameterValue(paramSource, updateReq)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve parameter %s: %w", paramName, err)
+		}
+
+		logger.Infof("🔍 [BUILD-PARAMS] [%d] Resolved param %s: Type=%T", i, paramName, value)
+
+		// Log details for array types
+		switch v := value.(type) {
+		case []*big.Int:
+			logger.Infof("🔍 [BUILD-PARAMS] [%d]   %s is []*big.Int with %d elements ✓", i, paramName, len(v))
+		case []interface{}:
+			logger.Infof("🔍 [BUILD-PARAMS] [%d]   %s is []interface{} with %d elements ⚠️ NEEDS CONVERSION", i, paramName, len(v))
 		}
 
 		// Convert OracleIntent into tuple struct for ABI packing
@@ -539,14 +569,15 @@ func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig,
 					Signature:  []byte(intent.Signature),
 					Signer:     intent.Signer,
 				}
-				params = append(params, tuple)
+				params[i] = tuple
 				continue
 			}
 		}
-		// Default append
-		params = append(params, value)
+		// Store in correct position
+		params[i] = value
 	}
 
+	logger.Infof("🔍 [BUILD-PARAMS] Built %d parameters total in ABI order", len(params))
 	return params, nil
 }
 
@@ -577,6 +608,9 @@ func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.Upd
 						}
 						return nil, fmt.Errorf("fullIntent has unexpected type %T", value)
 					}
+
+					// Return enrichment value directly - go-ethereum's ABI unpacker
+					// already returns typed values like []*big.Int for int256[]
 					return value, nil
 				}
 				return nil, fmt.Errorf("enrichment key %s not found", enrichmentKey)
@@ -635,12 +669,48 @@ func (b *Bridge) callContractMethod(ctx context.Context, destClient *WriteClient
 	auth.GasPrice = gasPrice
 	auth.Context = ctx
 
+	// DEBUG: Log parameter types before ABI packing
+	logger.Infof("🔍 [PARAM-DEBUG] Method: %s, Contract: %s, ParamCount: %d", methodName, contractAddress.Hex(), len(params))
+
+	// Log each parameter type
+	for i, param := range params {
+		if param == nil {
+			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: NIL", i)
+			continue
+		}
+
+		switch v := param.(type) {
+		case []*big.Int:
+			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=[]*big.Int, Len=%d", i, len(v))
+			if len(v) > 0 && len(v) <= 5 {
+				for j, val := range v {
+					logger.Infof("🔍 [PARAM-DEBUG]   [%d]=%s", j, val.String())
+				}
+			}
+		case []interface{}:
+			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=[]interface{}, Len=%d ⚠️ NOT CONVERTED!", i, len(v))
+			if len(v) > 0 && len(v) <= 5 {
+				for j, val := range v {
+					logger.Infof("🔍 [PARAM-DEBUG]   [%d]=%T: %v", j, val, val)
+				}
+			}
+		case *big.Int:
+			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=*big.Int, Value=%s", i, v.String())
+		default:
+			logger.Infof("🔍 [PARAM-DEBUG] params[%d]: Type=%T, Value=%v", i, param, param)
+		}
+	}
+
+	logger.Infof("🔍 [PARAM-DEBUG] About to call Transact()...")
+
 	// Create transaction using the provided contract address
 	tx, err := bind.NewBoundContract(contractAddress, parsedABI, destClient.client, destClient.client, destClient.client).Transact(auth, methodName, params...)
 	if err != nil {
+		logger.Errorf("❌ [PARAM-DEBUG] Transaction failed: %v", err)
 		return nil, fmt.Errorf("failed to send transaction: %w", err)
 	}
 
+	logger.Infof("✅ [PARAM-DEBUG] Transaction sent successfully: %s", tx.Hash().Hex())
 	return tx, nil
 }
 

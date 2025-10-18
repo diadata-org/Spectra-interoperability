@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -448,6 +449,27 @@ func (tb *TransactionBuilder) BuildAndSendTransaction(ctx context.Context, priva
 		return common.Hash{}, fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
+	callMsg := ethereum.CallMsg{
+		From:     fromAddress,
+		To:       &tx.To,
+		Gas:      tx.GasLimit,
+		GasPrice: gasPrice,
+		Value:    tx.Value,
+		Data:     tx.Data,
+	}
+
+	if _, err := client.CallContract(ctx, callMsg, nil); err != nil {
+		revertReason := extractRevertReason(err)
+		if revertReason != "" {
+			logger.Errorf("Transaction simulation reverted for chain %d, contract %s, method %s: %s",
+				tx.ChainID, tx.To.Hex(), tx.MethodName, revertReason)
+		} else {
+			logger.Errorf("Transaction simulation failed for chain %d, contract %s, method %s: %v",
+				tx.ChainID, tx.To.Hex(), tx.MethodName, err)
+		}
+		return common.Hash{}, fmt.Errorf("transaction simulation failed: %w", err)
+	}
+
 	if err := client.SendTransaction(ctx, signedTx); err != nil {
 		// Check if this is a nonce-related error and reset if needed
 		errStr := err.Error()
@@ -465,4 +487,21 @@ func (tb *TransactionBuilder) BuildAndSendTransaction(ctx context.Context, priva
 		signedTx.Hash().Hex(), tx.ChainID, tx.To.Hex(), tx.MethodName)
 
 	return signedTx.Hash(), nil
+}
+
+func extractRevertReason(err error) string {
+	if err == nil {
+		return ""
+	}
+
+	msg := err.Error()
+	const revertedPrefix = "execution reverted:"
+	if strings.Contains(msg, revertedPrefix) {
+		parts := strings.SplitN(msg, revertedPrefix, 2)
+		if len(parts) == 2 {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+
+	return ""
 }
