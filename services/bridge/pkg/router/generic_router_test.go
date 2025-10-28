@@ -1290,3 +1290,89 @@ func TestCheckPriceDeviation(t *testing.T) {
 		})
 	}
 }
+
+// TestOnRouted_UpdatesPriceAndTime verifies that OnRouted updates both destination time AND price
+// This is a regression test for the bug where OnRouted was not passing data to UpdateDestinationTime,
+// causing the price to never be updated and resulting in excessive transaction frequency
+func TestOnRouted_UpdatesPriceAndTime(t *testing.T) {
+	type TestOracleIntent struct {
+		Symbol string
+		Price  uint64
+	}
+
+	cfg := &config.RouterConfig{
+		ID:      "test_router",
+		Enabled: true,
+		Destinations: []config.RouterDestination{
+			{
+				ChainID:        84532,
+				Contract:       "0xB3CfEDF93D954Cd6187A523Cd2A2C93dbe2281De",
+				TimeThreshold:  config.Duration(24 * time.Hour),
+				PriceDeviation: "0.5%",
+			},
+		},
+	}
+
+	gr := &GenericRouter{
+		config:                     cfg,
+		destinationTimes:           make(map[string]time.Time),
+		destinationPrices:          make(map[string]string),
+		destinationPriceTimestamps: make(map[string]uint64),
+	}
+
+	// Create test data with initial price
+	initialData := &config.ExtractedData{
+		Enrichment: map[string]interface{}{
+			"fullIntent": TestOracleIntent{
+				Symbol: "ETH/USD",
+				Price:  405000193949,
+			},
+		},
+	}
+
+	// Call OnRouted with initial data
+	gr.OnRouted("IntentRegistered", initialData)
+
+	// Verify both time and price were updated
+	destKey := "84532-0xB3CfEDF93D954Cd6187A523Cd2A2C93dbe2281De-ETH/USD"
+
+	if _, exists := gr.destinationTimes[destKey]; !exists {
+		t.Errorf("OnRouted() did not update destination time")
+	}
+
+	initialPrice, priceExists := gr.destinationPrices[destKey]
+	if !priceExists {
+		t.Fatal("OnRouted() did not update destination price - THIS IS THE BUG!")
+	}
+
+	if initialPrice != "405000193949" {
+		t.Errorf("OnRouted() updated price incorrectly: got %s, want 405000193949", initialPrice)
+	}
+
+	// Wait a moment and call OnRouted with new price
+	time.Sleep(10 * time.Millisecond)
+	newData := &config.ExtractedData{
+		Enrichment: map[string]interface{}{
+			"fullIntent": TestOracleIntent{
+				Symbol: "ETH/USD",
+				Price:  405132897155, // Different price
+			},
+		},
+	}
+
+	gr.OnRouted("IntentRegistered", newData)
+
+	// Verify the price was updated to the new value
+	updatedPrice, exists := gr.destinationPrices[destKey]
+	if !exists {
+		t.Fatal("OnRouted() did not maintain destination price tracking")
+	}
+
+	if updatedPrice != "405132897155" {
+		t.Errorf("OnRouted() did not update price to new value: got %s, want 405132897155", updatedPrice)
+	}
+
+	t.Logf("✓ OnRouted correctly updates both time and price")
+	t.Logf("  Initial price: %s", initialPrice)
+	t.Logf("  Updated price: %s", updatedPrice)
+}

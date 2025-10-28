@@ -3,6 +3,7 @@ package router
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
@@ -24,10 +25,11 @@ type GenericRouter struct {
 	privateKey    *ecdsa.PrivateKey
 	address       common.Address
 
-	mu                sync.RWMutex
-	stats             GenericRouterStats
-	destinationTimes  map[string]time.Time // Tracks last update time for each destination (key: "chainID-contract-symbol")
-	destinationPrices map[string]string    // Tracks last price for each destination (key: "chainID-contract-symbol", value: price as string)
+	mu                       sync.RWMutex
+	stats                    GenericRouterStats
+	destinationTimes         map[string]time.Time // Tracks last update time for each destination (key: "chainID-contract-symbol")
+	destinationPrices        map[string]string    // Tracks last price for each destination (key: "chainID-contract-symbol", value: price as string)
+	destinationPriceTimestamps map[string]uint64    // Tracks intent timestamp of the last saved price to ensure only newer prices overwrite
 }
 
 // GenericRouterStats tracks router statistics
@@ -46,10 +48,11 @@ func NewGenericRouter(cfg *config.RouterConfig) (*GenericRouter, error) {
 	}
 
 	router := &GenericRouter{
-		config:            cfg,
-		triggerEvents:     triggerEvents,
-		destinationTimes:  make(map[string]time.Time),
-		destinationPrices: make(map[string]string),
+		config:                     cfg,
+		triggerEvents:              triggerEvents,
+		destinationTimes:           make(map[string]time.Time),
+		destinationPrices:          make(map[string]string),
+		destinationPriceTimestamps: make(map[string]uint64),
 	}
 
 	if cfg.PrivateKey != "" {
@@ -336,15 +339,16 @@ func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config
 		}
 
 		if timeThresholdMet || priceDeviationMet {
+			currentPrice := gr.GetPriceFromData(data)
 			if timeThresholdMet && priceDeviationMet {
-				logger.Infof("Update allowed for %s (symbol: %s): BOTH time threshold AND price deviation met",
-					dest.Contract, gr.GetSymbolFromData(data))
+				logger.Infof("Update allowed for %s (symbol: %s, currentPrice: %s): BOTH time threshold AND price deviation met",
+					dest.Contract, gr.GetSymbolFromData(data), currentPrice)
 			} else if timeThresholdMet {
-				logger.Infof("Update allowed for %s (symbol: %s): time threshold met (price deviation not required or not met)",
-					dest.Contract, gr.GetSymbolFromData(data))
+				logger.Infof("Update allowed for %s (symbol: %s, currentPrice: %s): time threshold met (price deviation not required or not met)",
+					dest.Contract, gr.GetSymbolFromData(data), currentPrice)
 			} else {
-				logger.Infof("Update allowed for %s (symbol: %s): price deviation met (time threshold not required or not met)",
-					dest.Contract, gr.GetSymbolFromData(data))
+				logger.Infof("Update allowed for %s (symbol: %s, currentPrice: %s): price deviation met (time threshold not required or not met)",
+					dest.Contract, gr.GetSymbolFromData(data), currentPrice)
 			}
 			filteredDestinations = append(filteredDestinations, dest)
 		} else {
@@ -428,7 +432,7 @@ func (gr *GenericRouter) checkPriceDeviation(dest config.RouterDestination, data
 	deviationMet := percentChange >= deviationPercent
 
 	if deviationMet {
-		logger.Debugf("Price deviation met for %s: %.2f%% >= %.2f%% (last: %s, current: %s)",
+		logger.Infof("Price deviation met for %s: %.2f%% >= %.2f%% (last: %s, current: %s)",
 			destKey, percentChange, deviationPercent, lastPrice, currentPrice)
 	} else {
 		logger.Debugf("Price deviation not met for %s: %.2f%% < %.2f%% (last: %s, current: %s)",
@@ -534,25 +538,106 @@ func (gr *GenericRouter) GetSymbolFromData(data *config.ExtractedData) string {
 	return "unknown"
 }
 
+// GetTimestampFromData extracts the intent timestamp from enriched data
+func (gr *GenericRouter) GetTimestampFromData(data *config.ExtractedData) uint64 {
+	if data == nil || data.Enrichment == nil {
+		return 0
+	}
+
+	// Try to extract from fullIntent structure
+	if fullIntentRaw, ok := data.Enrichment["fullIntent"]; ok {
+		if intentValue := reflect.ValueOf(fullIntentRaw); intentValue.IsValid() {
+			if intentValue.Kind() == reflect.Ptr && !intentValue.IsNil() {
+				intentValue = intentValue.Elem()
+			}
+			if intentValue.Kind() == reflect.Struct {
+				timestampField := intentValue.FieldByName("Timestamp")
+				if timestampField.IsValid() {
+					// Handle *big.Int pointer
+					if bigInt, ok := timestampField.Interface().(*big.Int); ok && bigInt != nil {
+						return bigInt.Uint64()
+					}
+					// Handle big.Int value (not pointer)
+					if timestampField.Kind() == reflect.Struct && timestampField.Type().String() == "big.Int" {
+						if bigInt, ok := timestampField.Addr().Interface().(*big.Int); ok {
+							return bigInt.Uint64()
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: try timestamp from event data
+	if timestamp, ok := data.Event["timestamp"]; ok {
+		switch v := timestamp.(type) {
+		case *big.Int:
+			if v != nil {
+				return v.Uint64()
+			}
+		case uint64:
+			return v
+		case int64:
+			return uint64(v)
+		case int:
+			return uint64(v)
+		}
+	}
+
+	return 0
+}
+
 // UpdateDestinationTime updates the last update time for a destination
 func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, symbol string, data ...*config.ExtractedData) {
 	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
 
 	gr.mu.Lock()
+	defer gr.mu.Unlock()
+
+	// Always update system time for time threshold checks
 	gr.destinationTimes[destKey] = time.Now()
 
-	// Also update price if data is provided
+	// Only update price if timestamp is newer than what we have
 	if len(data) > 0 && data[0] != nil {
-		if price := gr.GetPriceFromData(data[0]); price != "" {
-			gr.destinationPrices[destKey] = price
-			logger.Debugf("Updated destination time and price for %s (price: %s)", destKey, price)
+		newPrice := gr.GetPriceFromData(data[0])
+		newTimestamp := gr.GetTimestampFromData(data[0])
+
+		if newPrice != "" {
+			// If timestamp is available (> 0), check if it's newer
+			if newTimestamp > 0 {
+				lastTimestamp, exists := gr.destinationPriceTimestamps[destKey]
+
+				// Only update if this is the first time OR timestamp is newer
+				if !exists || newTimestamp > lastTimestamp {
+					gr.destinationPrices[destKey] = newPrice
+					gr.destinationPriceTimestamps[destKey] = newTimestamp
+
+					if exists {
+						logger.Infof("Updated price for %s: %s (timestamp: %d > previous: %d)",
+							destKey, newPrice, newTimestamp, lastTimestamp)
+					} else {
+						logger.Infof("First price for %s: %s (timestamp: %d)",
+							destKey, newPrice, newTimestamp)
+					}
+				} else if newTimestamp == lastTimestamp {
+					logger.Debugf("Price update skipped for %s: same timestamp %d (price: %s)",
+						destKey, newTimestamp, newPrice)
+				} else {
+					logger.Warnf("REJECTED stale price update for %s: timestamp %d <= current %d (price: %s would not replace %s)",
+						destKey, newTimestamp, lastTimestamp, newPrice, gr.destinationPrices[destKey])
+				}
+			} else {
+				// No timestamp available, fall back to always updating (backward compatibility)
+				gr.destinationPrices[destKey] = newPrice
+				logger.Debugf("Updated price for %s: %s (no timestamp available, using legacy mode)",
+					destKey, newPrice)
+			}
 		} else {
 			logger.Debugf("Updated destination time for %s (no price available)", destKey)
 		}
 	} else {
-		logger.Debugf("Updated destination time for %s", destKey)
+		logger.Debugf("Updated destination time for %s (no data provided)", destKey)
 	}
-	gr.mu.Unlock()
 }
 
 // GetPrivateKey returns the router's private key
@@ -603,6 +688,6 @@ func (gr *GenericRouter) OnRouted(eventName string, data *config.ExtractedData) 
 	destinations := gr.GetDestinations(data)
 
 	for _, dest := range destinations {
-		gr.UpdateDestinationTime(dest, symbol)
+		gr.UpdateDestinationTime(dest, symbol, data)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -228,6 +229,7 @@ type ReceiverClient struct {
 	contract     *BoundContract
 	auth         *bind.TransactOpts
 	nonceManager *NonceManager
+	mu           sync.Mutex
 }
 
 // NewReceiverClient creates a new receiver client
@@ -358,6 +360,9 @@ func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeT
 		return nil, err
 	}
 
+	// Mark nonce as sent (transaction successfully submitted to mempool)
+	r.nonceManager.MarkSent(usedNonce, signedTx.Hash().Hex())
+
 	logger.Infof("Transaction sent successfully for symbol %s: tx_hash=%s, nonce=%d",
 		intent.Symbol, signedTx.Hash().Hex(), usedNonce)
 
@@ -390,21 +395,20 @@ func (r *ReceiverClient) IsAuthorizedSigner(ctx context.Context, signer common.A
 
 // UpdateAuth updates the transaction auth with new nonce and gas price
 func (r *ReceiverClient) UpdateAuth(ctx context.Context, gasPrice *big.Int) error {
-	// Get next nonce from nonce manager
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	nonce, err := r.nonceManager.GetNextNonce(ctx)
 	if err != nil {
 		logger.Errorf("Failed to get next nonce for address %s: %v", r.auth.From.Hex(), err)
 		return err
 	}
 
-	// Check retry count for this nonce
 	retryCount := r.nonceManager.GetRetryCount(nonce)
 	if retryCount > 0 {
-		// This is a replacement transaction - bump gas price significantly
-		// Increase by 50% minimum, plus 10% per retry
 		bumpPercent := 150 + (10 * retryCount)
 		if bumpPercent > 300 {
-			bumpPercent = 300 // Cap at 3x original price
+			bumpPercent = 300
 		}
 
 		originalGasPrice := new(big.Int).Set(gasPrice)
@@ -548,4 +552,14 @@ func (r *ReceiverClient) decodeErrorString(hexData string) string {
 
 	// Extract string data
 	return string(bytes[64 : 64+length])
+}
+
+// HandleTransactionError forwards transaction errors to the NonceManager for handling
+func (r *ReceiverClient) HandleTransactionError(ctx context.Context, err error, usedNonce uint64) {
+	r.nonceManager.HandleError(ctx, err, usedNonce)
+}
+
+// MarkNonceSent marks a nonce as successfully sent to the mempool
+func (r *ReceiverClient) MarkNonceSent(nonce uint64, txHash string) {
+	r.nonceManager.MarkSent(nonce, txHash)
 }

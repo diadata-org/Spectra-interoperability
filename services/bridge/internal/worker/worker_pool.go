@@ -36,10 +36,18 @@ type Worker struct {
 }
 
 // NewWorkerPool creates a new worker pool
-func NewWorkerPool(maxWorkers int) *WorkerPool {
+func NewWorkerPool(maxWorkers int, taskQueueSize int) *WorkerPool {
+	// Use taskQueueSize if provided, otherwise fallback to maxWorkers*2
+	queueSize := taskQueueSize
+	if queueSize <= 0 {
+		queueSize = maxWorkers * 2
+	}
+
+	logger.Infof("Creating worker pool: maxWorkers=%d, taskQueueSize=%d", maxWorkers, queueSize)
+
 	return &WorkerPool{
 		maxWorkers:   maxWorkers,
-		taskQueue:    make(chan *WorkerTask, maxWorkers*2),
+		taskQueue:    make(chan *WorkerTask, queueSize),
 		shutdownChan: make(chan struct{}),
 	}
 }

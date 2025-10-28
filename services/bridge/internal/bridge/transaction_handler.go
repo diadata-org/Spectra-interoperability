@@ -6,7 +6,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
@@ -81,7 +80,7 @@ func (h *TransactionHandler) buildContext(ctx context.Context, updateReq *bridge
 		return nil, fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
 	}
 
-	gasPrice, err := h.bridge.getGasPrice(ctx, destClient)
+	gasPrice, err := destClient.getGasPrice(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get gas price: %w", err)
 	}
@@ -110,44 +109,44 @@ func (h *TransactionHandler) validate(txCtx *TransactionContext) error {
 	}
 
 	// Check and update authorization for intents with signers
-	if txCtx.UpdateRequest.Intent.Signer != (common.Address{}) {
-		return h.authorizeIntent(txCtx)
-	}
+	// if txCtx.UpdateRequest.Intent.Signer != (common.Address{}) {
+	// 	return h.authorizeIntent(txCtx)
+	// }
 
 	return nil
 }
 
-func (h *TransactionHandler) authorizeIntent(txCtx *TransactionContext) error {
-	signer := txCtx.UpdateRequest.Intent.Signer
-	contract := txCtx.DestClient.receiverClient.GetAddress()
+// func (h *TransactionHandler) authorizeIntent(txCtx *TransactionContext) error {
+// 	signer := txCtx.UpdateRequest.Intent.Signer
+// 	contract := txCtx.DestClient.receiverClient.GetAddress()
 
-	logger.Infof("Checking signer authorization for %s on chain %d, contract %s",
-		signer.Hex(), txCtx.UpdateRequest.DestinationChain.ChainID, contract.Hex())
+// 	logger.Infof("Checking signer authorization for %s on chain %d, contract %s",
+// 		signer.Hex(), txCtx.UpdateRequest.DestinationChain.ChainID, contract.Hex())
 
-	isAuthorized, err := txCtx.DestClient.receiverClient.IsAuthorizedSigner(txCtx.Ctx, signer)
-	if err != nil {
-		return fmt.Errorf("failed to check signer authorization: %w", err)
-	}
+// 	isAuthorized, err := txCtx.DestClient.receiverClient.IsAuthorizedSigner(txCtx.Ctx, signer)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to check signer authorization: %w", err)
+// 	}
 
-	if !isAuthorized {
-		return fmt.Errorf("signer %s is not authorized on contract %s", signer.Hex(), contract.Hex())
-	}
+// 	if !isAuthorized {
+// 		return fmt.Errorf("signer %s is not authorized on contract %s", signer.Hex(), contract.Hex())
+// 	}
 
-	// UpdateAuth sets up the transaction auth with correct nonce and gas price
-	// This must be called before sending the transaction to ensure sequential nonce
-	if err := txCtx.DestClient.receiverClient.UpdateAuth(txCtx.Ctx, txCtx.GasPrice); err != nil {
-		return fmt.Errorf("failed to update auth: %w", err)
-	}
+// 	// UpdateAuth sets up the transaction auth with correct nonce and gas price
+// 	// This must be called before sending the transaction to ensure sequential nonce
+// 	if err := txCtx.DestClient.receiverClient.UpdateAuth(txCtx.Ctx, txCtx.GasPrice); err != nil {
+// 		return fmt.Errorf("failed to update auth: %w", err)
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 // execute builds and sends the transaction
 func (h *TransactionHandler) execute(txCtx *TransactionContext) (*types.Transaction, error) {
 	if txCtx.UpdateRequest.DestinationMethodConfig != nil {
 		return h.executeWithMethodConfig(txCtx)
 	}
-	return h.executeLegacy(txCtx)
+	return nil, fmt.Errorf("no destination method configuration provided")
 }
 
 // executeWithMethodConfig executes using router-specified method configuration
@@ -159,7 +158,7 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 		txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, methodConfig.Name,
 		gasLimit, txCtx.UpdateRequest.RouterID, txCtx.Symbol)
 
-	tx, err := h.bridge.callRouterMethod(txCtx.Ctx, txCtx.DestClient, txCtx.UpdateRequest, txCtx.GasPrice, gasLimit)
+	tx, err := txCtx.DestClient.callRouterMethod(txCtx.Ctx, txCtx.DestClient, txCtx.UpdateRequest, txCtx.GasPrice, gasLimit)
 	if err != nil {
 		logTransactionError(err, txCtx.UpdateRequest.Intent)
 		return nil, err
@@ -169,20 +168,20 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 }
 
 // executeLegacy executes using legacy HandleIntentUpdate method
-func (h *TransactionHandler) executeLegacy(txCtx *TransactionContext) (*types.Transaction, error) {
-	logger.Infof("Sending transaction for %s on chain %d with gas limit %d (legacy), router=%s, symbol=%s",
-		txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, DefaultGasLimit,
-		txCtx.UpdateRequest.RouterID, txCtx.Symbol)
+// func (h *TransactionHandler) executeLegacy(txCtx *TransactionContext) (*types.Transaction, error) {
+// 	logger.Infof("Sending transaction for %s on chain %d with gas limit %d (legacy), router=%s, symbol=%s",
+// 		txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, DefaultGasLimit,
+// 		txCtx.UpdateRequest.RouterID, txCtx.Symbol)
 
-	tx, err := txCtx.DestClient.receiverClient.HandleIntentUpdate(
-		txCtx.Ctx, txCtx.UpdateRequest.Intent, DefaultGasLimit, txCtx.GasPrice)
-	if err != nil {
-		logTransactionError(err, txCtx.UpdateRequest.Intent)
-		return nil, err
-	}
+// 	tx, err := txCtx.DestClient.receiverClient.HandleIntentUpdate(
+// 		txCtx.Ctx, txCtx.UpdateRequest.Intent, DefaultGasLimit, txCtx.GasPrice)
+// 	if err != nil {
+// 		logTransactionError(err, txCtx.UpdateRequest.Intent)
+// 		return nil, err
+// 	}
 
-	return tx, nil
-}
+// 	return tx, nil
+// }
 
 // confirm waits for transaction confirmation and updates state
 func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transaction) error {

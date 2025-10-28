@@ -37,7 +37,7 @@ type GenericEventProcessor struct {
 	extractor   *pipeline.DataExtractor
 	enricher    *pipeline.DataEnricher
 	transformer *pipeline.DataTransformer
-	txBuilder   *pipeline.TransactionBuilder
+	// txBuilder   *pipeline.TransactionBuilder // UNUSED - removed to eliminate duplicate NonceManager
 
 	eventChan  <-chan *types.EventData
 	errorChan  chan<- error
@@ -86,10 +86,8 @@ func NewGenericEventProcessor(
 
 	transformer := pipeline.NewDataTransformer()
 
-	txBuilder, err := pipeline.NewTransactionBuilder(destClients)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create transaction builder: %w", err)
-	}
+	// txBuilder removed - unused dead code that created duplicate NonceManager
+	// All transactions now go through transaction.Client → contracts.NonceManager
 
 	gep := &GenericEventProcessor{
 		config:           cfg,
@@ -102,7 +100,7 @@ func NewGenericEventProcessor(
 		extractor:        extractor,
 		enricher:         enricher,
 		transformer:      transformer,
-		txBuilder:        txBuilder,
+		// txBuilder:     nil, // removed
 		eventChan:        eventChan,
 		errorChan:        errorChan,
 		updateChan:       updateChan,

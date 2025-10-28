@@ -281,7 +281,17 @@ func TestBridge_resolveParameterValue(t *testing.T) {
 	})
 }
 
+// NOTE: This test is deprecated and skipped.
+//
+// It was written to test the old buildMethodParams implementation which didn't require ABIs
+// and had non-deterministic parameter ordering (due to Go map iteration).
+//
+// The bug was fixed in v1.2.7 by parsing ABIs to determine correct parameter order.
+//
+// See bridge_params_test.go for comprehensive tests of the new behavior.
 func TestBridge_buildMethodParams(t *testing.T) {
+	t.Skip("Deprecated test - tests old non-deterministic behavior. See bridge_params_test.go for current tests")
+
 	bridge := &Bridge{}
 
 	t.Run("MultipleParams", func(t *testing.T) {
