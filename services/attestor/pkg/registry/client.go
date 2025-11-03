@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	multirpc "github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
 	"github.com/ethereum/go-ethereum/common"
@@ -15,13 +16,14 @@ import (
 
 // Client implements the RegistryClient interface
 type Client struct {
-	privateKey   string
-	registryAddr common.Address
-	fromAddress  common.Address
+	privateKey    string
+	registryAddr  common.Address
+	fromAddress   common.Address
+	registryClient *multirpc.MultiClient
 }
 
 // NewClient creates a new registry client
-func NewClient(privateKey string, registryAddr string) (*Client, error) {
+func NewClient(privateKey string, registryAddr string, registryRPCURLs []string) (*Client, error) {
 	cleanKey := strings.TrimPrefix(privateKey, "0x")
 	privKey, err := crypto.HexToECDSA(cleanKey)
 	if err != nil {
@@ -30,10 +32,19 @@ func NewClient(privateKey string, registryAddr string) (*Client, error) {
 
 	fromAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
+	// Create shared MultiClient for registry operations
+	registryClient, err := multirpc.NewMultiClient(registryRPCURLs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to registry RPC: %w", err)
+	}
+
+	logger.Infof("Connected to registry RPC: %s", registryClient.GetCurrentRPCURL())
+
 	return &Client{
-		privateKey:   privateKey,
-		registryAddr: common.HexToAddress(registryAddr),
-		fromAddress:  fromAddr,
+		privateKey:     privateKey,
+		registryAddr:   common.HexToAddress(registryAddr),
+		fromAddress:    fromAddr,
+		registryClient: registryClient,
 	}, nil
 }
 
@@ -45,8 +56,8 @@ func (c *Client) PublishIntent(ctx context.Context, signedIntent []byte) (string
 		return "", errors.NewRegistryError("publish", "", fmt.Errorf("failed to parse signed intent: %w", err))
 	}
 
-	// Use the intent package's publish functionality
-	txHash, err := intent.PublishIntent(ctx, c.privateKey, string(signedIntent))
+	// Use the intent package's publish functionality with shared registry client
+	txHash, err := intent.PublishIntent(ctx, c.registryClient, c.privateKey, string(signedIntent))
 	if err != nil {
 		return "", errors.NewRegistryError("publish", "", err)
 	}
@@ -67,8 +78,8 @@ func (c *Client) PublishBatchIntents(ctx context.Context, signedIntents []byte) 
 		return "", errors.NewRegistryError("publish batch", "", fmt.Errorf("failed to parse batch intent: %w", err))
 	}
 
-	// Use the intent package's batch publish functionality
-	txHash, err := intent.PublishMultipleIntents(ctx, c.privateKey, string(signedIntents))
+	// Use the intent package's batch publish functionality with shared registry client
+	txHash, err := intent.PublishMultipleIntents(ctx, c.registryClient, c.privateKey, string(signedIntents))
 	if err != nil {
 		return "", errors.NewRegistryError("publish batch", "", err)
 	}
@@ -81,6 +92,9 @@ func (c *Client) PublishBatchIntents(ctx context.Context, signedIntents []byte) 
 	return txHash, nil
 }
 
-// Close closes the Ethereum client connection
+// Close closes the registry client and cleans up resources
 func (c *Client) Close() {
+	if c.registryClient != nil {
+		c.registryClient.Close()
+	}
 }

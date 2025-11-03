@@ -145,11 +145,14 @@ func main() {
 	}
 
 	// Close client connections
-	if oracleClient, ok := deps.oracle.(*client.OracleClient); ok {
+	if oracleClient, ok := deps.oracle.(*client.GuardedOracleClient); ok {
 		oracleClient.Close()
 	}
 	if deps.registry != nil {
 		deps.registry.Close()
+	}
+	if deps.signer != nil {
+		deps.signer.Close()
 	}
 
 	// Wait for all goroutines to finish with timeout
@@ -180,7 +183,7 @@ type dependencies struct {
 // createDependencies creates all the service dependencies
 func createDependencies(cfg *config.Config) (*dependencies, error) {
 	// Create oracle client
-	oracleClient, err := client.NewOracleClient(
+	oracleClient, err := client.NewGuardedOracleClient(
 		cfg.RPC.URLs,
 		cfg.Oracle.Address,
 		"", // signed address not used in new architecture
@@ -194,13 +197,14 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	registryClient, err := registry.NewClient(
 		cfg.Attestor.PrivateKey,
 		cfg.Registry.Address,
+		cfg.RPC.RegistryURLs,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create registry client: %w", err)
 	}
 
 	// Create signer
-	eip712Signer, err := signer.NewEIP712Signer(cfg.Attestor.PrivateKey)
+	eip712Signer, err := signer.NewEIP712Signer(cfg.Attestor.PrivateKey, cfg.RPC.URLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}

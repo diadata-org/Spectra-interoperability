@@ -138,9 +138,12 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 
 	logger.WithField("symbol", symbol).Debug("Processing single attestation")
 
+	// Get guardian params for this symbol
+	guardianParams := s.config.Attestor.Guardian.GetParamsForSymbol(symbol)
+
 	// Fetch oracle value
 	fetchStart := time.Now()
-	price, timestamp, err := s.oracle.GetValue(ctx, symbol)
+	price, timestamp, err := s.oracle.GetGuardedValue(ctx, symbol, guardianParams)
 	s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
 
 	if err != nil {
@@ -195,8 +198,11 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 	symbolData := make([]interfaces.SymbolData, 0, len(s.config.Attestor.Symbols))
 
 	for _, symbol := range s.config.Attestor.Symbols {
+		// Get guardian params for this symbol
+		guardianParams := s.config.Attestor.Guardian.GetParamsForSymbol(symbol)
+
 		fetchStart := time.Now()
-		price, timestamp, err := s.oracle.GetValue(ctx, symbol)
+		price, timestamp, err := s.oracle.GetGuardedValue(ctx, symbol, guardianParams)
 		s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
 
 		if err != nil {

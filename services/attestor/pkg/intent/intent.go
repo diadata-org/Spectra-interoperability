@@ -23,9 +23,12 @@ import (
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
-func AttestValue(ctx context.Context, privateKey string, fromAddress string, price *big.Int, volume *big.Int, symbol string) (string, error) {
+func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, price *big.Int, volume *big.Int, symbol string) (string, error) {
 	if privateKey == "" {
 		return "", fmt.Errorf("private key not provided")
+	}
+	if multiClient == nil {
+		return "", fmt.Errorf("multiClient is required")
 	}
 
 	now := time.Now().Unix()
@@ -43,14 +46,6 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 	intentVersion := cfg.Attestor.IntentVersion
 	if intentVersion == "" {
 		intentVersion = "1.0"
-	}
-	multiClient, err := multirpc.NewMultiClient(cfg.RPC.URLs)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to RPC: %v", err)
-	}
-	defer multiClient.Close()
-	if active := multiClient.ActiveURL(); active != "" {
-		logger.WithField("rpc_url", active).Debug("Connected to RPC endpoint for attest value")
 	}
 
 	chainID, err := multiClient.ChainID(ctx)
@@ -91,11 +86,10 @@ func AttestValue(ctx context.Context, privateKey string, fromAddress string, pri
 		Source:     "DIA Oracle",
 	}
 
-	chainIDHex := gethmath.HexOrDecimal256(*chainID)
 	domain := apitypes.TypedDataDomain{
 		Name:              "DIA Oracle",
 		Version:           intentVersion,
-		ChainId:           &chainIDHex,
+		ChainId:           (*gethmath.HexOrDecimal256)(chainID),
 		VerifyingContract: contractAddress.Hex(),
 		Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
 	}
@@ -210,9 +204,12 @@ type SymbolData struct {
 	Volume *big.Int
 }
 
-func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress string, symbolsData []SymbolData) (string, error) {
+func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, symbolsData []SymbolData) (string, error) {
 	if privateKey == "" {
 		return "", fmt.Errorf("private key not provided")
+	}
+	if multiClient == nil {
+		return "", fmt.Errorf("multiClient is required")
 	}
 
 	if len(symbolsData) == 0 {
@@ -234,14 +231,6 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	intentVersion := cfg.Attestor.IntentVersion
 	if intentVersion == "" {
 		intentVersion = "1.0"
-	}
-	multiClient, err := multirpc.NewMultiClient(cfg.RPC.URLs)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to RPC: %v", err)
-	}
-	defer multiClient.Close()
-	if active := multiClient.ActiveURL(); active != "" {
-		logger.WithField("rpc_url", active).Debug("Connected to RPC endpoint for batch attest")
 	}
 
 	chainID, err := multiClient.ChainID(ctx)
@@ -285,11 +274,10 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 			Source:     "DIA Oracle",
 		}
 
-		chainIDHex := gethmath.HexOrDecimal256(*chainID)
 		domain := apitypes.TypedDataDomain{
-			Name:              "DIA Oracle Intent",
+			Name:              "DIA Oracle",
 			Version:           intentVersion,
-			ChainId:           &chainIDHex,
+			ChainId:           (*gethmath.HexOrDecimal256)(chainID),
 			VerifyingContract: contractAddress.Hex(),
 			Salt:              "0x0000000000000000000000000000000000000000000000000000000000000000",
 		}
@@ -392,11 +380,14 @@ func AttestMultipleValues(ctx context.Context, privateKey string, fromAddress st
 	return string(batchIntentJSON), nil
 }
 
-func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJSON string) (string, error) {
+func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiClient, privateKey string, batchIntentJSON string) (string, error) {
 	startTime := time.Now()
 
+	if registryClient == nil {
+		return "", fmt.Errorf("registryClient is required")
+	}
+
 	cfg := config.Get()
-	registryRPCs := cfg.RPC.RegistryURLs
 	registryContract := cfg.Registry.Address
 
 	if registryContract == "" {
@@ -419,15 +410,6 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 	}
 
 	logger.WithField("intent_count", intentCount).Info("Processing batch transaction")
-
-	registryClient, err := multirpc.NewMultiClient(registryRPCs)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
-	}
-	defer registryClient.Close()
-	if active := registryClient.ActiveURL(); active != "" {
-		logger.WithField("rpc_url", active).Debug("Connected to registry RPC for batch publish")
-	}
 
 	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
 	if err != nil {
@@ -561,9 +543,12 @@ func PublishMultipleIntents(ctx context.Context, privateKey string, batchIntentJ
 	return "", fmt.Errorf("failed to send transaction after %d attempts: %v", maxNonceAttempts, lastErr)
 }
 
-func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON string) (string, error) {
+func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, privateKey string, signedIntentJSON string) (string, error) {
+	if registryClient == nil {
+		return "", fmt.Errorf("registryClient is required")
+	}
+
 	cfg := config.Get()
-	registryRPCs := cfg.RPC.RegistryURLs
 	registryContract := cfg.Registry.Address
 
 	if registryContract == "" {
@@ -575,15 +560,6 @@ func PublishIntent(ctx context.Context, privateKey string, signedIntentJSON stri
 	err := json.Unmarshal([]byte(signedIntentJSON), &signedIntent)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse signed intent: %v", err)
-	}
-
-	registryClient, err := multirpc.NewMultiClient(registryRPCs)
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to L2 chain: %v", err)
-	}
-	defer registryClient.Close()
-	if active := registryClient.ActiveURL(); active != "" {
-		logger.WithField("rpc_url", active).Debug("Connected to registry RPC for publish")
 	}
 
 	const registryABI = `[{"inputs":[{"internalType":"string","name":"intentType","type":"string"},{"internalType":"string","name":"version","type":"string"},{"internalType":"uint256","name":"chainId","type":"uint256"},{"internalType":"uint256","name":"nonce","type":"uint256"},{"internalType":"uint256","name":"expiry","type":"uint256"},{"internalType":"string","name":"symbol","type":"string"},{"internalType":"uint256","name":"price","type":"uint256"},{"internalType":"uint256","name":"timestamp","type":"uint256"},{"internalType":"string","name":"source","type":"string"},{"internalType":"bytes","name":"signature","type":"bytes"},{"internalType":"address","name":"signer","type":"address"}],"name":"registerIntent","outputs":[],"stateMutability":"nonpayable","type":"function"}]`

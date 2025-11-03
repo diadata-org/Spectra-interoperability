@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git make
@@ -7,21 +7,23 @@ RUN apk add --no-cache git make
 # Set working directory
 WORKDIR /workspace
 
-# Copy root go.mod and shared packages
-COPY ../../go.mod ../../go.sum ./
-COPY ../../pkg ./pkg
+# Copy root go.mod and shared packages from repository root
+COPY go.mod go.sum ./
+COPY pkg ./pkg
+
+# Copy attestor service files
+COPY services/attestor ./services/attestor
 
 # Set working directory to service
 WORKDIR /workspace/services/attestor
-
-# Copy service files
-COPY . .
 
 # Download dependencies
 RUN go mod download
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o attestor .
+RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o attestor .
+
+
 
 # Final stage
 FROM alpine:latest

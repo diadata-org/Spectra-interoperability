@@ -1,5 +1,9 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
+
+# Configure Go proxy - use direct mode to bypass proxy issues
+ENV GOPROXY=direct
+ENV GOSUMDB=off
 
 # Install dependencies
 RUN apk add --no-cache git
@@ -16,21 +20,24 @@ COPY go.mod go.sum ./
 WORKDIR /bridge
 
 # Copy bridge go mod files
-COPY bridge/go.mod bridge/go.sum ./
+COPY services/bridge/go.mod services/bridge/go.sum ./
 
 # Install protoc and Go plugins
-RUN apk add --no-cache protobuf protobuf-dev && \
+RUN apk add --no-cache protoc protobuf-c-dev && \
     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 # Regenerate proto files
 RUN cd /proto && protoc --go_out=. --go-grpc_out=. bridge.proto
 
+# Force direct module downloads (bypass proxy issues)
+ENV GOPROXY=direct GOSUMDB=off
+
 # Download dependencies
 RUN go mod download
 
 # Copy bridge source code
-COPY bridge ./
+COPY services/bridge ./
 
 # Tidy dependencies and build the application
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o bridge ./cmd/bridge

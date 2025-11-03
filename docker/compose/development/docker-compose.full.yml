@@ -26,8 +26,8 @@ services:
   # Attestor service - publishes oracle intents to registry
   attestor:
     build:
-      context: ../../../services/attestor
-      dockerfile: ../../../docker/dockerfiles/attestor.Dockerfile
+      context: ../../..
+      dockerfile: docker/dockerfiles/attestor.Dockerfile
     container_name: spectra-attestor
     restart: unless-stopped
     environment:

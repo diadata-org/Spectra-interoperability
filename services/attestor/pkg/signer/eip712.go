@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strings"
 
+	multirpc "github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
@@ -19,10 +20,11 @@ type EIP712Signer struct {
 	privateKey    *ecdsa.PrivateKey
 	address       common.Address
 	privateKeyHex string
+	signingClient *multirpc.MultiClient
 }
 
-// NewEIP712Signer creates a new EIP-712 signer
-func NewEIP712Signer(privateKeyHex string) (*EIP712Signer, error) {
+// NewEIP712Signer
+func NewEIP712Signer(privateKeyHex string, rpcURLs []string) (*EIP712Signer, error) {
 	// Remove 0x prefix if present
 	cleanKey := strings.TrimPrefix(privateKeyHex, "0x")
 
@@ -35,10 +37,16 @@ func NewEIP712Signer(privateKeyHex string) (*EIP712Signer, error) {
 	// Derive the address
 	address := crypto.PubkeyToAddress(privateKey.PublicKey)
 
+	signingClient, err := multirpc.NewMultiClient(rpcURLs)
+	if err != nil {
+		return nil, errors.NewSignerError("create signing client", "", err)
+	}
+
 	return &EIP712Signer{
 		privateKey:    privateKey,
 		address:       address,
 		privateKeyHex: privateKeyHex,
+		signingClient: signingClient,
 	}, nil
 }
 
@@ -55,8 +63,7 @@ func (s *EIP712Signer) SignIntent(ctx context.Context, price, volume *big.Int, s
 		return nil, errors.NewValidationError("symbol", symbol, "must not be empty")
 	}
 
-	// Use the intent package to create the signed intent
-	signedIntentJSON, err := intent.AttestValue(ctx, s.privateKeyHex, s.address.Hex(), price, volume, symbol)
+	signedIntentJSON, err := intent.AttestValue(ctx, s.signingClient, s.privateKeyHex, s.address.Hex(), price, volume, symbol)
 	if err != nil {
 		return nil, errors.NewSignerError("sign intent", symbol, err)
 	}
@@ -103,11 +110,17 @@ func (s *EIP712Signer) SignBatchIntent(ctx context.Context, values []interfaces.
 		})
 	}
 
-	// Use the intent package to create the batch signed intent
-	batchIntentJSON, err := intent.AttestMultipleValues(ctx, s.privateKeyHex, s.address.Hex(), symbolData)
+	batchIntentJSON, err := intent.AttestMultipleValues(ctx, s.signingClient, s.privateKeyHex, s.address.Hex(), symbolData)
 	if err != nil {
 		return nil, errors.NewSignerError("sign batch intent", fmt.Sprintf("%d values", len(values)), err)
 	}
 
 	return []byte(batchIntentJSON), nil
+}
+
+// Close
+func (s *EIP712Signer) Close() {
+	if s.signingClient != nil {
+		s.signingClient.Close()
+	}
 }

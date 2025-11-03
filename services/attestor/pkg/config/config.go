@@ -37,12 +37,13 @@ type Config struct {
 	} `mapstructure:"registry"`
 
 	Attestor struct {
-		PrivateKey    string        `mapstructure:"private_key"`
-		Symbols       []string      `mapstructure:"symbols"`
-		PollingTime   time.Duration `mapstructure:"polling_time"`
-		BatchMode     bool          `mapstructure:"batch_mode"`
-		IntentType    string        `mapstructure:"intent_type"`
-		IntentVersion string        `mapstructure:"intent_version"`
+		PrivateKey    string         `mapstructure:"private_key"`
+		Symbols       []string       `mapstructure:"symbols"`
+		PollingTime   time.Duration  `mapstructure:"polling_time"`
+		BatchMode     bool           `mapstructure:"batch_mode"`
+		IntentType    string         `mapstructure:"intent_type"`
+		IntentVersion string         `mapstructure:"intent_version"`
+		Guardian      GuardianConfig `mapstructure:"guardian"`
 	} `mapstructure:"attestor"`
 
 	Logging struct {
@@ -56,6 +57,25 @@ type Config struct {
 	API struct {
 		Port int `mapstructure:"port"`
 	} `mapstructure:"api"`
+}
+
+type GuardianConfig struct {
+	Default GuardianParams            `mapstructure:"default"`
+	Symbols map[string]GuardianParams `mapstructure:"symbols"`
+}
+
+type GuardianParams struct {
+	MaxDeviationBips   int `mapstructure:"max_deviation_bips"`
+	MaxTimestampAge    int `mapstructure:"max_timestamp_age"`
+	MinGuardianMatches int `mapstructure:"min_guardian_matches"`
+}
+
+// GetParamsForSymbol returns guardian parameters for a specific symbol.
+func (gc *GuardianConfig) GetParamsForSymbol(symbol string) GuardianParams {
+	if params, ok := gc.Symbols[symbol]; ok {
+		return params
+	}
+	return gc.Default
 }
 
 var cfg *Config
@@ -88,6 +108,9 @@ func Init(configPath string) (*Config, error) {
 	v.SetDefault("attestor.batch_mode", true)
 	v.SetDefault("attestor.intent_type", "OracleUpdate")
 	v.SetDefault("attestor.intent_version", "1.0")
+	v.SetDefault("attestor.guardian.default.max_deviation_bips", 500)
+	v.SetDefault("attestor.guardian.default.max_timestamp_age", 3600)
+	v.SetDefault("attestor.guardian.default.min_guardian_matches", 1)
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("metrics.port", 8080)
 	v.SetDefault("api.port", 8081)

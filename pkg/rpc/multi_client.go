@@ -25,6 +25,8 @@ type MultiClient struct {
 	mu              sync.RWMutex
 	lastHealthCheck time.Time
 	healthInterval  time.Duration
+	stopChan        chan struct{}
+	wg              sync.WaitGroup
 }
 
 // NewMultiClient creates a new multi-client with failover support
@@ -38,6 +40,7 @@ func NewMultiClient(urls []string) (*MultiClient, error) {
 		clients:        make([]*ethclient.Client, len(urls)),
 		currentIndex:   0,
 		healthInterval: 30 * time.Second,
+		stopChan:       make(chan struct{}),
 	}
 
 	// Try to connect to each URL
@@ -83,6 +86,7 @@ func NewMultiClient(urls []string) (*MultiClient, error) {
 	}
 
 	// Start health check routine
+	mc.wg.Add(1)
 	go mc.healthCheckLoop()
 
 	return mc, nil
@@ -174,11 +178,18 @@ func (mc *MultiClient) failover() error {
 
 // healthCheckLoop periodically checks RPC health
 func (mc *MultiClient) healthCheckLoop() {
+	defer mc.wg.Done()
 	ticker := time.NewTicker(mc.healthInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		mc.performHealthCheck()
+	for {
+		select {
+		case <-mc.stopChan:
+			logger.Debug("Health check loop stopping")
+			return
+		case <-ticker.C:
+			mc.performHealthCheck()
+		}
 	}
 }
 
@@ -236,9 +247,13 @@ func (mc *MultiClient) withRetry(fn func(*ethclient.Client) error) error {
 
 		lastErr = err
 
+		// Log the exact raw error for debugging
+		logger.Errorf("RPC error from %s (attempt %d/%d): %v (type: %T)",
+			mc.urls[mc.currentIndex], i+1, maxRetries, err, err)
+
 		// Check if error is network related
 		if isNetworkError(err) {
-			logger.Warnf("Network error on RPC %s: %v", mc.urls[mc.currentIndex], err)
+			logger.Warnf("Network error detected on RPC %s: %v", mc.urls[mc.currentIndex], err)
 			if err := mc.failover(); err != nil {
 				return fmt.Errorf("failover failed: %v, original error: %v", err, lastErr)
 			}
@@ -246,6 +261,7 @@ func (mc *MultiClient) withRetry(fn func(*ethclient.Client) error) error {
 		}
 
 		// Non-network error, don't retry
+		logger.Errorf("Non-network error (not retrying) on RPC %s: %v", mc.urls[mc.currentIndex], err)
 		return err
 	}
 
@@ -274,14 +290,19 @@ func isNetworkError(err error) bool {
 		"429",
 		"Too Many Requests",
 		"rate limit",
+		"cannot unmarshal",       // JSON parsing errors from malformed RPC responses
+		"invalid character",      // JSON syntax errors
+		"unexpected end of JSON", // Incomplete JSON responses
 	}
 
 	for _, netErr := range networkErrors {
 		if contains(errStr, netErr) {
+			logger.Debugf("Network error pattern matched: '%s' in error: %s", netErr, errStr)
 			return true
 		}
 	}
 
+	logger.Debugf("No network error pattern matched for error: %s", errStr)
 	return false
 }
 
@@ -303,6 +324,10 @@ func findSubstring(s, substr string) bool {
 
 // Close closes all clients
 func (mc *MultiClient) Close() {
+	close(mc.stopChan)
+
+	mc.wg.Wait()
+
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
