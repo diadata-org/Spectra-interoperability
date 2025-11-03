@@ -219,20 +219,21 @@ func decodeErrorData(hexData string) string {
 
 	// Look up the error in our known selectors
 	errorSelectors := map[string]string{
-		"0x82b42900": "UnauthorizedSigner() - signer not in authorizedSigners mapping",
-		"0x4e387fc6": "IntentAlreadyProcessed() - this intent hash was already processed",
-		"0x8baa579f": "InvalidSignature() - EIP-712 signature verification failed",
-		"0x356680b7": "InsufficientGasForPayment() - contract balance too low for protocol fees",
 		"0xe6c4247b": "InvalidAddress() - zero address validation failed",
-		"0x2fd2a7e4": "InvalidISMAddress() - ISM not set or zero address",
-		"0x3bf5fc78": "UnauthorizedMailbox() - sender is not the trusted mailbox",
-		"0x725b3d7f": "AmountTransferFailed() - ETH transfer to payment hook failed",
-		"0xa75c88ba": "NoBalanceToWithdraw() - contract has zero balance",
+		"0x4b9257bc": "UnauthorizedMailbox() - sender is not the trusted mailbox",
+		"0xca31867a": "UnauthorizedSigner() - signer not in authorizedSigners mapping",
+		"0x408b2234": "IntentExpired() - intent timestamp has expired",
+		"0x97d96e67": "IntentAlreadyProcessed() - this intent hash was already processed",
+		"0x8baa579f": "InvalidSignature() - EIP-712 signature verification failed",
+		"0xbbd81708": "NoBalanceToWithdraw() - contract has zero balance",
 		"0xf4d678b8": "InsufficientBalance() - withdrawal amount exceeds balance",
-		"0x8d8a9b8d": "BatchTooLarge() - batch size exceeds MAX_BATCH_SIZE (100)",
-		"0xa2a7201c": "InvalidDomainName() - empty domain name provided",
-		"0x7ba84776": "InvalidDomainVersion() - empty domain version provided",
-		"0x3d07fc42": "InvalidChainId() - zero chain ID provided",
+		"0x3d56f707": "AmountTransferFailed() - ETH transfer to payment hook failed",
+		"0xe76bf378": "InsufficientGasForPayment() - contract balance too low for protocol fees",
+		"0x0b7d62e2": "BatchTooLarge() - batch size exceeds MAX_BATCH_SIZE (100)",
+		"0x3f71cb25": "InvalidDomainName() - empty domain name provided",
+		"0x1703e094": "InvalidDomainVersion() - empty domain version provided",
+		"0x7a47c9a2": "InvalidChainId() - zero chain ID provided",
+		"0x79548cce": "DomainSeparatorZero() - domain separator is zero",
 	}
 
 	if errorName, found := errorSelectors[selector]; found {
@@ -247,21 +248,21 @@ func decodeErrorData(hexData string) string {
 func decodeCustomError(errMsg string) string {
 	// Map of known error selectors from PushOracleReceiverV2.sol
 	errorSelectors := map[string]string{
-		"0x82b42900": "UnauthorizedSigner() - signer not in authorizedSigners mapping",
-		"0x4e387fc6": "IntentAlreadyProcessed() - this intent hash was already processed",
-		"0x8baa579f": "InvalidSignature() - EIP-712 signature verification failed",
-		"0x356680b7": "InsufficientGasForPayment() - contract balance too low for protocol fees",
 		"0xe6c4247b": "InvalidAddress() - zero address validation failed",
-		"0x2fd2a7e4": "InvalidISMAddress() - ISM not set or zero address",
-		"0x3bf5fc78": "UnauthorizedMailbox() - sender is not the trusted mailbox",
-		"0x725b3d7f": "AmountTransferFailed() - ETH transfer to payment hook failed",
-		"0xa75c88ba": "NoBalanceToWithdraw() - contract has zero balance",
+		"0x4b9257bc": "UnauthorizedMailbox() - sender is not the trusted mailbox",
+		"0xca31867a": "UnauthorizedSigner() - signer not in authorizedSigners mapping",
+		"0x408b2234": "IntentExpired() - intent timestamp has expired",
+		"0x97d96e67": "IntentAlreadyProcessed() - this intent hash was already processed",
+		"0x8baa579f": "InvalidSignature() - EIP-712 signature verification failed",
+		"0xbbd81708": "NoBalanceToWithdraw() - contract has zero balance",
 		"0xf4d678b8": "InsufficientBalance() - withdrawal amount exceeds balance",
-		"0x8d8a9b8d": "BatchTooLarge() - batch size exceeds MAX_BATCH_SIZE (100)",
-		"0xa2a7201c": "InvalidDomainName() - empty domain name provided",
-		"0x7ba84776": "InvalidDomainVersion() - empty domain version provided",
-		"0x3d07fc42": "InvalidChainId() - zero chain ID provided",
-		"0x00000000": "DomainSeparatorZero() - domain separator is zero",
+		"0x3d56f707": "AmountTransferFailed() - ETH transfer to payment hook failed",
+		"0xe76bf378": "InsufficientGasForPayment() - contract balance too low for protocol fees",
+		"0x0b7d62e2": "BatchTooLarge() - batch size exceeds MAX_BATCH_SIZE (100)",
+		"0x3f71cb25": "InvalidDomainName() - empty domain name provided",
+		"0x1703e094": "InvalidDomainVersion() - empty domain version provided",
+		"0x7a47c9a2": "InvalidChainId() - zero chain ID provided",
+		"0x79548cce": "DomainSeparatorZero() - domain separator is zero",
 	}
 
 	// Look for hex error data in the message

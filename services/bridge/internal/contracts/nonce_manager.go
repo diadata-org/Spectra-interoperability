@@ -17,12 +17,13 @@ import (
 type NonceManager struct {
 	client        *ethclient.Client
 	address       common.Address
+	chainID       int64 // Chain ID for logging
 	mu            sync.Mutex
-	localNonce    uint64           // Our local tracked nonce (next to use)
-	initialized   bool             // Whether we've synced with chain
+	localNonce    uint64                // Our local tracked nonce (next to use)
+	initialized   bool                  // Whether we've synced with chain
 	pendingNonces map[uint64]*NonceInfo // Track nonce usage
-	retryCount    map[uint64]int   // Track retry attempts per nonce
-	lastSync      time.Time        // Last time we synced with chain
+	retryCount    map[uint64]int        // Track retry attempts per nonce
+	lastSync      time.Time             // Last time we synced with chain
 }
 
 // NonceInfo tracks information about a nonce
@@ -33,10 +34,11 @@ type NonceInfo struct {
 }
 
 // NewNonceManager creates a new nonce manager
-func NewNonceManager(client *ethclient.Client, address common.Address) *NonceManager {
+func NewNonceManager(client *ethclient.Client, address common.Address, chainID int64) *NonceManager {
 	return &NonceManager{
 		client:        client,
 		address:       address,
+		chainID:       chainID,
 		pendingNonces: make(map[uint64]*NonceInfo),
 		retryCount:    make(map[uint64]int),
 		initialized:   false,
@@ -45,12 +47,31 @@ func NewNonceManager(client *ethclient.Client, address common.Address) *NonceMan
 
 // GetNextNonce returns the next available nonce with local tracking
 func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
-	// CRITICAL: Fetch chain nonce WITHOUT holding lock for better concurrency
-	// This allows multiple threads to make RPC calls in parallel
-	pendingNonce, err := nm.client.PendingNonceAt(ctx, nm.address)
-	if err != nil {
-		logger.Errorf("NonceManager: Failed to get pending nonce: %v", err)
-		return 0, fmt.Errorf("failed to get pending nonce: %w", err)
+	// During initialization, use confirmed nonce instead of pending nonce
+	// to avoid starting with stale pending transactions from RPC mempool
+	var chainNonce uint64
+	var err error
+
+	// Check if this is first initialization
+	nm.mu.Lock()
+	isFirstInit := !nm.initialized
+	nm.mu.Unlock()
+
+	if isFirstInit {
+		// In First call Use confirmed nonce to avoid stale pending transactions
+		chainNonce, err = nm.client.NonceAt(ctx, nm.address, nil)
+		if err != nil {
+			logger.Errorf("NonceManager: Failed to get confirmed nonce for chain %d: %v", nm.chainID, err)
+			return 0, fmt.Errorf("failed to get confirmed nonce: %w", err)
+		}
+		logger.Infof("NonceManager: Initializing with confirmed nonce %d for address %s on chain %d", chainNonce, nm.address.Hex(), nm.chainID)
+	} else {
+		// After initialization, Using pending nonce to detect new transactions
+		chainNonce, err = nm.client.PendingNonceAt(ctx, nm.address)
+		if err != nil {
+			logger.Errorf("NonceManager: Failed to get pending nonce for chain %d: %v", nm.chainID, err)
+			return 0, fmt.Errorf("failed to get pending nonce: %w", err)
+		}
 	}
 
 	// Now acquire lock for the actual nonce allocation (fast, in-memory operations)
@@ -58,13 +79,15 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	defer nm.mu.Unlock()
 
 	// If chain is ahead of our tracking, sync up immediately
-	if pendingNonce > nm.localNonce {
-		logger.Warnf("NonceManager: Chain moved ahead (chain: %d, local: %d), syncing", pendingNonce, nm.localNonce)
-		nm.localNonce = pendingNonce
+	if chainNonce > nm.localNonce {
+		if nm.initialized {
+			logger.Warnf("NonceManager: Chain moved ahead (chain: %d, local: %d), syncing", chainNonce, nm.localNonce)
+		}
+		nm.localNonce = chainNonce
 
 		// Clean up any nonces below chain nonce (they're already confirmed)
 		for n := range nm.pendingNonces {
-			if n < pendingNonce {
+			if n < chainNonce {
 				logger.Debugf("NonceManager: Cleaning up confirmed nonce %d", n)
 				delete(nm.pendingNonces, n)
 				delete(nm.retryCount, n)

@@ -158,7 +158,7 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 		txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, methodConfig.Name,
 		gasLimit, txCtx.UpdateRequest.RouterID, txCtx.Symbol)
 
-	tx, err := txCtx.DestClient.callRouterMethod(txCtx.Ctx, txCtx.DestClient, txCtx.UpdateRequest, txCtx.GasPrice, gasLimit)
+	tx, err := txCtx.DestClient.callRouterMethod(txCtx.Ctx, txCtx.UpdateRequest, txCtx.GasPrice, gasLimit)
 	if err != nil {
 		logTransactionError(err, txCtx.UpdateRequest.Intent)
 		return nil, err

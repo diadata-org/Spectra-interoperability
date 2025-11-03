@@ -94,13 +94,15 @@ func (wc *WriteClient) getGasPrice(ctx context.Context) (*big.Int, error) {
 		return nil, err
 	}
 
-	// Increase suggested gas price by 20% to ensure timely inclusion
-	// This helps avoid stuck transactions
-	gasPrice.Mul(gasPrice, big.NewInt(120))
+	multiplier := wc.chainConfig.GasMultiplier
+	if multiplier == 0 {
+		multiplier = 1.2
+	}
+
+	multiplierInt := int64(multiplier * 100)
+	gasPrice.Mul(gasPrice, big.NewInt(multiplierInt))
 	gasPrice.Div(gasPrice, big.NewInt(100))
 
-	// Apply gas price cap from contract config if available
-	// Note: This would need to be per-contract in production
 	for _, contract := range wc.contracts {
 		if contract.MaxGasPrice != "" {
 			maxGasPrice := new(big.Int)

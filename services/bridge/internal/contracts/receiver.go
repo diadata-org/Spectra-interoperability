@@ -270,7 +270,7 @@ func NewReceiverClient(client *ethclient.Client, address common.Address, private
 			client:  client,
 		},
 		auth:         auth,
-		nonceManager: NewNonceManager(client, auth.From),
+		nonceManager: NewNonceManager(client, auth.From, chainID.Int64()),
 	}, nil
 }
 
