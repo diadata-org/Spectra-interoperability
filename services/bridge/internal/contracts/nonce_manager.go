@@ -58,7 +58,6 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	nm.mu.Unlock()
 
 	if isFirstInit {
-		// In First call Use confirmed nonce to avoid stale pending transactions
 		chainNonce, err = nm.client.NonceAt(ctx, nm.address, nil)
 		if err != nil {
 			logger.Errorf("NonceManager: Failed to get confirmed nonce for chain %d: %v", nm.chainID, err)
@@ -66,11 +65,11 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 		}
 		logger.Infof("NonceManager: Initializing with confirmed nonce %d for address %s on chain %d", chainNonce, nm.address.Hex(), nm.chainID)
 	} else {
-		// After initialization, Using pending nonce to detect new transactions
-		chainNonce, err = nm.client.PendingNonceAt(ctx, nm.address)
+		// TODO temo fix due to nonce gap in eth sepolia
+		chainNonce, err = nm.client.NonceAt(ctx, nm.address, nil)
 		if err != nil {
-			logger.Errorf("NonceManager: Failed to get pending nonce for chain %d: %v", nm.chainID, err)
-			return 0, fmt.Errorf("failed to get pending nonce: %w", err)
+			logger.Errorf("NonceManager: Failed to get confirmed nonce for chain %d: %v", nm.chainID, err)
+			return 0, fmt.Errorf("failed to get confirmed nonce: %w", err)
 		}
 	}
 
@@ -78,14 +77,13 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
-	// If chain is ahead of our tracking, sync up immediately
 	if chainNonce > nm.localNonce {
 		if nm.initialized {
-			logger.Warnf("NonceManager: Chain moved ahead (chain: %d, local: %d), syncing", chainNonce, nm.localNonce)
+			logger.Infof("NonceManager: Confirmed nonce ahead (confirmed: %d, local: %d) - transactions were mined, syncing", chainNonce, nm.localNonce)
 		}
 		nm.localNonce = chainNonce
 
-		// Clean up any nonces below chain nonce (they're already confirmed)
+		// Clean up any nonces below confirmed nonce (they're already mined)
 		for n := range nm.pendingNonces {
 			if n < chainNonce {
 				logger.Debugf("NonceManager: Cleaning up confirmed nonce %d", n)
@@ -95,7 +93,33 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 		}
 	}
 
+	const maxSafeGap = 100 // Allow up to 100 pending transactions
+	if nm.localNonce > chainNonce {
+		gap := nm.localNonce - chainNonce
+		if gap > maxSafeGap {
+			logger.Errorf("NonceManager: ERROR - Local nonce (%d) is %d ahead of chain (%d)",
+				nm.localNonce, gap, chainNonce)
+			logger.Errorf("NonceManager: Gap of %d exceeds max safe gap of %d", gap, maxSafeGap)
+			logger.Errorf("NonceManager: This means transactions are NOT being broadcast to network!")
+			logger.Errorf("NonceManager: Forcing nonce reset to prevent infinite gap growth")
+
+			nm.localNonce = chainNonce
+			nm.pendingNonces = make(map[uint64]*NonceInfo)
+			nm.retryCount = make(map[uint64]int)
+
+			logger.Warnf("NonceManager: Emergency reset complete. Local nonce: %d", nm.localNonce)
+
+			return 0, fmt.Errorf("nonce gap exceeded %d (had %d pending), forced reset to chain nonce %d - check transaction broadcast", maxSafeGap, gap, chainNonce)
+		}
+
+		if gap > 50 && gap%10 == 0 {
+			logger.Warnf("NonceManager: Local nonce %d ahead of chain %d by %d (pending transactions)",
+				nm.localNonce, chainNonce, gap)
+		}
+	}
+
 	nm.initialized = true
+	nm.lastSync = time.Now()
 
 	// Find the next available nonce
 	nonce := nm.localNonce
@@ -123,21 +147,15 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 // syncWithChainLocked syncs local nonce with chain state (must be called with lock held)
 func (nm *NonceManager) syncWithChainLocked(ctx context.Context) error {
 	// Get confirmed nonce from chain
+	//  use confirmed nonce - pending nonce includes old stuck transactions
 	confirmedNonce, err := nm.client.NonceAt(ctx, nm.address, nil)
 	if err != nil {
 		logger.Errorf("NonceManager: Failed to get confirmed nonce for %s: %v", nm.address.Hex(), err)
 		return err
 	}
 
-	// Get pending nonce from mempool
-	pendingNonce, err := nm.client.PendingNonceAt(ctx, nm.address)
-	if err != nil {
-		logger.Errorf("NonceManager: Failed to get pending nonce for %s: %v", nm.address.Hex(), err)
-		return err
-	}
-
-	logger.Infof("NonceManager: Syncing - confirmed: %d, pending: %d, local: %d",
-		confirmedNonce, pendingNonce, nm.localNonce)
+	logger.Infof("NonceManager: Syncing - confirmed: %d, local: %d",
+		confirmedNonce, nm.localNonce)
 
 	// Clean up confirmed nonces
 	for n := range nm.pendingNonces {
@@ -148,36 +166,23 @@ func (nm *NonceManager) syncWithChainLocked(ctx context.Context) error {
 		}
 	}
 
-	// Determine which nonce to use
-	var targetNonce uint64
+	// If confirmed nonce is ahead of our local tracking, catch up
+	// This means some of our transactions were mined
+	if confirmedNonce > nm.localNonce {
+		logger.Infof("NonceManager: Confirmed nonce (%d) ahead of local (%d) - transactions mined, syncing forward",
+			confirmedNonce, nm.localNonce)
+		nm.localNonce = confirmedNonce
 
-	if pendingNonce > confirmedNonce {
-		// We have transactions in mempool
-		targetNonce = pendingNonce
-		logger.Infof("NonceManager: Using pending nonce %d (transactions in mempool)", pendingNonce)
-	} else {
-		// No pending transactions, use confirmed
-		targetNonce = confirmedNonce
-		logger.Infof("NonceManager: Using confirmed nonce %d (no pending transactions)", confirmedNonce)
-	}
-
-	// If chain is ahead of our local tracking, catch up
-	if targetNonce > nm.localNonce {
-		logger.Warnf("NonceManager: Chain nonce (%d) ahead of local (%d), catching up",
-			targetNonce, nm.localNonce)
-		nm.localNonce = targetNonce
-
-		// Clear any stale pending nonces below the chain nonce
+		// Clear any stale pending nonces below the confirmed nonce
 		for n := range nm.pendingNonces {
-			if n < targetNonce {
+			if n < confirmedNonce {
 				delete(nm.pendingNonces, n)
 				delete(nm.retryCount, n)
 			}
 		}
-	} else if targetNonce < nm.localNonce {
-		// Chain is behind our local tracking - this is normal (we allocated but haven't sent yet)
-		logger.Debugf("NonceManager: Local nonce (%d) ahead of chain (%d) - normal pending state",
-			nm.localNonce, targetNonce)
+	} else if confirmedNonce < nm.localNonce {
+		logger.Debugf("NonceManager: Local nonce (%d) ahead of confirmed (%d) - normal pending state",
+			nm.localNonce, confirmedNonce)
 	}
 
 	nm.initialized = true

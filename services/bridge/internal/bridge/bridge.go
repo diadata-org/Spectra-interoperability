@@ -435,7 +435,6 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 func (b *Bridge) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash) (*types.Receipt, error) {
 	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
 
-	// Maximum wait time: 5 minutes
 	timeout := time.After(5 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()

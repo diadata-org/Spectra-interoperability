@@ -419,8 +419,8 @@ func (r *ReceiverClient) UpdateAuth(ctx context.Context, gasPrice *big.Int) erro
 			nonce, retryCount, originalGasPrice.String(), gasPrice.String(), bumpPercent)
 	}
 
-	logger.Infof("Nonce allocated for address %s: nonce=%d, gas_price=%s",
-		r.auth.From.Hex(), nonce, gasPrice.String())
+	logger.Infof("Nonce allocated for address %s on chain %d: nonce=%d, gas_price=%s",
+		r.auth.From.Hex(), r.nonceManager.chainID, nonce, gasPrice.String())
 
 	r.auth.Nonce = big.NewInt(int64(nonce))
 	r.auth.GasPrice = gasPrice

@@ -247,6 +247,14 @@ func (mc *MultiClient) withRetry(fn func(*ethclient.Client) error) error {
 
 		lastErr = err
 
+		// Check if this is ethereum.NotFound (e.g., transaction receipt not yet mined)
+		// This is a NORMAL expected error during polling, use DEBUG logging
+		if errors.Is(err, ethereum.NotFound) {
+			logger.Debugf("RPC returned NotFound from %s (attempt %d/%d): %v - this is normal for pending transactions",
+				mc.urls[mc.currentIndex], i+1, maxRetries, err)
+			return err // Return immediately, caller's polling loop will handle retry
+		}
+
 		// Log the exact raw error for debugging
 		logger.Errorf("RPC error from %s (attempt %d/%d): %v (type: %T)",
 			mc.urls[mc.currentIndex], i+1, maxRetries, err, err)
