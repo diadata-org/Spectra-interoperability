@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // OracleIntentRegistryABI is the ABI for the OracleIntentRegistry contract
@@ -177,7 +177,7 @@ const OracleIntentRegistryABI = `[
 
 // RegistryClient wraps the OracleIntentRegistry contract
 type RegistryClient struct {
-	client   *ethclient.Client
+	client   rpc.EthClient
 	address  common.Address
 	abi      abi.ABI
 	contract *BoundContract
@@ -187,7 +187,7 @@ type RegistryClient struct {
 type BoundContract struct {
 	address common.Address
 	abi     abi.ABI
-	client  *ethclient.Client
+	client  rpc.EthClient
 }
 
 // Call makes a contract call

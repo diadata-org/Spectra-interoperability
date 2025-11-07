@@ -56,13 +56,9 @@ func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.C
 		return nil, fmt.Errorf("no enabled receiver contract found")
 	}
 
-	ethClient, err := client.GetClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get eth client: %w", err)
-	}
-
+	// Use the multi-client for on-chain calls (failover + retries)
 	receiverClient, err := contracts.NewReceiverClient(
-		ethClient,
+		client,
 		common.HexToAddress(receiverAddress),
 		privateKey,
 	)

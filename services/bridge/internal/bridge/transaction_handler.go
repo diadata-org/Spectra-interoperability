@@ -108,38 +108,8 @@ func (h *TransactionHandler) validate(txCtx *TransactionContext) error {
 		return fmt.Errorf("intent expired")
 	}
 
-	// Check and update authorization for intents with signers
-	// if txCtx.UpdateRequest.Intent.Signer != (common.Address{}) {
-	// 	return h.authorizeIntent(txCtx)
-	// }
-
 	return nil
 }
-
-// func (h *TransactionHandler) authorizeIntent(txCtx *TransactionContext) error {
-// 	signer := txCtx.UpdateRequest.Intent.Signer
-// 	contract := txCtx.DestClient.receiverClient.GetAddress()
-
-// 	logger.Infof("Checking signer authorization for %s on chain %d, contract %s",
-// 		signer.Hex(), txCtx.UpdateRequest.DestinationChain.ChainID, contract.Hex())
-
-// 	isAuthorized, err := txCtx.DestClient.receiverClient.IsAuthorizedSigner(txCtx.Ctx, signer)
-// 	if err != nil {
-// 		return fmt.Errorf("failed to check signer authorization: %w", err)
-// 	}
-
-// 	if !isAuthorized {
-// 		return fmt.Errorf("signer %s is not authorized on contract %s", signer.Hex(), contract.Hex())
-// 	}
-
-// 	// UpdateAuth sets up the transaction auth with correct nonce and gas price
-// 	// This must be called before sending the transaction to ensure sequential nonce
-// 	if err := txCtx.DestClient.receiverClient.UpdateAuth(txCtx.Ctx, txCtx.GasPrice); err != nil {
-// 		return fmt.Errorf("failed to update auth: %w", err)
-// 	}
-
-// 	return nil
-// }
 
 // execute builds and sends the transaction
 func (h *TransactionHandler) execute(txCtx *TransactionContext) (*types.Transaction, error) {
@@ -166,22 +136,6 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 
 	return tx, nil
 }
-
-// executeLegacy executes using legacy HandleIntentUpdate method
-// func (h *TransactionHandler) executeLegacy(txCtx *TransactionContext) (*types.Transaction, error) {
-// 	logger.Infof("Sending transaction for %s on chain %d with gas limit %d (legacy), router=%s, symbol=%s",
-// 		txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, DefaultGasLimit,
-// 		txCtx.UpdateRequest.RouterID, txCtx.Symbol)
-
-// 	tx, err := txCtx.DestClient.receiverClient.HandleIntentUpdate(
-// 		txCtx.Ctx, txCtx.UpdateRequest.Intent, DefaultGasLimit, txCtx.GasPrice)
-// 	if err != nil {
-// 		logTransactionError(err, txCtx.UpdateRequest.Intent)
-// 		return nil, err
-// 	}
-
-// 	return tx, nil
-// }
 
 // confirm waits for transaction confirmation and updates state
 func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transaction) error {

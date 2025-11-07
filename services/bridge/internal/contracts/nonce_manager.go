@@ -7,15 +7,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
-
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
+	"github.com/ethereum/go-ethereum/common"
 )
+
+// staleNonceThreshold defines how long to keep pending nonces before eviction
+const staleNonceThreshold = 10 * time.Minute
+
+// maxRetryCount defines maximum retry attempts for a nonce before forcing eviction
+const maxRetryCount = 5
 
 // NonceManager manages nonces for transaction sending with local tracking
 type NonceManager struct {
-	client        *ethclient.Client
+	client        rpc.EthClient
 	address       common.Address
 	chainID       int64 // Chain ID for logging
 	mu            sync.Mutex
@@ -34,7 +39,7 @@ type NonceInfo struct {
 }
 
 // NewNonceManager creates a new nonce manager
-func NewNonceManager(client *ethclient.Client, address common.Address, chainID int64) *NonceManager {
+func NewNonceManager(client rpc.EthClient, address common.Address, chainID int64) *NonceManager {
 	return &NonceManager{
 		client:        client,
 		address:       address,
@@ -45,60 +50,59 @@ func NewNonceManager(client *ethclient.Client, address common.Address, chainID i
 	}
 }
 
-// GetNextNonce returns the next available nonce with local tracking
-func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
-	// During initialization, use confirmed nonce instead of pending nonce
-	// to avoid starting with stale pending transactions from RPC mempool
-	var chainNonce uint64
-	var err error
-
-	// Check if this is first initialization
-	nm.mu.Lock()
-	isFirstInit := !nm.initialized
-	nm.mu.Unlock()
-
-	if isFirstInit {
-		chainNonce, err = nm.client.NonceAt(ctx, nm.address, nil)
-		if err != nil {
-			logger.Errorf("NonceManager: Failed to get confirmed nonce for chain %d: %v", nm.chainID, err)
-			return 0, fmt.Errorf("failed to get confirmed nonce: %w", err)
-		}
-		logger.Infof("NonceManager: Initializing with confirmed nonce %d for address %s on chain %d", chainNonce, nm.address.Hex(), nm.chainID)
-	} else {
-		// TODO temo fix due to nonce gap in eth sepolia
-		chainNonce, err = nm.client.NonceAt(ctx, nm.address, nil)
-		if err != nil {
-			logger.Errorf("NonceManager: Failed to get confirmed nonce for chain %d: %v", nm.chainID, err)
-			return 0, fmt.Errorf("failed to get confirmed nonce: %w", err)
+// cleanupAndSyncLocked deletes confirmed nonces and catches up localNonce if behind
+func (nm *NonceManager) cleanupAndSyncLocked(chainNonce uint64) {
+	for n := range nm.pendingNonces {
+		if n < chainNonce {
+			logger.Debugf("NonceManager: Cleaning up confirmed nonce %d", n)
+			delete(nm.pendingNonces, n)
+			delete(nm.retryCount, n)
 		}
 	}
+	if chainNonce > nm.localNonce {
+		nm.localNonce = chainNonce
+	}
+}
 
-	// Now acquire lock for the actual nonce allocation (fast, in-memory operations)
+// evictStalePendingLocked removes pending nonces older than staleNonceThreshold
+func (nm *NonceManager) evictStalePendingLocked(now time.Time) {
+	for n, info := range nm.pendingNonces {
+		if now.Sub(info.Allocated) > staleNonceThreshold {
+			logger.Warnf("NonceManager: Evicting stale pending nonce %d (allocated at %v)", n, info.Allocated)
+			delete(nm.pendingNonces, n)
+			delete(nm.retryCount, n)
+		}
+	}
+}
+
+// GetNextNonce returns the next available nonce with local tracking
+func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	nm.mu.Lock()
 	defer nm.mu.Unlock()
 
-	if chainNonce > nm.localNonce {
-		if nm.initialized {
-			logger.Infof("NonceManager: Confirmed nonce ahead (confirmed: %d, local: %d) - transactions were mined, syncing", chainNonce, nm.localNonce)
-		}
-		nm.localNonce = chainNonce
-
-		// Clean up any nonces below confirmed nonce (they're already mined)
-		for n := range nm.pendingNonces {
-			if n < chainNonce {
-				logger.Debugf("NonceManager: Cleaning up confirmed nonce %d", n)
-				delete(nm.pendingNonces, n)
-				delete(nm.retryCount, n)
-			}
-		}
+	// Get confirmed nonce
+	chainNonce, err := nm.client.NonceAt(ctx, nm.address, nil)
+	if err != nil {
+		logger.Errorf("NonceManager: Failed to get confirmed nonce for chain %d: %v", nm.chainID, err)
+		return 0, fmt.Errorf("failed to get confirmed nonce: %w", err)
+	}
+	if !nm.initialized {
+		logger.Infof("NonceManager: Initializing with confirmed nonce %d for address %s on chain %d", chainNonce, nm.address.Hex(), nm.chainID)
+	} else if chainNonce > nm.localNonce {
+		logger.Infof("NonceManager: Confirmed nonce ahead (confirmed: %d, local: %d) - transactions were mined, syncing", chainNonce, nm.localNonce)
 	}
 
-	const maxSafeGap = 100 // Allow up to 100 pending transactions
+	// Sync local state with chain
+	nm.cleanupAndSyncLocked(chainNonce)
+	// Evict stale pending nonces
+	nm.evictStalePendingLocked(time.Now())
+
+	// Handle gap when localNonce is ahead of chainNonce
 	if nm.localNonce > chainNonce {
 		gap := nm.localNonce - chainNonce
+		const maxSafeGap = 100
 		if gap > maxSafeGap {
-			logger.Errorf("NonceManager: ERROR - Local nonce (%d) is %d ahead of chain (%d)",
-				nm.localNonce, gap, chainNonce)
+			logger.Errorf("NonceManager: ERROR - Local nonce (%d) is %d ahead of chain (%d)", nm.localNonce, gap, chainNonce)
 			logger.Errorf("NonceManager: Gap of %d exceeds max safe gap of %d", gap, maxSafeGap)
 			logger.Errorf("NonceManager: This means transactions are NOT being broadcast to network!")
 			logger.Errorf("NonceManager: Forcing nonce reset to prevent infinite gap growth")
@@ -108,86 +112,47 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 			nm.retryCount = make(map[uint64]int)
 
 			logger.Warnf("NonceManager: Emergency reset complete. Local nonce: %d", nm.localNonce)
-
 			return 0, fmt.Errorf("nonce gap exceeded %d (had %d pending), forced reset to chain nonce %d - check transaction broadcast", maxSafeGap, gap, chainNonce)
 		}
-
 		if gap > 50 && gap%10 == 0 {
-			logger.Warnf("NonceManager: Local nonce %d ahead of chain %d by %d (pending transactions)",
-				nm.localNonce, chainNonce, gap)
+			logger.Warnf("NonceManager: Local nonce %d ahead of chain %d by %d (pending transactions)", nm.localNonce, chainNonce, gap)
 		}
 	}
 
 	nm.initialized = true
 	nm.lastSync = time.Now()
 
-	// Find the next available nonce
+	// Allocate or reuse nonce
 	nonce := nm.localNonce
-
-	// If this nonce is already pending and not sent, reuse it (retry case)
 	if info, exists := nm.pendingNonces[nonce]; exists && !info.Sent {
 		logger.Infof("NonceManager: Reusing pending nonce %d for retry (not yet sent)", nonce)
 		return nonce, nil
 	}
-
-	// Otherwise, mark as allocated and increment for next call
-	nm.pendingNonces[nonce] = &NonceInfo{
-		Allocated: time.Now(),
-		Sent:      false,
-	}
-
+	nm.pendingNonces[nonce] = &NonceInfo{Allocated: time.Now(), Sent: false}
 	nm.localNonce++
-
-	logger.Debugf("NonceManager: Allocated nonce %d for address %s (next: %d, pending: %d)",
-		nonce, nm.address.Hex(), nm.localNonce, len(nm.pendingNonces))
-
+	logger.Debugf("NonceManager: Allocated nonce %d for address %s (next: %d, pending: %d)", nonce, nm.address.Hex(), nm.localNonce, len(nm.pendingNonces))
 	return nonce, nil
 }
 
 // syncWithChainLocked syncs local nonce with chain state (must be called with lock held)
 func (nm *NonceManager) syncWithChainLocked(ctx context.Context) error {
 	// Get confirmed nonce from chain
-	//  use confirmed nonce - pending nonce includes old stuck transactions
 	confirmedNonce, err := nm.client.NonceAt(ctx, nm.address, nil)
 	if err != nil {
 		logger.Errorf("NonceManager: Failed to get confirmed nonce for %s: %v", nm.address.Hex(), err)
 		return err
 	}
+	logger.Infof("NonceManager: Syncing - confirmed: %d, local: %d", confirmedNonce, nm.localNonce)
 
-	logger.Infof("NonceManager: Syncing - confirmed: %d, local: %d",
-		confirmedNonce, nm.localNonce)
+	// Sync local state with chain
+	nm.cleanupAndSyncLocked(confirmedNonce)
 
-	// Clean up confirmed nonces
-	for n := range nm.pendingNonces {
-		if n < confirmedNonce {
-			logger.Debugf("NonceManager: Cleaning up confirmed nonce %d", n)
-			delete(nm.pendingNonces, n)
-			delete(nm.retryCount, n)
-		}
-	}
-
-	// If confirmed nonce is ahead of our local tracking, catch up
-	// This means some of our transactions were mined
-	if confirmedNonce > nm.localNonce {
-		logger.Infof("NonceManager: Confirmed nonce (%d) ahead of local (%d) - transactions mined, syncing forward",
-			confirmedNonce, nm.localNonce)
-		nm.localNonce = confirmedNonce
-
-		// Clear any stale pending nonces below the confirmed nonce
-		for n := range nm.pendingNonces {
-			if n < confirmedNonce {
-				delete(nm.pendingNonces, n)
-				delete(nm.retryCount, n)
-			}
-		}
-	} else if confirmedNonce < nm.localNonce {
-		logger.Debugf("NonceManager: Local nonce (%d) ahead of confirmed (%d) - normal pending state",
-			nm.localNonce, confirmedNonce)
+	if confirmedNonce < nm.localNonce {
+		logger.Debugf("NonceManager: Local nonce (%d) ahead of confirmed (%d) - normal pending state", nm.localNonce, confirmedNonce)
 	}
 
 	nm.initialized = true
 	nm.lastSync = time.Now()
-
 	return nil
 }
 
@@ -253,54 +218,67 @@ func (nm *NonceManager) Reset() {
 	nm.lastSync = time.Time{} // Force resync on next GetNextNonce
 }
 
+// classifyTxError categorizes transaction errors into known types
+func classifyTxError(err error) (tooLow bool, replacementUnderpriced bool, txUnderpriced bool, alreadyKnown bool) {
+	if err == nil {
+		return false, false, false, false
+	}
+	msg := strings.ToLower(err.Error())
+	tooLow = strings.Contains(msg, "nonce too low")
+	replacementUnderpriced = strings.Contains(msg, "replacement transaction underpriced")
+	txUnderpriced = strings.Contains(msg, "transaction underpriced")
+	alreadyKnown = strings.Contains(msg, "already known")
+	return
+}
+
 // HandleError processes transaction errors and adjusts nonce management
 func (nm *NonceManager) HandleError(ctx context.Context, err error, usedNonce uint64) {
 	if err == nil {
 		return
 	}
+	tooLow, replUnderpriced, txUnderpriced, alreadyKnown := classifyTxError(err)
 
-	errStr := err.Error()
-
-	// Handle different error types
-	if strings.Contains(errStr, "nonce too low") {
+	switch {
+	case tooLow:
 		logger.Warnf("NonceManager: Nonce too low error for nonce %d - chain is ahead, syncing with chain", usedNonce)
-
-		// Full resync with chain to get current nonce state
 		nm.mu.Lock()
-
-		// Sync with chain to get accurate nonce
-		chainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		chainCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-
-		if err := nm.syncWithChainLocked(chainCtx); err != nil {
-			logger.Errorf("NonceManager: Failed to sync after nonce too low error: %v", err)
+		if syncErr := nm.syncWithChainLocked(chainCtx); syncErr != nil {
+			logger.Errorf("NonceManager: Failed to sync after nonce too low error: %v", syncErr)
 		} else {
 			logger.Infof("NonceManager: Resynced after nonce too low, local nonce now: %d", nm.localNonce)
 		}
-
-		// Clean up the failed nonce
 		delete(nm.pendingNonces, usedNonce)
 		delete(nm.retryCount, usedNonce)
-
 		nm.mu.Unlock()
 
-	} else if strings.Contains(errStr, "replacement transaction underpriced") {
-		logger.Warnf("NonceManager: Replacement transaction underpriced for nonce %d", usedNonce)
-		// This is handled by gas price bump in receiver.go UpdateAuth
-		// Just increment retry count
-		nm.IncrementRetryCount(usedNonce)
-
+	case replUnderpriced || txUnderpriced:
+		if replUnderpriced {
+			logger.Warnf("NonceManager: Replacement transaction underpriced for nonce %d", usedNonce)
+		} else {
+			logger.Warnf("NonceManager: Transaction underpriced for nonce %d", usedNonce)
+		}
+		count := nm.IncrementRetryCount(usedNonce)
+		if count > maxRetryCount {
+			logger.Errorf("NonceManager: Nonce %d retry count %d exceeds max %d, evicting pending nonce", usedNonce, count, maxRetryCount)
+			nm.mu.Lock()
+			delete(nm.pendingNonces, usedNonce)
+			delete(nm.retryCount, usedNonce)
+			nm.mu.Unlock()
+			return
+		}
 		nm.mu.Lock()
-		// Mark as not sent so it can be retried with higher gas
 		if info, exists := nm.pendingNonces[usedNonce]; exists {
 			info.Sent = false
-			info.TxHash = ""
+			if replUnderpriced {
+				info.TxHash = ""
+			}
 		}
 		nm.mu.Unlock()
 
-	} else if strings.Contains(errStr, "already known") {
+	case alreadyKnown:
 		logger.Warnf("NonceManager: Transaction already known for nonce %d - already in mempool", usedNonce)
-		// Transaction is already in mempool, mark as sent
 		nm.mu.Lock()
 		if info, exists := nm.pendingNonces[usedNonce]; exists {
 			info.Sent = true
@@ -308,19 +286,17 @@ func (nm *NonceManager) HandleError(ctx context.Context, err error, usedNonce ui
 		}
 		nm.mu.Unlock()
 
-	} else if strings.Contains(errStr, "transaction underpriced") {
-		logger.Warnf("NonceManager: Transaction underpriced for nonce %d", usedNonce)
-		nm.IncrementRetryCount(usedNonce)
-
-		nm.mu.Lock()
-		if info, exists := nm.pendingNonces[usedNonce]; exists {
-			info.Sent = false
-		}
-		nm.mu.Unlock()
-
-	} else {
-		// Unknown error - log and mark for retry
+	default:
 		logger.Errorf("NonceManager: Unknown error for nonce %d: %v", usedNonce, err)
+		count := nm.IncrementRetryCount(usedNonce)
+		if count > maxRetryCount {
+			logger.Errorf("NonceManager: Nonce %d retry count %d exceeds max %d, evicting pending nonce", usedNonce, count, maxRetryCount)
+			nm.mu.Lock()
+			delete(nm.pendingNonces, usedNonce)
+			delete(nm.retryCount, usedNonce)
+			nm.mu.Unlock()
+			return
+		}
 		nm.mu.Lock()
 		if info, exists := nm.pendingNonces[usedNonce]; exists {
 			info.Sent = false

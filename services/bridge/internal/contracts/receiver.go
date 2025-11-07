@@ -2,23 +2,18 @@ package contracts
 
 import (
 	"context"
-	"encoding/hex"
-	"fmt"
 	"math/big"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
+	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
-
-	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
-	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
 // PushOracleReceiverABI is the ABI for the PushOracleReceiver contract
@@ -221,19 +216,18 @@ const PushOracleReceiverABI = `[
 	}
 ]`
 
-// ReceiverClient wraps the PushOracleReceiver contract
+// ReceiverClient wraps the PushOracleReceiver contract using a failover RPC client
 type ReceiverClient struct {
-	client       *ethclient.Client
+	client       rpc.EthClient
 	address      common.Address
 	abi          abi.ABI
-	contract     *BoundContract
 	auth         *bind.TransactOpts
 	nonceManager *NonceManager
 	mu           sync.Mutex
 }
 
-// NewReceiverClient creates a new receiver client
-func NewReceiverClient(client *ethclient.Client, address common.Address, privateKey string) (*ReceiverClient, error) {
+// NewReceiverClient creates a new receiver client using an EthClient with failover support
+func NewReceiverClient(client rpc.EthClient, address common.Address, privateKey string) (*ReceiverClient, error) {
 	parsedABI, err := abi.JSON(strings.NewReader(PushOracleReceiverABI))
 	if err != nil {
 		return nil, err
@@ -261,136 +255,12 @@ func NewReceiverClient(client *ethclient.Client, address common.Address, private
 	logger.Infof("Receiver client sender address: %s", auth.From.Hex())
 
 	return &ReceiverClient{
-		client:  client,
-		address: address,
-		abi:     parsedABI,
-		contract: &BoundContract{
-			address: address,
-			abi:     parsedABI,
-			client:  client,
-		},
+		client:       client,
+		address:      address,
+		abi:          parsedABI,
 		auth:         auth,
 		nonceManager: NewNonceManager(client, auth.From, chainID.Int64()),
 	}, nil
-}
-
-// HandleIntentUpdate sends a single intent update to the receiver contract
-func (r *ReceiverClient) HandleIntentUpdate(ctx context.Context, intent *bridgeTypes.OracleIntent, gasLimit uint64, gasPrice *big.Int) (*types.Transaction, error) {
-	// Set gas parameters
-	r.auth.GasLimit = gasLimit
-	r.auth.GasPrice = gasPrice
-	r.auth.Context = ctx
-
-	// Pack the intent data
-	input, err := r.abi.Pack("handleIntentUpdate", r.intentToContractStruct(intent))
-	if err != nil {
-		logger.Errorf("Failed to pack intent data for symbol %s: %v", intent.Symbol, err)
-		return nil, err
-	}
-
-	// Simulate the transaction first to check for reverts
-	callMsg := ethereum.CallMsg{
-		From:  r.auth.From,
-		To:    &r.address,
-		Gas:   gasLimit,
-		Value: r.auth.Value,
-		Data:  input,
-	}
-	if gasPrice != nil {
-		callMsg.GasPrice = gasPrice
-		callMsg.GasTipCap = gasPrice
-		callMsg.GasFeeCap = gasPrice
-	}
-
-	_, err = r.client.CallContract(ctx, callMsg, nil)
-	if err != nil {
-		logger.Errorf("Transaction simulation failed for symbol %s: %v", intent.Symbol, err)
-		// Try to extract revert reason
-		if revertReason := r.extractRevertReason(ctx, callMsg); revertReason != "" {
-			logger.Errorf("Revert reason for %s: %s", intent.Symbol, revertReason)
-		}
-		return nil, fmt.Errorf("simulation failed: %w", err)
-	}
-
-	// Log transaction details before sending
-	logger.Infof("Preparing transaction for symbol %s: nonce=%d, gas_limit=%d, gas_price=%s, from=%s, to=%s",
-		intent.Symbol, r.auth.Nonce.Uint64(), gasLimit, gasPrice.String(),
-		r.auth.From.Hex(), r.address.Hex())
-
-	// Get chain ID for transaction
-	chainID, err := r.client.ChainID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get chain ID: %w", err)
-	}
-
-	// Create EIP-1559 transaction for better compatibility
-	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   chainID,
-		Nonce:     r.auth.Nonce.Uint64(),
-		GasTipCap: gasPrice, // Use gasPrice as tip
-		GasFeeCap: gasPrice, // Use gasPrice as max fee
-		Gas:       gasLimit,
-		To:        &r.address,
-		Value:     r.auth.Value,
-		Data:      input,
-	})
-
-	// Sign transaction
-	signedTx, err := r.auth.Signer(r.auth.From, tx)
-	if err != nil {
-		logger.Errorf("Failed to sign transaction for symbol %s, nonce %d: %v",
-			intent.Symbol, r.auth.Nonce.Uint64(), err)
-		return nil, err
-	}
-
-	// Send transaction
-	usedNonce := r.auth.Nonce.Uint64()
-
-	// Log transaction details before sending
-	logger.Infof("Sending raw transaction: nonce=%d, gas=%d, gasPrice=%s, value=%s, to=%s, dataLen=%d",
-		usedNonce, signedTx.Gas(), signedTx.GasPrice().String(), signedTx.Value().String(),
-		signedTx.To().Hex(), len(signedTx.Data()))
-
-	err = r.client.SendTransaction(ctx, signedTx)
-	if err != nil {
-		logger.Errorf("Failed to send transaction for symbol %s, nonce %d, tx_hash %s: %v",
-			intent.Symbol, usedNonce, signedTx.Hash().Hex(), err)
-		// Handle the error appropriately
-		r.nonceManager.HandleError(ctx, err, usedNonce)
-		return nil, err
-	}
-
-	// Mark nonce as sent (transaction successfully submitted to mempool)
-	r.nonceManager.MarkSent(usedNonce, signedTx.Hash().Hex())
-
-	logger.Infof("Transaction sent successfully for symbol %s: tx_hash=%s, nonce=%d",
-		intent.Symbol, signedTx.Hash().Hex(), usedNonce)
-
-	// Immediately check if transaction is in mempool
-	go func() {
-		time.Sleep(2 * time.Second)
-		_, pending, err := r.client.TransactionByHash(context.Background(), signedTx.Hash())
-		if err != nil {
-			logger.Errorf("Transaction %s not found in mempool after 2s: %v", signedTx.Hash().Hex(), err)
-		} else {
-			logger.Infof("Transaction %s found in mempool, pending=%v", signedTx.Hash().Hex(), pending)
-		}
-	}()
-
-	// Don't confirm nonce immediately - wait for actual confirmation
-	// r.nonceManager.ConfirmNonce(usedNonce)
-
-	return signedTx, nil
-}
-
-// IsAuthorizedSigner checks if an address is an authorized signer
-func (r *ReceiverClient) IsAuthorizedSigner(ctx context.Context, signer common.Address) (bool, error) {
-	result, err := r.contract.Call(ctx, "isAuthorizedSigner", signer)
-	if err != nil {
-		return false, err
-	}
-
-	return result[0].(bool), nil
 }
 
 // UpdateAuth updates the transaction auth with new nonce and gas price
@@ -486,72 +356,12 @@ func (r *ReceiverClient) extractRevertReason(ctx context.Context, callMsg ethere
 		}
 	}
 
-	// Pattern 2: Error in hex format (0x08c379a0... for Error(string))
-	if strings.Contains(errStr, "0x") {
-		// Extract hex data
-		start := strings.Index(errStr, "0x")
-		if start >= 0 {
-			hexData := errStr[start:]
-			// Find end of hex string
-			end := strings.IndexFunc(hexData, func(r rune) bool {
-				return !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F'))
-			})
-			if end > 0 {
-				hexData = hexData[:end]
-			}
-
-			// Try to decode as Error(string)
-			if reason := r.decodeErrorString(hexData); reason != "" {
-				return reason
-			}
-		}
-	}
-
 	// Pattern 3: Direct revert message
 	if strings.Contains(errStr, "revert") {
 		return errStr
 	}
 
 	return ""
-}
-
-// decodeErrorString decodes the standard Error(string) revert reason
-func (r *ReceiverClient) decodeErrorString(hexData string) string {
-	// Error(string) selector is 0x08c379a0
-	errorSelector := "0x08c379a0"
-
-	if !strings.HasPrefix(hexData, errorSelector) {
-		return ""
-	}
-
-	// Remove 0x prefix
-	data := strings.TrimPrefix(hexData, "0x")
-
-	// Remove function selector (4 bytes = 8 hex chars)
-	if len(data) < 8 {
-		return ""
-	}
-	data = data[8:]
-
-	// Decode the remaining data as string
-	bytes, err := hex.DecodeString(data)
-	if err != nil {
-		return ""
-	}
-
-	// The string is ABI encoded: offset (32 bytes) + length (32 bytes) + data
-	if len(bytes) < 64 {
-		return ""
-	}
-
-	// Get string length (bytes 32-63)
-	length := new(big.Int).SetBytes(bytes[32:64]).Uint64()
-	if uint64(len(bytes)) < 64+length {
-		return ""
-	}
-
-	// Extract string data
-	return string(bytes[64 : 64+length])
 }
 
 // HandleTransactionError forwards transaction errors to the NonceManager for handling
