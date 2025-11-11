@@ -22,6 +22,8 @@ attestor:
     - BTC/USD
   polling_time: 5s
   batch_mode: false
+  mode: prime  # Options: prime, replica
+  replica_backup_delay: 300  # Seconds to wait before replica submits 
   intent_type: OracleUpdate
   intent_version: "1.0"
   guardian:

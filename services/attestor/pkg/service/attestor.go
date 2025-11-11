@@ -129,6 +129,53 @@ func (s *AttestorService) IsRunning() bool {
 	return s.running
 }
 
+func (s *AttestorService) shouldPublishInReplicaMode(ctx context.Context, symbol string) bool {
+	if s.config.Attestor.Mode != config.ModeReplica {
+		return true
+	}
+
+	latestIntent, err := s.registry.GetLatestIntentByType(ctx, s.config.Attestor.IntentType, symbol)
+	if err != nil {
+		logger.WithFields(map[string]interface{}{
+			"symbol": symbol,
+			"error":  err.Error(),
+		}).Info("Replica mode: No previous intent found or error, allowing publish")
+		return true
+	}
+
+	now := time.Now().Unix()
+	lastTimestamp := latestIntent.Timestamp.Int64()
+	timeDiff := now - lastTimestamp
+
+	backupDelay := int64(s.config.Attestor.ReplicaBackupDelay)
+
+	lastUpdateTime := time.Unix(lastTimestamp, 0).Format(time.RFC3339)
+	timeSinceUpdate := time.Duration(timeDiff) * time.Second
+
+	if timeDiff < backupDelay {
+		logger.WithFields(map[string]interface{}{
+			"symbol":            symbol,
+			"last_update_time":  lastUpdateTime,
+			"last_timestamp":    lastTimestamp,
+			"time_since_update": timeSinceUpdate.String(),
+			"backup_delay":      fmt.Sprintf("%ds", backupDelay),
+			"remaining_wait":    (time.Duration(backupDelay-timeDiff) * time.Second).String(),
+			"last_price":        latestIntent.Price.String(),
+		}).Info("Replica mode: Skipping publish, backup delay not exceeded")
+		return false
+	}
+
+	logger.WithFields(map[string]interface{}{
+		"symbol":            symbol,
+		"last_update_time":  lastUpdateTime,
+		"last_timestamp":    lastTimestamp,
+		"time_since_update": timeSinceUpdate.String(),
+		"backup_delay":      fmt.Sprintf("%ds", backupDelay),
+		"last_price":        latestIntent.Price.String(),
+	}).Warn("Replica mode: Backup delay exceeded, TRIGGERING BACKUP PUBLISH")
+	return true
+}
+
 // processSingleAttestation processes attestation for a single symbol
 func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol string) error {
 	start := time.Now()
@@ -137,6 +184,10 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 	}()
 
 	logger.WithField("symbol", symbol).Debug("Processing single attestation")
+
+	if !s.shouldPublishInReplicaMode(ctx, symbol) {
+		return nil
+	}
 
 	// Get guardian params for this symbol
 	guardianParams := s.config.Attestor.Guardian.GetParamsForSymbol(symbol)
@@ -198,6 +249,10 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 	symbolData := make([]interfaces.SymbolData, 0, len(s.config.Attestor.Symbols))
 
 	for _, symbol := range s.config.Attestor.Symbols {
+		if !s.shouldPublishInReplicaMode(ctx, symbol) {
+			logger.WithField("symbol", symbol).Debug("Skipping symbol in replica mode")
+			continue
+		}
 		// Get guardian params for this symbol
 		guardianParams := s.config.Attestor.Guardian.GetParamsForSymbol(symbol)
 

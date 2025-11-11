@@ -1,6 +1,35 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+type AttestorMode string
+
+const (
+	ModePrime   AttestorMode = "prime"
+	ModeReplica AttestorMode = "replica"
+)
+
+// String returns the string representation of the mode
+func (m AttestorMode) String() string {
+	return string(m)
+}
+
+// IsValid checks if the mode is valid
+func (m AttestorMode) IsValid() bool {
+	return m == ModePrime || m == ModeReplica
+}
+
+// ParseAttestorMode parses a string into AttestorMode
+func ParseAttestorMode(s string) (AttestorMode, error) {
+	mode := AttestorMode(s)
+	if !mode.IsValid() {
+		return "", fmt.Errorf("invalid attestor mode: %s (must be 'prime' or 'replica')", s)
+	}
+	return mode, nil
+}
 
 // AttestorConfig holds attestor-specific configuration
 type AttestorConfig struct {

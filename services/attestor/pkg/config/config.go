@@ -37,13 +37,15 @@ type Config struct {
 	} `mapstructure:"registry"`
 
 	Attestor struct {
-		PrivateKey    string         `mapstructure:"private_key"`
-		Symbols       []string       `mapstructure:"symbols"`
-		PollingTime   time.Duration  `mapstructure:"polling_time"`
-		BatchMode     bool           `mapstructure:"batch_mode"`
-		IntentType    string         `mapstructure:"intent_type"`
-		IntentVersion string         `mapstructure:"intent_version"`
-		Guardian      GuardianConfig `mapstructure:"guardian"`
+		PrivateKey         string         `mapstructure:"private_key"`
+		Symbols            []string       `mapstructure:"symbols"`
+		PollingTime        time.Duration  `mapstructure:"polling_time"`
+		BatchMode          bool           `mapstructure:"batch_mode"`
+		Mode               AttestorMode   `mapstructure:"mode"`
+		ReplicaBackupDelay int            `mapstructure:"replica_backup_delay"`
+		IntentType         string         `mapstructure:"intent_type"`
+		IntentVersion      string         `mapstructure:"intent_version"`
+		Guardian           GuardianConfig `mapstructure:"guardian"`
 	} `mapstructure:"attestor"`
 
 	Logging struct {
@@ -106,6 +108,8 @@ func Init(configPath string) (*Config, error) {
 	v.SetDefault("attestor.symbols", []string{"BTC/USD", "ETH/USD"})
 	v.SetDefault("attestor.polling_time", "300ms")
 	v.SetDefault("attestor.batch_mode", true)
+	v.SetDefault("attestor.mode", "prime")
+	v.SetDefault("attestor.replica_backup_delay", 300)
 	v.SetDefault("attestor.intent_type", "OracleUpdate")
 	v.SetDefault("attestor.intent_version", "1.0")
 	v.SetDefault("attestor.guardian.default.max_deviation_bips", 500)
@@ -124,6 +128,8 @@ func Init(configPath string) (*Config, error) {
 	v.BindEnv("attestor.private_key", "PRIVATE_KEY")
 	v.BindEnv("attestor.symbols", "SYMBOLS")
 	v.BindEnv("attestor.polling_time", "POLLING_TIME")
+	v.BindEnv("attestor.mode", "MODE")
+	v.BindEnv("attestor.replica_backup_delay", "REPLICA_BACKUP_DELAY")
 	v.BindEnv("attestor.intent_type", "INTENT_TYPE")
 	v.BindEnv("attestor.intent_version", "INTENT_VERSION")
 	v.BindEnv("logging.level", "LOG_LEVEL")
@@ -144,6 +150,10 @@ func Init(configPath string) (*Config, error) {
 	cfg = &Config{}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("unable to decode config: %w", err)
+	}
+
+	if !cfg.Attestor.Mode.IsValid() {
+		return nil, fmt.Errorf("invalid attestor mode: %s (must be 'prime' or 'replica')", cfg.Attestor.Mode)
 	}
 
 	// Handle SYMBOLS environment variable for backward compatibility

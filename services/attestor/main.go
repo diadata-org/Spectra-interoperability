@@ -106,13 +106,20 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	logger.WithFields(map[string]interface{}{
+	logFields := map[string]interface{}{
 		"symbols":      cfg.Attestor.Symbols,
 		"oracle":       cfg.Oracle.Address,
 		"registry":     cfg.Registry.Address,
 		"polling_time": cfg.Attestor.PollingTime.String(),
 		"batch_mode":   cfg.Attestor.BatchMode,
-	}).Info("Attestor service started")
+		"mode":         cfg.Attestor.Mode.String(),
+	}
+
+	if cfg.Attestor.Mode == config.ModeReplica {
+		logFields["replica_backup_delay"] = fmt.Sprintf("%ds", cfg.Attestor.ReplicaBackupDelay)
+	}
+
+	logger.WithFields(logFields).Info("Attestor service started")
 
 	// Wait for signal or error
 	select {
