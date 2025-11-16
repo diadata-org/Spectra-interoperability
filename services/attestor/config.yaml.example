@@ -15,7 +15,7 @@ registry:
 
 # Attestor Configuration
 attestor:
-  private_key: ""  # Set your private key (or use ATTESTOR_PRIVATE_KEY env var)
+  private_key: ""  # Set your private key (or use ATTESTOR_ATTESTOR_PRIVATE_KEY env var)
   symbols:
     - BTC/USD
     - ETH/USD
@@ -35,24 +35,21 @@ api:
   port: 8081
 
 # Environment Variable Override
-# You can override any configuration value using environment variables:
-# - ATTESTOR_RPC_URL
+# You can override any configuration value using environment variables with the ATTESTOR_ prefix:
+# - ATTESTOR_RPC_URL or ATTESTOR_RPC_URLS (comma-separated for multiple URLs)
+# - ATTESTOR_RPC_REGISTRY_URL or ATTESTOR_RPC_REGISTRY_URLS (comma-separated for multiple URLs)
 # - ATTESTOR_ORACLE_ADDRESS
 # - ATTESTOR_REGISTRY_ADDRESS
 # - ATTESTOR_ATTESTOR_PRIVATE_KEY
 # - ATTESTOR_ATTESTOR_SYMBOLS (comma-separated)
-# - ATTESTOR_ATTESTOR_POLLING_TIME
+# - ATTESTOR_ATTESTOR_POLLING_TIME (e.g., "5s", "300ms")
+# - ATTESTOR_ATTESTOR_BATCH_MODE (true/false)
+# - ATTESTOR_ATTESTOR_MODE (prime/replica)
 # - ATTESTOR_LOGGING_LEVEL
 # - ATTESTOR_METRICS_PORT
 # - ATTESTOR_API_PORT
 #
-# For backward compatibility, these environment variables are also supported:
-# - RPC_URL
-# - ORACLE_ADDRESS
-# - INTENT_REGISTRY_ADDRESS
-# - PRIVATE_KEY
-# - SYMBOLS (comma-separated)
-# - POLLING_TIME (in seconds)
-# - LOG_LEVEL
-# - METRICS_PORT
-# - L2_RPC_URL (maps to rpc.registry_url)
+# Environment variables use dot notation converted to underscores:
+# - rpc.url -> ATTESTOR_RPC_URL
+# - attestor.private_key -> ATTESTOR_ATTESTOR_PRIVATE_KEY
+# - etc.

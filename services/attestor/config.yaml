@@ -20,6 +20,7 @@ attestor:
   # private_key should be set via ATTESTOR_ATTESTOR_PRIVATE_KEY environment variable
   symbols:
     - BTC/USD
+    - ETH/USD
   polling_time: 5s
   batch_mode: false
   mode: prime  # Options: prime, replica

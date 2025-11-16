@@ -101,6 +101,25 @@ func Init(configPath string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.SetEnvPrefix("ATTESTOR")
 
+	// Explicitly bind nested attestor.* config keys to ATTESTOR_ATTESTOR_* env vars.
+	//
+	// WHY THIS IS NEEDED:
+	// Without explicit binding, Viper's AutomaticEnv() CAN read the env var via GetString(),
+	// but Unmarshal() won't populate nested struct fields. This is a known Viper limitation.
+	//
+	// ENV VAR NAMING:
+	// Config key "attestor.private_key" with prefix "ATTESTOR" and replacer "." -> "_"
+	// becomes: ATTESTOR_ATTESTOR_PRIVATE_KEY
+	// (prefix + key_with_underscores_uppercased)
+	v.BindEnv("attestor.private_key", "ATTESTOR_ATTESTOR_PRIVATE_KEY")
+	v.BindEnv("attestor.symbols", "ATTESTOR_ATTESTOR_SYMBOLS")
+	v.BindEnv("attestor.polling_time", "ATTESTOR_ATTESTOR_POLLING_TIME")
+	v.BindEnv("attestor.batch_mode", "ATTESTOR_ATTESTOR_BATCH_MODE")
+	v.BindEnv("attestor.mode", "ATTESTOR_ATTESTOR_MODE")
+	v.BindEnv("attestor.replica_backup_delay", "ATTESTOR_ATTESTOR_REPLICA_BACKUP_DELAY")
+	v.BindEnv("attestor.intent_type", "ATTESTOR_ATTESTOR_INTENT_TYPE")
+	v.BindEnv("attestor.intent_version", "ATTESTOR_ATTESTOR_INTENT_VERSION")
+
 	// Set defaults
 	v.SetDefault("rpc.url", "https://testnet-rpc.diadata.org")
 	v.SetDefault("rpc.registry_url", "https://testnet-rpc.diadata.org")
@@ -118,25 +137,6 @@ func Init(configPath string) (*Config, error) {
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("metrics.port", 8080)
 	v.SetDefault("api.port", 8081)
-
-	// Bind environment variables for backward compatibility
-	v.BindEnv("rpc.url", "RPC_URL")
-	v.BindEnv("rpc.urls", "RPC_URLS")
-	v.BindEnv("rpc.registry_urls", "RPC_REGISTRY_URLS")
-	v.BindEnv("oracle.address", "ORACLE_ADDRESS")
-	v.BindEnv("registry.address", "INTENT_REGISTRY_ADDRESS")
-	v.BindEnv("attestor.private_key", "PRIVATE_KEY")
-	v.BindEnv("attestor.symbols", "SYMBOLS")
-	v.BindEnv("attestor.polling_time", "POLLING_TIME")
-	v.BindEnv("attestor.mode", "MODE")
-	v.BindEnv("attestor.replica_backup_delay", "REPLICA_BACKUP_DELAY")
-	v.BindEnv("attestor.intent_type", "INTENT_TYPE")
-	v.BindEnv("attestor.intent_version", "INTENT_VERSION")
-	v.BindEnv("logging.level", "LOG_LEVEL")
-	v.BindEnv("metrics.port", "METRICS_PORT")
-
-	// Also bind with L2_ prefix for backward compatibility
-	v.BindEnv("rpc.registry_url", "L2_RPC_URL")
 
 	// Read config file
 	if err := v.ReadInConfig(); err != nil {
@@ -156,27 +156,7 @@ func Init(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("invalid attestor mode: %s (must be 'prime' or 'replica')", cfg.Attestor.Mode)
 	}
 
-	// Handle SYMBOLS environment variable for backward compatibility
-	if symbolsEnv := v.GetString("SYMBOLS"); symbolsEnv != "" {
-		symbols := strings.Split(symbolsEnv, ",")
-		for i := range symbols {
-			symbols[i] = strings.TrimSpace(symbols[i])
-		}
-		cfg.Attestor.Symbols = symbols
-	}
-
-	// Handle POLLING_TIME for backward compatibility (convert seconds to duration)
-	if pollingEnv := v.GetString("POLLING_TIME"); pollingEnv != "" {
-		duration, err := time.ParseDuration(pollingEnv + "s")
-		if err == nil {
-			cfg.Attestor.PollingTime = duration
-		}
-	}
-
-	// Normalize RPC URLs configuration
-	if urlsEnv := v.GetString("RPC_URLS"); urlsEnv != "" {
-		cfg.RPC.URLs = parseCSV(urlsEnv)
-	}
+	// Normalize RPC URLs configuration: convert single URL to array if needed
 	if len(cfg.RPC.URLs) == 0 {
 		if cfg.RPC.URL != "" {
 			cfg.RPC.URLs = []string{strings.TrimSpace(cfg.RPC.URL)}
@@ -186,14 +166,13 @@ func Init(configPath string) (*Config, error) {
 		cfg.RPC.URLs = []string{"https://testnet-rpc.diadata.org"}
 	}
 
-	if registryURLsEnv := v.GetString("RPC_REGISTRY_URLS"); registryURLsEnv != "" {
-		cfg.RPC.RegistryURLs = parseCSV(registryURLsEnv)
-	}
+	// Normalize registry RPC URLs configuration: convert single URL to array if needed
 	if len(cfg.RPC.RegistryURLs) == 0 {
 		if cfg.RPC.RegistryURL != "" {
 			cfg.RPC.RegistryURLs = []string{strings.TrimSpace(cfg.RPC.RegistryURL)}
 		}
 	}
+	// Fallback to RPC.URLs if registry URLs not specified
 	if len(cfg.RPC.RegistryURLs) == 0 && len(cfg.RPC.URLs) > 0 {
 		cfg.RPC.RegistryURLs = append([]string(nil), cfg.RPC.URLs...)
 	}
@@ -201,7 +180,76 @@ func Init(configPath string) (*Config, error) {
 		cfg.RPC.RegistryURLs = []string{"https://testnet-rpc.diadata.org"}
 	}
 
+	// Validate configuration
+	if err := validateConfig(cfg); err != nil {
+		return nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
 	return cfg, nil
+}
+
+// validateConfig validates the configuration after loading
+func validateConfig(cfg *Config) error {
+	if cfg.Attestor.PrivateKey == "" {
+		return fmt.Errorf("private key not configured")
+	}
+
+	if cfg.Oracle.Address == "" {
+		return fmt.Errorf("oracle address not configured")
+	}
+
+	if cfg.Registry.Address == "" {
+		return fmt.Errorf("registry address not configured")
+	}
+
+	if len(cfg.Attestor.Symbols) == 0 {
+		return fmt.Errorf("no symbols configured")
+	}
+
+	if cfg.Attestor.PollingTime <= 0 {
+		return fmt.Errorf("invalid polling time: %v", cfg.Attestor.PollingTime)
+	}
+
+	// Validate guardian params
+	if err := validateGuardianConfig(&cfg.Attestor.Guardian); err != nil {
+		return fmt.Errorf("guardian configuration invalid: %w", err)
+	}
+
+	return nil
+}
+
+// validateGuardianConfig validates guardian configuration
+func validateGuardianConfig(gc *GuardianConfig) error {
+	// Validate default params
+	if err := validateGuardianParams(gc.Default); err != nil {
+		return fmt.Errorf("default guardian params: %w", err)
+	}
+
+	// Validate per-symbol params
+	for symbol, params := range gc.Symbols {
+		if err := validateGuardianParams(params); err != nil {
+			return fmt.Errorf("guardian params for symbol %s: %w", symbol, err)
+		}
+	}
+
+	return nil
+}
+
+// validateGuardianParams validates individual guardian parameters
+func validateGuardianParams(params GuardianParams) error {
+	if params.MaxDeviationBips < 0 || params.MaxDeviationBips > 10000 {
+		return fmt.Errorf("max_deviation_bips must be between 0 and 10000, got %d", params.MaxDeviationBips)
+	}
+
+	if params.MaxTimestampAge <= 0 {
+		return fmt.Errorf("max_timestamp_age must be positive, got %d", params.MaxTimestampAge)
+	}
+
+	if params.MinGuardianMatches <= 0 {
+		return fmt.Errorf("min_guardian_matches must be positive, got %d", params.MinGuardianMatches)
+	}
+
+	return nil
 }
 
 func Get() *Config {

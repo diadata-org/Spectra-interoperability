@@ -19,7 +19,6 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/registry"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/service"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/signer"
-	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/utils"
 )
 
 func main() {
@@ -27,7 +26,6 @@ func main() {
 	flag.StringVar(&configPath, "config", "", "Path to configuration file")
 	flag.Parse()
 
-	// Load configuration
 	cfg, err := config.Init(configPath)
 	if err != nil {
 		logger.Fatalf("Failed to load configuration: %v", err)
@@ -36,11 +34,6 @@ func main() {
 	// Initialize logger
 	if err := logger.Init(cfg.Logging.Level); err != nil {
 		logger.Warnf("Invalid log level %s, using default: %v", cfg.Logging.Level, err)
-	}
-
-	// Validate configuration
-	if err := validateConfig(cfg); err != nil {
-		logger.Fatalf("Invalid configuration: %v", err)
 	}
 
 	// Create dependencies
@@ -96,11 +89,6 @@ func main() {
 			errCh <- fmt.Errorf("attestor service error: %w", err)
 		}
 	}()
-
-	// Create .env.example if needed
-	if err := utils.CreateEnvTemplate(); err != nil {
-		logger.Warnf("Failed to create .env.example file: %v", err)
-	}
 
 	// Wait for shutdown signal or service error
 	sigCh := make(chan os.Signal, 1)
@@ -225,29 +213,4 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 		signer:   eip712Signer,
 		metrics:  metricsCollector,
 	}, nil
-}
-
-// validateConfig validates the configuration
-func validateConfig(cfg *config.Config) error {
-	if cfg.Attestor.PrivateKey == "" {
-		return fmt.Errorf("private key not configured")
-	}
-
-	if cfg.Oracle.Address == "" {
-		return fmt.Errorf("oracle address not configured")
-	}
-
-	if cfg.Registry.Address == "" {
-		return fmt.Errorf("registry address not configured")
-	}
-
-	if len(cfg.Attestor.Symbols) == 0 {
-		return fmt.Errorf("no symbols configured")
-	}
-
-	if cfg.Attestor.PollingTime <= 0 {
-		return fmt.Errorf("invalid polling time: %v", cfg.Attestor.PollingTime)
-	}
-
-	return nil
 }
