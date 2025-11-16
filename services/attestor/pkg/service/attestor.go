@@ -57,12 +57,14 @@ func (s *AttestorService) Start(ctx context.Context) error {
 	s.running = true
 	s.mu.Unlock()
 
-	// Defer cleanup in case of early return
+	started := false
 	defer func() {
-		s.mu.Lock()
-		s.running = false
-		s.cancelFunc = nil
-		s.mu.Unlock()
+		if !started {
+			s.mu.Lock()
+			s.running = false
+			s.cancelFunc = nil
+			s.mu.Unlock()
+		}
 	}()
 
 	logger.Info("Starting attestor service")
@@ -83,6 +85,8 @@ func (s *AttestorService) Start(ctx context.Context) error {
 	// Start periodic attestation
 	ticker := time.NewTicker(s.config.Attestor.PollingTime)
 	defer ticker.Stop()
+
+	started = true
 
 	for {
 		select {
