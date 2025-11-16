@@ -18,7 +18,7 @@ type mockOracleReader struct {
 	err    error
 }
 
-func (m *mockOracleReader) GetValue(ctx context.Context, symbol string) (*big.Int, *big.Int, error) {
+func (m *mockOracleReader) GetGuardedValue(ctx context.Context, symbol string, params config.GuardianParams) (*big.Int, *big.Int, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
@@ -29,8 +29,10 @@ func (m *mockOracleReader) GetValue(ctx context.Context, symbol string) (*big.In
 }
 
 type mockRegistryClient struct {
-	publishErr error
-	txHash     string
+	publishErr        error
+	txHash            string
+	latestIntent      *interfaces.LatestIntent
+	latestIntentError error
 }
 
 func (m *mockRegistryClient) PublishIntent(ctx context.Context, signedIntent []byte) (string, error) {
@@ -45,6 +47,16 @@ func (m *mockRegistryClient) PublishBatchIntents(ctx context.Context, signedInte
 		return "", m.publishErr
 	}
 	return m.txHash, nil
+}
+
+func (m *mockRegistryClient) GetLatestIntentByType(ctx context.Context, intentType, symbol string) (*interfaces.LatestIntent, error) {
+	if m.latestIntentError != nil {
+		return nil, m.latestIntentError
+	}
+	if m.latestIntent != nil {
+		return m.latestIntent, nil
+	}
+	return nil, errors.New("intent not found")
 }
 
 type mockIntentSigner struct {
@@ -133,12 +145,14 @@ func TestNewAttestorService(t *testing.T) {
 }
 
 func TestAttestorService_StartStop(t *testing.T) {
-	cfg := &config.Config{
-		Attestor: config.AttestorConfig{
-			Symbols:     []string{"BTC/USD"},
-			PollingTime: 100 * time.Millisecond,
-			BatchMode:   false,
-		},
+	cfg := &config.Config{}
+	cfg.Attestor.Symbols = []string{"BTC/USD"}
+	cfg.Attestor.PollingTime = 100 * time.Millisecond
+	cfg.Attestor.BatchMode = false
+	cfg.Attestor.Guardian.Default = config.GuardianParams{
+		MaxDeviationBips:   500,
+		MaxTimestampAge:    3600,
+		MinGuardianMatches: 1,
 	}
 
 	oracle := &mockOracleReader{
@@ -224,10 +238,12 @@ func TestAttestorService_ProcessSingleAttestation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &config.Config{
-				Attestor: config.AttestorConfig{
-					Symbols: []string{"BTC/USD"},
-				},
+			cfg := &config.Config{}
+			cfg.Attestor.Symbols = []string{"BTC/USD"}
+			cfg.Attestor.Guardian.Default = config.GuardianParams{
+				MaxDeviationBips:   500,
+				MaxTimestampAge:    3600,
+				MinGuardianMatches: 1,
 			}
 
 			oracle := &mockOracleReader{
@@ -274,11 +290,13 @@ func TestAttestorService_ProcessSingleAttestation(t *testing.T) {
 }
 
 func TestAttestorService_ProcessBatchAttestation(t *testing.T) {
-	cfg := &config.Config{
-		Attestor: config.AttestorConfig{
-			Symbols:   []string{"BTC/USD", "ETH/USD"},
-			BatchMode: true,
-		},
+	cfg := &config.Config{}
+	cfg.Attestor.Symbols = []string{"BTC/USD", "ETH/USD"}
+	cfg.Attestor.BatchMode = true
+	cfg.Attestor.Guardian.Default = config.GuardianParams{
+		MaxDeviationBips:   500,
+		MaxTimestampAge:    3600,
+		MinGuardianMatches: 1,
 	}
 
 	oracle := &mockOracleReader{
@@ -322,11 +340,13 @@ func TestAttestorService_ProcessBatchAttestation(t *testing.T) {
 }
 
 func TestAttestorService_ProcessBatchAttestation_NoValidData(t *testing.T) {
-	cfg := &config.Config{
-		Attestor: config.AttestorConfig{
-			Symbols:   []string{"BTC/USD", "ETH/USD"},
-			BatchMode: true,
-		},
+	cfg := &config.Config{}
+	cfg.Attestor.Symbols = []string{"BTC/USD", "ETH/USD"}
+	cfg.Attestor.BatchMode = true
+	cfg.Attestor.Guardian.Default = config.GuardianParams{
+		MaxDeviationBips:   500,
+		MaxTimestampAge:    3600,
+		MinGuardianMatches: 1,
 	}
 
 	// Oracle returns errors for all symbols
@@ -356,12 +376,14 @@ func TestAttestorService_ProcessBatchAttestation_NoValidData(t *testing.T) {
 }
 
 func TestAttestorService_Health(t *testing.T) {
-	cfg := &config.Config{
-		Attestor: config.AttestorConfig{
-			Symbols:     []string{"BTC/USD", "ETH/USD"},
-			BatchMode:   true,
-			PollingTime: 5 * time.Minute,
-		},
+	cfg := &config.Config{}
+	cfg.Attestor.Symbols = []string{"BTC/USD", "ETH/USD"}
+	cfg.Attestor.BatchMode = true
+	cfg.Attestor.PollingTime = 5 * time.Minute
+	cfg.Attestor.Guardian.Default = config.GuardianParams{
+		MaxDeviationBips:   500,
+		MaxTimestampAge:    3600,
+		MinGuardianMatches: 1,
 	}
 
 	service := NewAttestorService(cfg, nil, nil, nil, nil)
