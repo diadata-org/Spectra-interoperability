@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
@@ -23,6 +25,23 @@ import (
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
+var (
+	nonceCounter  atomic.Int64
+	nonceInitOnce sync.Once
+)
+
+func initNonceCounter() {
+	nonceInitOnce.Do(func() {
+		nonceCounter.Store(time.Now().UnixNano())
+	})
+}
+
+func generateNonce() *big.Int {
+	initNonceCounter()
+	nonce := nonceCounter.Add(1)
+	return big.NewInt(nonce)
+}
+
 func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, price *big.Int, volume *big.Int, symbol string) (string, error) {
 	if privateKey == "" {
 		return "", fmt.Errorf("private key not provided")
@@ -34,8 +53,8 @@ func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, private
 	now := time.Now().Unix()
 	nowBig := big.NewInt(now)
 
-	nonceVal := time.Now().UnixNano()
-	nonce := big.NewInt(nonceVal)
+	// Generate unique nonce using atomic counter to prevent collisions
+	nonce := generateNonce()
 	expiry := big.NewInt(now + 3600)
 
 	cfg := config.Get()
@@ -219,8 +238,6 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 	now := time.Now().Unix()
 	nowBig := big.NewInt(now)
 
-	nonceVal := time.Now().UnixNano()
-	nonce := big.NewInt(nonceVal)
 	expiry := big.NewInt(now + 3600)
 
 	cfg := config.Get()
@@ -262,6 +279,9 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 	signedIntents := make([]types.SignedIntent, len(symbolsData))
 
 	for i, data := range symbolsData {
+		// Generate unique nonce for each intent in the batch to prevent collisions
+		nonce := generateNonce()
+
 		intent := types.OracleIntent{
 			IntentType: intentType,
 			Version:    intentVersion,

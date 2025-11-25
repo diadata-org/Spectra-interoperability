@@ -245,7 +245,7 @@ func validateGuardianParams(params GuardianParams) error {
 		return fmt.Errorf("max_timestamp_age must be positive, got %d", params.MaxTimestampAge)
 	}
 
-	if params.MinGuardianMatches <= 0 {
+	if params.MinGuardianMatches < 0 {
 		return fmt.Errorf("min_guardian_matches must be positive, got %d", params.MinGuardianMatches)
 	}
 

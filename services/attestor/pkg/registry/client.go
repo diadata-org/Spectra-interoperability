@@ -36,7 +36,6 @@ func NewClient(privateKey string, registryAddr string, registryRPCURLs []string)
 
 	fromAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
-	// Create shared MultiClient for registry operations
 	registryClient, err := multirpc.NewMultiClient(registryRPCURLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to registry RPC: %w", err)

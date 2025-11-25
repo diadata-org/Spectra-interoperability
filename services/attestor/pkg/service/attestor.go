@@ -69,20 +69,24 @@ func (s *AttestorService) Start(ctx context.Context) error {
 
 	logger.Info("Starting attestor service")
 
-	// Process initial attestations
 	if s.config.Attestor.BatchMode {
 		if err := s.processBatchAttestation(serviceCtx); err != nil {
 			logger.WithError(err).Error("Initial batch attestation failed")
 		}
 	} else {
 		for _, symbol := range s.config.Attestor.Symbols {
+			select {
+			case <-serviceCtx.Done():
+				logger.Info("Context cancelled during initial attestations, stopping")
+				return serviceCtx.Err()
+			default:
+			}
 			if err := s.processSingleAttestation(serviceCtx, symbol); err != nil {
 				logger.WithError(err).WithField("symbol", symbol).Error("Initial attestation failed")
 			}
 		}
 	}
 
-	// Start periodic attestation
 	ticker := time.NewTicker(s.config.Attestor.PollingTime)
 	defer ticker.Stop()
 
@@ -100,6 +104,12 @@ func (s *AttestorService) Start(ctx context.Context) error {
 				}
 			} else {
 				for _, symbol := range s.config.Attestor.Symbols {
+					select {
+					case <-serviceCtx.Done():
+						logger.Info("Context cancelled during attestation cycle, stopping")
+						return nil
+					default:
+					}
 					if err := s.processSingleAttestation(serviceCtx, symbol); err != nil {
 						logger.WithError(err).WithField("symbol", symbol).Error("Attestation failed")
 					}
@@ -201,6 +211,15 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 	price, timestamp, err := s.oracle.GetGuardedValue(ctx, symbol, guardianParams)
 	s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
 
+	logger.WithFields(map[string]interface{}{
+		"symbol":             symbol,
+		"price":              price.String(),
+		"timestamp":          timestamp.String(),
+		"MaxDeviationBips":   guardianParams.MaxDeviationBips,
+		"MaxTimestampAge":    guardianParams.MaxTimestampAge,
+		"MinGuardianMatches": guardianParams.MinGuardianMatches,
+	}).Info("Retrieving oracle value")
+
 	if err != nil {
 		s.metrics.RecordIntentCreated(symbol, false)
 		return errors.NewOracleError(symbol, "failed to fetch value", err)
@@ -210,9 +229,12 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 	volume := big.NewInt(1)
 
 	logger.WithFields(map[string]interface{}{
-		"symbol":    symbol,
-		"price":     price.String(),
-		"timestamp": timestamp.String(),
+		"symbol":             symbol,
+		"price":              price.String(),
+		"timestamp":          timestamp.String(),
+		"MaxDeviationBips":   guardianParams.MaxDeviationBips,
+		"MaxTimestampAge":    guardianParams.MaxTimestampAge,
+		"MinGuardianMatches": guardianParams.MinGuardianMatches,
 	}).Debug("Retrieved oracle value")
 
 	// Sign intent
@@ -252,7 +274,21 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 	// Collect symbol data
 	symbolData := make([]interfaces.SymbolData, 0, len(s.config.Attestor.Symbols))
 
+symbolLoop:
 	for _, symbol := range s.config.Attestor.Symbols {
+		// Check context cancellation before processing each symbol
+		select {
+		case <-ctx.Done():
+			logger.Info("Context cancelled during batch attestation, stopping collection")
+			// Return error if we haven't collected any data, otherwise proceed with partial batch
+			if len(symbolData) == 0 {
+				return fmt.Errorf("batch attestation cancelled: %w", ctx.Err())
+			}
+			// Break out of loop but continue with partial batch
+			break symbolLoop
+		default:
+		}
+
 		if !s.shouldPublishInReplicaMode(ctx, symbol) {
 			logger.WithField("symbol", symbol).Debug("Skipping symbol in replica mode")
 			continue
