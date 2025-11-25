@@ -286,14 +286,9 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 			}
 
 			// Process filtered destinations for this router
+			// Note: Time threshold and price deviation checks are now atomic (check-and-reserve)
+			// in FilterDestinationsByTimeThreshold, so no need for pre-emptive update here
 			for _, dest := range filteredDestinations {
-				// Update destination time and price to prevent race conditions
-				if dest.TimeThreshold.Duration() > 0 || dest.PriceDeviation != "" {
-					symbol := router.GetSymbolFromData(extractedData)
-					router.UpdateDestinationTime(dest, symbol, extractedData)
-					logger.Debugf("Pre-emptively updated destination time/price for %d-%s-%s to prevent race conditions",
-						dest.ChainID, dest.Contract, symbol)
-				}
 				destConfig, exists := gep.destinations[dest.ChainID]
 				if !exists || destConfig == nil {
 					logger.Warnf("Destination config not found for chain %d", dest.ChainID)

@@ -50,6 +50,9 @@ type Collector struct {
 	componentHealth  *prometheus.GaugeVec
 	recoveryAttempts *prometheus.CounterVec
 
+	// Nonce metrics
+	pendingNonceCount *prometheus.GaugeVec // Current pending nonce count by wallet and chain
+
 	// Intent lifecycle metrics
 	IntentMetrics *IntentMetrics
 
@@ -168,6 +171,12 @@ func NewCollector() *Collector {
 				Name: "bridge_recovery_attempts_total",
 				Help: "Total number of recovery attempts",
 			}, []string{"component", "result"}),
+
+			// Nonce metrics
+			pendingNonceCount: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_pending_nonce_count",
+				Help: "Current count of pending nonces by wallet address and chain",
+			}, []string{"wallet", "chain_id"}),
 
 			// Initialize intent metrics
 			IntentMetrics: NewIntentMetrics(),
@@ -307,6 +316,16 @@ func (c *Collector) SetComponentHealth(component, componentType string, healthy 
 
 func (c *Collector) IncRecoveryAttempts(component, result string) {
 	c.recoveryAttempts.WithLabelValues(component, result).Inc()
+}
+
+// Nonce metric methods
+
+// SetPendingNonceCount sets the current pending nonce count for a wallet on a chain
+func (c *Collector) SetPendingNonceCount(wallet string, chainID int64, count int) {
+	c.pendingNonceCount.WithLabelValues(
+		wallet,
+		formatChainID(chainID),
+	).Set(float64(count))
 }
 
 // Helper functions

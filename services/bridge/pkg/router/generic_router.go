@@ -25,11 +25,17 @@ type GenericRouter struct {
 	privateKey    *ecdsa.PrivateKey
 	address       common.Address
 
-	mu                       sync.RWMutex
-	stats                    GenericRouterStats
-	destinationTimes         map[string]time.Time // Tracks last update time for each destination (key: "chainID-contract-symbol")
-	destinationPrices        map[string]string    // Tracks last price for each destination (key: "chainID-contract-symbol", value: price as string)
-	destinationPriceTimestamps map[string]uint64    // Tracks intent timestamp of the last saved price to ensure only newer prices overwrite
+	mu                sync.RWMutex
+	stats             GenericRouterStats
+	destinationStates map[string]*DestinationState // Tracks state for each destination (key: "chainID-contract-symbol")
+}
+
+// DestinationState holds the state for a specific destination
+type DestinationState struct {
+	mu            sync.Mutex
+	lastUpdate    time.Time
+	lastPrice     string
+	lastTimestamp uint64
 }
 
 // GenericRouterStats tracks router statistics
@@ -48,11 +54,9 @@ func NewGenericRouter(cfg *config.RouterConfig) (*GenericRouter, error) {
 	}
 
 	router := &GenericRouter{
-		config:                     cfg,
-		triggerEvents:              triggerEvents,
-		destinationTimes:           make(map[string]time.Time),
-		destinationPrices:          make(map[string]string),
-		destinationPriceTimestamps: make(map[string]uint64),
+		config:            cfg,
+		triggerEvents:     triggerEvents,
+		destinationStates: make(map[string]*DestinationState),
 	}
 
 	if cfg.PrivateKey != "" {
@@ -317,43 +321,43 @@ func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config
 		priceDeviationMet := false
 
 		if hasTimeThreshold {
-			timeThresholdMet = gr.checkTimeThreshold(dest, data)
-			if timeThresholdMet {
-				logger.Debugf("Time threshold met for destination %s (symbol: %s)",
-					dest.Contract, gr.GetSymbolFromData(data))
-			} else {
-				logger.Debugf("Time threshold not met for destination %s (symbol: %s)",
-					dest.Contract, gr.GetSymbolFromData(data))
-			}
+			timeThresholdMet = gr.checkAndReserveTimeThreshold(dest, data)
 		}
 
 		if hasPriceDeviation {
-			priceDeviationMet = gr.checkPriceDeviation(dest, data)
-			if priceDeviationMet {
-				logger.Debugf("Price deviation threshold met for destination %s (symbol: %s)",
-					dest.Contract, gr.GetSymbolFromData(data))
-			} else {
-				logger.Debugf("Price deviation threshold not met for destination %s (symbol: %s)",
-					dest.Contract, gr.GetSymbolFromData(data))
-			}
+			priceDeviationMet = gr.checkAndReservePriceDeviation(dest, data)
 		}
 
 		if timeThresholdMet || priceDeviationMet {
 			currentPrice := gr.GetPriceFromData(data)
+			symbol := gr.GetSymbolFromData(data)
+
+			// Important: Time threshold timestamp is ONLY updated when time threshold itself triggers the update
+			// NOT when only price deviation triggers it, to preserve the real time-based update schedule
+
 			if timeThresholdMet && priceDeviationMet {
-				logger.Infof("Update allowed for %s (symbol: %s, currentPrice: %s): BOTH time threshold AND price deviation met",
-					dest.Contract, gr.GetSymbolFromData(data), currentPrice)
+				logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=BOTH time threshold AND price deviation met",
+					gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice)
 			} else if timeThresholdMet {
-				logger.Infof("Update allowed for %s (symbol: %s, currentPrice: %s): time threshold met (price deviation not required or not met)",
-					dest.Contract, gr.GetSymbolFromData(data), currentPrice)
+				logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=time threshold met (price deviation not required or not met)",
+					gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice)
 			} else {
-				logger.Infof("Update allowed for %s (symbol: %s, currentPrice: %s): price deviation met (time threshold not required or not met)",
-					dest.Contract, gr.GetSymbolFromData(data), currentPrice)
+				logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=price deviation met (time threshold NOT updated to preserve time-based schedule)",
+					gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice)
 			}
 			filteredDestinations = append(filteredDestinations, dest)
 		} else {
-			logger.Debugf("Update blocked for %s (symbol: %s): NEITHER time threshold NOR price deviation met",
-				dest.Contract, gr.GetSymbolFromData(data))
+			symbol := gr.GetSymbolFromData(data)
+			timeThresholdStr := "not configured"
+			priceDeviationStr := "not configured"
+			if dest.TimeThreshold.Duration() > 0 {
+				timeThresholdStr = dest.TimeThreshold.Duration().String()
+			}
+			if dest.PriceDeviation != "" {
+				priceDeviationStr = dest.PriceDeviation
+			}
+			logger.Debugf("Update blocked: router=%s, chain=%d, contract=%s, symbol=%s, reason=NEITHER time threshold (%s) NOR price deviation (%s) met",
+				gr.config.ID, dest.ChainID, dest.Contract, symbol, timeThresholdStr, priceDeviationStr)
 		}
 	}
 
@@ -365,35 +369,63 @@ func (gr *GenericRouter) evaluateDestinationCondition(condition string, data *co
 	return strings.Contains(strings.ToLower(condition), "true") || condition == ""
 }
 
-// checkTimeThreshold checks if enough time has passed since the last update to this destination
-func (gr *GenericRouter) checkTimeThreshold(dest config.RouterDestination, data *config.ExtractedData) bool {
-	symbol := gr.GetSymbolFromData(data)
-
-	// Create unique key for this destination + symbol
-	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
-
+// getOrCreateDestinationState safely retrieves or creates the state for a destination key
+func (gr *GenericRouter) getOrCreateDestinationState(key string) *DestinationState {
 	gr.mu.RLock()
-	lastUpdate, exists := gr.destinationTimes[destKey]
+	state, exists := gr.destinationStates[key]
 	gr.mu.RUnlock()
 
+	if exists {
+		return state
+	}
+
+	gr.mu.Lock()
+	defer gr.mu.Unlock()
+
+	// Double-check after acquiring write lock
+	state, exists = gr.destinationStates[key]
 	if !exists {
-		// First time sending to this destination, allow it
+		state = &DestinationState{}
+		gr.destinationStates[key] = state
+	}
+	return state
+}
+
+// checkAndReserveTimeThreshold atomically checks if threshold is met and reserves the update slot
+// Returns true if threshold is met and slot was successfully reserved, false otherwise
+// checkAndReserveTimeThreshold atomically checks if threshold is met and reserves the update slot
+// Returns true if threshold is met and slot was successfully reserved, false otherwise
+func (gr *GenericRouter) checkAndReserveTimeThreshold(dest config.RouterDestination, data *config.ExtractedData) bool {
+	symbol := gr.GetSymbolFromData(data)
+	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
+
+	state := gr.getOrCreateDestinationState(destKey)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if state.lastUpdate.IsZero() {
+		// First time sending to this destination, reserve it now
+		state.lastUpdate = time.Now()
+		logger.Infof("Time threshold check: first update for destination, router=%s, chain=%d, contract=%s, symbol=%s, threshold=%v",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, dest.TimeThreshold.Duration())
 		return true
 	}
 
 	// Check if enough time has passed
-	timeSinceLastUpdate := time.Since(lastUpdate)
+	timeSinceLastUpdate := time.Since(state.lastUpdate)
 	thresholdMet := timeSinceLastUpdate >= dest.TimeThreshold.Duration()
 
 	if thresholdMet {
-		logger.Debugf("Time threshold met for destination %s: %v >= %v",
-			destKey, timeSinceLastUpdate, dest.TimeThreshold.Duration())
-	} else {
-		logger.Debugf("Time threshold not met for destination %s: %v < %v",
-			destKey, timeSinceLastUpdate, dest.TimeThreshold.Duration())
+		// Atomically reserve the slot by updating the time
+		state.lastUpdate = time.Now()
+		logger.Infof("Time threshold met and reserved: router=%s, chain=%d, contract=%s, symbol=%s, timeSinceLastUpdate=%v, threshold=%v",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, timeSinceLastUpdate, dest.TimeThreshold.Duration())
+		return true
 	}
 
-	return thresholdMet
+	logger.Debugf("Time threshold not met: router=%s, chain=%d, contract=%s, symbol=%s, timeSinceLastUpdate=%v < threshold=%v",
+		gr.config.ID, dest.ChainID, dest.Contract, symbol, timeSinceLastUpdate, dest.TimeThreshold.Duration())
+	return false
 }
 
 // checkPriceDeviation checks if price has changed by the configured deviation percentage
@@ -402,20 +434,22 @@ func (gr *GenericRouter) checkPriceDeviation(dest config.RouterDestination, data
 	currentPrice := gr.GetPriceFromData(data)
 
 	if currentPrice == "" {
-		logger.Debugf("No price found in data for symbol %s, allowing update", symbol)
+		logger.Debugf("Price deviation check: no price found in data, allowing update, router=%s, chain=%d, contract=%s, symbol=%s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol)
 		return true // Allow if we can't determine price
 	}
 
 	// Create unique key for this destination + symbol
 	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
 
-	gr.mu.RLock()
-	lastPrice, exists := gr.destinationPrices[destKey]
-	gr.mu.RUnlock()
+	state := gr.getOrCreateDestinationState(destKey)
+	state.mu.Lock()
+	defer state.mu.Unlock()
 
-	if !exists {
+	if state.lastPrice == "" {
 		// First time, allow it
-		logger.Debugf("No previous price for %s, allowing update", destKey)
+		logger.Debugf("Price deviation check: no previous price, allowing update, router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice)
 		return true
 	}
 
@@ -423,23 +457,89 @@ func (gr *GenericRouter) checkPriceDeviation(dest config.RouterDestination, data
 	deviationStr := strings.TrimSuffix(dest.PriceDeviation, "%")
 	deviationPercent, err := strconv.ParseFloat(deviationStr, 64)
 	if err != nil {
-		logger.Warnf("Invalid price_deviation format '%s': %v, allowing update", dest.PriceDeviation, err)
+		logger.Warnf("Invalid price_deviation format '%s': %v, allowing update, router=%s, chain=%d, contract=%s, symbol=%s",
+			dest.PriceDeviation, err, gr.config.ID, dest.ChainID, dest.Contract, symbol)
 		return true
 	}
 
 	// Calculate percentage change
-	percentChange := gr.calculatePriceChangePercent(lastPrice, currentPrice)
+	percentChange := gr.calculatePriceChangePercent(state.lastPrice, currentPrice)
 	deviationMet := percentChange >= deviationPercent
 
 	if deviationMet {
-		logger.Infof("Price deviation met for %s: %.2f%% >= %.2f%% (last: %s, current: %s)",
-			destKey, percentChange, deviationPercent, lastPrice, currentPrice)
+		logger.Infof("Price deviation met: router=%s, chain=%d, contract=%s, symbol=%s, change=%.2f%%, threshold=%.2f%%, lastPrice=%s, currentPrice=%s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, percentChange, deviationPercent, state.lastPrice, currentPrice)
 	} else {
-		logger.Debugf("Price deviation not met for %s: %.2f%% < %.2f%% (last: %s, current: %s)",
-			destKey, percentChange, deviationPercent, lastPrice, currentPrice)
+		logger.Debugf("Price deviation not met: router=%s, chain=%d, contract=%s, symbol=%s, change=%.2f%% < threshold=%.2f%%, lastPrice=%s, currentPrice=%s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, percentChange, deviationPercent, state.lastPrice, currentPrice)
 	}
 
 	return deviationMet
+}
+
+// checkAndReservePriceDeviation atomically checks if price deviation is met and reserves the update slot
+// Returns true if deviation is met and slot was successfully reserved, false otherwise
+func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestination, data *config.ExtractedData) bool {
+	symbol := gr.GetSymbolFromData(data)
+	currentPrice := gr.GetPriceFromData(data)
+
+	if currentPrice == "" {
+		logger.Debugf("No price found in data for symbol %s, allowing update", symbol)
+		return true // Allow if we can't determine price
+	}
+
+	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
+
+	state := gr.getOrCreateDestinationState(destKey)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if state.lastPrice == "" {
+		// First time, reserve it now by updating the price
+		state.lastPrice = currentPrice
+		if data != nil {
+			if timestamp := gr.GetTimestampFromData(data); timestamp > 0 {
+				state.lastTimestamp = timestamp
+			}
+		}
+		logger.Infof("Price deviation check: first update for destination, router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, threshold=%s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice, dest.PriceDeviation)
+		return true
+	}
+
+	// Parse deviation percentage (e.g., "0.5%" -> 0.5)
+	deviationStr := strings.TrimSuffix(dest.PriceDeviation, "%")
+	deviationPercent, err := strconv.ParseFloat(deviationStr, 64)
+	if err != nil {
+		logger.Warnf("Invalid price_deviation format '%s': %v, allowing update, router=%s, chain=%d, contract=%s, symbol=%s",
+			dest.PriceDeviation, err, gr.config.ID, dest.ChainID, dest.Contract, symbol)
+		state.lastPrice = currentPrice
+		return true
+	}
+
+	// Calculate percentage change
+	percentChange := gr.calculatePriceChangePercent(state.lastPrice, currentPrice)
+	deviationMet := percentChange >= deviationPercent
+
+	if deviationMet {
+		// Atomically reserve the slot by updating the price
+		// Note: We do NOT update time threshold here - only update price
+		// Time threshold should only be updated when time-based update actually happens
+		lastPrice := state.lastPrice
+		state.lastPrice = currentPrice
+		if data != nil {
+			if timestamp := gr.GetTimestampFromData(data); timestamp > 0 {
+				state.lastTimestamp = timestamp
+			}
+		}
+		logger.Infof("Price deviation met and reserved: router=%s, chain=%d, contract=%s, symbol=%s, change=%.2f%%, threshold=%.2f%%, lastPrice=%s, currentPrice=%s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, percentChange, deviationPercent, lastPrice, currentPrice)
+		return true
+	}
+
+	logger.Debugf("Price deviation not met: router=%s, chain=%d, contract=%s, symbol=%s, change=%.2f%% < threshold=%.2f%%, lastPrice=%s, currentPrice=%s",
+		gr.config.ID, dest.ChainID, dest.Contract, symbol, percentChange, deviationPercent, state.lastPrice, currentPrice)
+	return false
 }
 
 // calculatePriceChangePercent calculates the percentage change between two price strings
@@ -591,11 +691,12 @@ func (gr *GenericRouter) GetTimestampFromData(data *config.ExtractedData) uint64
 func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, symbol string, data ...*config.ExtractedData) {
 	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
 
-	gr.mu.Lock()
-	defer gr.mu.Unlock()
+	state := gr.getOrCreateDestinationState(destKey)
+	state.mu.Lock()
+	defer state.mu.Unlock()
 
 	// Always update system time for time threshold checks
-	gr.destinationTimes[destKey] = time.Now()
+	state.lastUpdate = time.Now()
 
 	// Only update price if timestamp is newer than what we have
 	if len(data) > 0 && data[0] != nil {
@@ -605,30 +706,29 @@ func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, sy
 		if newPrice != "" {
 			// If timestamp is available (> 0), check if it's newer
 			if newTimestamp > 0 {
-				lastTimestamp, exists := gr.destinationPriceTimestamps[destKey]
-
 				// Only update if this is the first time OR timestamp is newer
-				if !exists || newTimestamp > lastTimestamp {
-					gr.destinationPrices[destKey] = newPrice
-					gr.destinationPriceTimestamps[destKey] = newTimestamp
+				if state.lastTimestamp == 0 || newTimestamp > state.lastTimestamp {
+					oldTimestamp := state.lastTimestamp
+					state.lastPrice = newPrice
+					state.lastTimestamp = newTimestamp
 
-					if exists {
+					if oldTimestamp > 0 {
 						logger.Infof("Updated price for %s: %s (timestamp: %d > previous: %d)",
-							destKey, newPrice, newTimestamp, lastTimestamp)
+							destKey, newPrice, newTimestamp, oldTimestamp)
 					} else {
 						logger.Infof("First price for %s: %s (timestamp: %d)",
 							destKey, newPrice, newTimestamp)
 					}
-				} else if newTimestamp == lastTimestamp {
+				} else if newTimestamp == state.lastTimestamp {
 					logger.Debugf("Price update skipped for %s: same timestamp %d (price: %s)",
 						destKey, newTimestamp, newPrice)
 				} else {
 					logger.Warnf("REJECTED stale price update for %s: timestamp %d <= current %d (price: %s would not replace %s)",
-						destKey, newTimestamp, lastTimestamp, newPrice, gr.destinationPrices[destKey])
+						destKey, newTimestamp, state.lastTimestamp, newPrice, state.lastPrice)
 				}
 			} else {
 				// No timestamp available, fall back to always updating (backward compatibility)
-				gr.destinationPrices[destKey] = newPrice
+				state.lastPrice = newPrice
 				logger.Debugf("Updated price for %s: %s (no timestamp available, using legacy mode)",
 					destKey, newPrice)
 			}
