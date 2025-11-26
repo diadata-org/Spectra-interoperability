@@ -42,6 +42,9 @@ type Collector struct {
 	taskQueueSize          prometheus.Gauge
 	taskProcessingDuration prometheus.Histogram
 
+	// Update channel metrics
+	updateChanSize prometheus.Gauge
+
 	// Database metrics
 	dbConnections   prometheus.Gauge
 	dbQueryDuration prometheus.Histogram
@@ -151,6 +154,12 @@ func NewCollector() *Collector {
 				Buckets: prometheus.DefBuckets,
 			}),
 
+			// Update channel metrics
+			updateChanSize: promauto.NewGauge(prometheus.GaugeOpts{
+				Name: "bridge_update_chan_size",
+				Help: "Current number of items in the update channel queue",
+			}),
+
 			// Database metrics
 			dbConnections: promauto.NewGauge(prometheus.GaugeOpts{
 				Name: "bridge_db_connections",
@@ -184,6 +193,9 @@ func NewCollector() *Collector {
 			// Initialize failover metrics (shared instance)
 			FailoverMetrics: NewMetrics(),
 		}
+
+		// Initialize update channel metric to 0 to ensure it's exposed
+		collectorInstance.updateChanSize.Set(0)
 	})
 	return collectorInstance
 }
@@ -283,6 +295,15 @@ func (c *Collector) SetTaskQueueSize(size int32) {
 
 func (c *Collector) ObserveTaskProcessingDuration(seconds float64) {
 	c.taskProcessingDuration.Observe(seconds)
+}
+
+// Update channel metric methods
+
+func (c *Collector) SetUpdateChanSize(size int) {
+	if c == nil {
+		return
+	}
+	c.updateChanSize.Set(float64(size))
 }
 
 // HTTP metric methods

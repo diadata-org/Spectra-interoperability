@@ -45,6 +45,7 @@ type GenericEventProcessor struct {
 
 	dedupCache       *DedupCache
 	metricsCollector *metrics.Collector
+	reportQueueSize  func() // Callback to report queue size after enqueue
 
 	stats types.ProcessorStats
 
@@ -73,6 +74,7 @@ func NewGenericEventProcessor(
 	errorChan chan<- error,
 	updateChan chan<- *types.UpdateRequest,
 	metricsCollector *metrics.Collector,
+	reportQueueSize func(), // Callback to report queue size after enqueue
 ) (*GenericEventProcessor, error) {
 	extractor, err := pipeline.NewDataExtractor(eventDefs)
 	if err != nil {
@@ -106,6 +108,7 @@ func NewGenericEventProcessor(
 		updateChan:       updateChan,
 		dedupCache:       NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration()),
 		metricsCollector: metricsCollector,
+		reportQueueSize:  reportQueueSize,
 		stopChan:         make(chan struct{}),
 	}
 
@@ -316,14 +319,40 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				}
 
 				// Create update request using the router's method configuration
+				// Extract Intent from enrichment if available (this is what gets passed to handleIntentUpdate)
+				var intent *types.OracleIntent
+				var createdAt time.Time
+				
+				if extractedData.Enrichment != nil {
+					if fullIntentValue, exists := extractedData.Enrichment["fullIntent"]; exists {
+						if intentFromEnrichment, ok := fullIntentValue.(*types.OracleIntent); ok {
+							intent = intentFromEnrichment
+							// Use Intent timestamp - this is the timestamp passed to handleIntentUpdate
+							if intent.Timestamp != nil {
+								createdAt = time.Unix(intent.Timestamp.Int64(), 0)
+							}
+						}
+					}
+				}
+				
+				// Fallback to event timestamp if Intent timestamp not available
+				if createdAt.IsZero() && event.Timestamp != nil {
+					createdAt = time.Unix(event.Timestamp.Int64(), 0)
+				}
+				// Final fallback to current time
+				if createdAt.IsZero() {
+					createdAt = time.Now()
+				}
+
 				updateReq := &types.UpdateRequest{
 					ID:                      fmt.Sprintf("%s-%s-%d", result.RouterID, event.EventName, time.Now().Unix()),
 					Event:                   event,
+					Intent:                  intent, // Set Intent so it's available later
 					DestinationChain:        destConfig,
 					Contract:                contractConfig,
 					Priority:                1,
 					Retries:                 0,
-					CreatedAt:               time.Now(),
+					CreatedAt:               createdAt, // Use timestamp from Intent (same as passed to handleIntentUpdate)
 					RouterID:                result.RouterID,
 					DestinationMethodConfig: &dest.Method,
 					ExtractedData:           extractedData,
@@ -344,6 +373,10 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 					symbol := router.GetSymbolFromData(extractedData)
 					logger.Infof("Queued update: event=%s, router=%s, symbol=%s, chain=%d, contract=%s",
 						event.EventName, result.RouterID, symbol, dest.ChainID, dest.Contract)
+					// Report queue size immediately after enqueueing
+					if gep.reportQueueSize != nil {
+						gep.reportQueueSize()
+					}
 				case <-ctx.Done():
 					return ctx.Err()
 				default:

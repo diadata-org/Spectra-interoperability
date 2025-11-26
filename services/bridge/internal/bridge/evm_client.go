@@ -83,6 +83,13 @@ func (wc *WriteClient) updateLastUpdate(symbol string) {
 	wc.lastUpdate[symbol] = time.Now()
 }
 
+// getLastUpdate returns the last update time for a symbol, or zero time if not found
+func (wc *WriteClient) getLastUpdate(symbol string) time.Time {
+	wc.mu.RLock()
+	defer wc.mu.RUnlock()
+	return wc.lastUpdate[symbol]
+}
+
 // getGasPrice gets the current gas price for a destination chain
 func (wc *WriteClient) getGasPrice(ctx context.Context) (*big.Int, error) {
 	gasPrice, err := wc.client.SuggestGasPrice(ctx)

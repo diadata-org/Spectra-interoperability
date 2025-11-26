@@ -61,6 +61,7 @@ type Bridge struct {
 
 	// Metrics tracking
 	metricsTracker *MetricsTracker
+	metricsCollector *metrics.Collector
 	// API components
 	apiServer *api.Server
 	metrics   *metrics.Metrics
@@ -217,6 +218,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		workerPool:         workerPool,
 		routerRegistry:     routerRegistry,
 		metricsTracker:     metricsTracker,
+		metricsCollector:   metricsCollector,
 		queueManager:       queueManager,
 	}
 
@@ -230,6 +232,13 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 
 	// Create generic event processor
+	// Create callback function to report queue size after enqueue
+	reportQueueSize := func() {
+		if bridge.metricsCollector != nil {
+			bridge.metricsCollector.SetUpdateChanSize(len(bridge.updateChan))
+		}
+	}
+
 	eventProcessor, err := processor.NewGenericEventProcessor(
 		&cfgService.GetInfrastructure().EventProcessor,
 		cfgService.GetEventDefinitions(),
@@ -242,6 +251,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		errorChan,
 		bridge.updateChan,
 		metricsCollector,
+		reportQueueSize,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
@@ -307,6 +317,19 @@ func (b *Bridge) Start(ctx context.Context) error {
 	go func() {
 		defer b.wg.Done()
 		b.processUpdates(ctx)
+	}()
+
+	// Initialize update channel metric to 0 immediately
+	if b.metricsCollector != nil {
+		b.metricsCollector.SetUpdateChanSize(0)
+		logger.Debugf("Initialized update channel metric to 0")
+	}
+
+	// Start update channel metrics reporter
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		b.reportUpdateChanMetrics(ctx)
 	}()
 
 	// Start health checker
@@ -385,6 +408,43 @@ func (b *Bridge) Wait() {
 	b.wg.Wait()
 }
 
+// reportUpdateChanMetrics periodically reports the update channel queue size
+func (b *Bridge) reportUpdateChanMetrics(ctx context.Context) {
+	logger.Info("Starting update channel metrics reporter")
+	ticker := time.NewTicker(100 * time.Millisecond) // Report every 100ms to catch items quickly
+	defer ticker.Stop()
+
+	// Report initial size immediately (even if 0, to ensure metric is exposed)
+	if b.metricsCollector != nil {
+		size := len(b.updateChan)
+		b.metricsCollector.SetUpdateChanSize(size)
+		logger.Debugf("Initial update channel size: %d", size)
+	} else {
+		logger.Warn("Metrics collector is nil, cannot report update channel size")
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Update channel metrics reporter stopped (context cancelled)")
+			return
+		case <-b.shutdownChan:
+			logger.Info("Update channel metrics reporter stopped (shutdown)")
+			return
+		case <-ticker.C:
+			// Periodically report updateChan size (more frequently to catch items)
+			if b.metricsCollector != nil {
+				size := len(b.updateChan)
+				b.metricsCollector.SetUpdateChanSize(size)
+				// Log when queue has items
+				if size > 0 {
+					logger.Debugf("Update channel size: %d/%d", size, cap(b.updateChan))
+				}
+			}
+		}
+	}
+}
+
 // processUpdates processes update requests
 func (b *Bridge) processUpdates(ctx context.Context) {
 	logger.Info("Starting update processor")
@@ -396,6 +456,30 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 		case <-b.shutdownChan:
 			return
 		case updateReq := <-b.updateChan:
+			// Report metric: when we successfully dequeue, we know there was at least 1 item
+			// Report current size + 1 to show the size BEFORE we dequeued this item
+			// This gives a more accurate picture of queue depth
+			if b.metricsCollector != nil {
+				// Current size after dequeue + 1 (the item we just dequeued)
+				queueSize := len(b.updateChan) + 1
+				b.metricsCollector.SetUpdateChanSize(queueSize)
+			}
+
+			// Check if update is stale based on last update in cache
+			if updateReq.Intent != nil && !updateReq.CreatedAt.IsZero() {
+				destClient := b.writeClients[updateReq.DestinationChain.ChainID]
+				if destClient != nil {
+					lastUpdateTime := destClient.getLastUpdate(updateReq.Intent.Symbol)
+					if !lastUpdateTime.IsZero() && updateReq.CreatedAt.Before(lastUpdateTime) {
+						// Update is older than what's already in cache, skip it
+						logger.Debugf("Skipping stale update: symbol=%s, chain=%d, updateTime=%v, lastUpdateTime=%v, age=%v",
+							updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID,
+							updateReq.CreatedAt, lastUpdateTime, lastUpdateTime.Sub(updateReq.CreatedAt))
+						continue
+					}
+				}
+			}
+
 			// Create task ID based on available data
 			var taskID string
 			if updateReq.Intent != nil {

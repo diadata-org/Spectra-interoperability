@@ -12,8 +12,20 @@ import (
 
 // initializeChainStats initializes chain statistics
 func (b *Bridge) initializeChainStats() {
+	// Check if configService is available
+	if b.configService == nil {
+		logger.Warnf("configService is nil, skipping chain stats initialization")
+		return
+	}
+	
+	infra := b.configService.GetInfrastructure()
+	if infra == nil {
+		logger.Warnf("Infrastructure config is nil, skipping chain stats initialization")
+		return
+	}
+	
 	// Source chain stats
-	sourceConfig := b.configService.GetInfrastructure().Source
+	sourceConfig := infra.Source
 	b.stats.ChainStats[sourceConfig.ChainID] = &bridgetypes.ChainStatus{
 		ChainID:   sourceConfig.ChainID,
 		Name:      sourceConfig.Name,
