@@ -227,7 +227,7 @@ type ReceiverClient struct {
 }
 
 // NewReceiverClient creates a new receiver client using an EthClient with failover support
-func NewReceiverClient(client rpc.EthClient, address common.Address, privateKey string) (*ReceiverClient, error) {
+func NewReceiverClient(client rpc.EthClient, address common.Address, privateKey string, maxSafeGap uint64) (*ReceiverClient, error) {
 	parsedABI, err := abi.JSON(strings.NewReader(PushOracleReceiverABI))
 	if err != nil {
 		return nil, err
@@ -244,7 +244,7 @@ func NewReceiverClient(client rpc.EthClient, address common.Address, privateKey 
 		return nil, err
 	}
 
-	logger.Infof("Creating receiver client for chain ID: %s", chainID.String())
+	logger.Infof("Creating receiver client for chain ID: %s, maxSafeGap: %d", chainID.String(), maxSafeGap)
 
 	auth, err := bind.NewKeyedTransactorWithChainID(key, chainID)
 	if err != nil {
@@ -259,7 +259,7 @@ func NewReceiverClient(client rpc.EthClient, address common.Address, privateKey 
 		address:      address,
 		abi:          parsedABI,
 		auth:         auth,
-		nonceManager: NewNonceManager(client, auth.From, chainID.Int64()),
+		nonceManager: NewNonceManager(client, auth.From, chainID.Int64(), maxSafeGap),
 	}, nil
 }
 

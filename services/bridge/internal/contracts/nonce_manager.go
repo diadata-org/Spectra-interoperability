@@ -31,6 +31,7 @@ type NonceManager struct {
 	retryCount    map[uint64]int        // Track retry attempts per nonce
 	lastSync      time.Time             // Last time we synced with chain
 	metrics       *metrics.Collector    // Optional metrics collector for tracking pending nonces
+	maxSafeGap    uint64                // Maximum safe gap before emergency reset
 }
 
 // getRPCURL returns the RPC URL if the client is a MultiClient, otherwise returns "unknown"
@@ -50,7 +51,7 @@ type NonceInfo struct {
 }
 
 // NewNonceManager creates a new nonce manager
-func NewNonceManager(client rpc.EthClient, address common.Address, chainID int64) *NonceManager {
+func NewNonceManager(client rpc.EthClient, address common.Address, chainID int64, maxSafeGap uint64) *NonceManager {
 	nm := &NonceManager{
 		client:        client,
 		address:       address,
@@ -59,6 +60,7 @@ func NewNonceManager(client rpc.EthClient, address common.Address, chainID int64
 		retryCount:    make(map[uint64]int),
 		initialized:   false,
 		metrics:       metrics.NewCollector(), // Use singleton metrics collector
+		maxSafeGap:    maxSafeGap,
 	}
 	return nm
 }
@@ -154,10 +156,9 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	// Handle gap when localNonce is ahead of chainNonce
 	if nm.localNonce > chainNonce {
 		gap := nm.localNonce - chainNonce
-		const maxSafeGap = 100
-		if gap > maxSafeGap {
+		if gap > nm.maxSafeGap {
 			logger.Errorf("NonceManager: ERROR - Local nonce (%d) is %d ahead of chain (%d), wallet=%s, chain=%d, rpc=%s", nm.localNonce, gap, chainNonce, nm.address.Hex(), nm.chainID, nm.getRPCURL())
-			logger.Errorf("NonceManager: Gap of %d exceeds max safe gap of %d, wallet=%s, chain=%d, rpc=%s", gap, maxSafeGap, nm.address.Hex(), nm.chainID, nm.getRPCURL())
+			logger.Errorf("NonceManager: Gap of %d exceeds max safe gap of %d, wallet=%s, chain=%d, rpc=%s", gap, nm.maxSafeGap, nm.address.Hex(), nm.chainID, nm.getRPCURL())
 			logger.Errorf("NonceManager: This means transactions are NOT being broadcast to network! wallet=%s, chain=%d, rpc=%s", nm.address.Hex(), nm.chainID, nm.getRPCURL())
 			logger.Errorf("NonceManager: Forcing nonce reset to prevent infinite gap growth, wallet=%s, chain=%d, rpc=%s", nm.address.Hex(), nm.chainID, nm.getRPCURL())
 
@@ -167,7 +168,7 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 			nm.updatePendingNonceMetrics()
 
 			logger.Warnf("NonceManager: Emergency reset complete. Local nonce: %d, wallet=%s, chain=%d, rpc=%s", nm.localNonce, nm.address.Hex(), nm.chainID, nm.getRPCURL())
-			return 0, fmt.Errorf("nonce gap exceeded %d (had %d pending), forced reset to chain nonce %d - check transaction broadcast", maxSafeGap, gap, chainNonce)
+			return 0, fmt.Errorf("nonce gap exceeded %d (had %d pending), forced reset to chain nonce %d - check transaction broadcast", nm.maxSafeGap, gap, chainNonce)
 		}
 		if gap > 50 && gap%10 == 0 {
 			logger.Warnf("NonceManager: Local nonce %d ahead of chain %d by %d (pending transactions), wallet=%s, chain=%d, rpc=%s", nm.localNonce, chainNonce, gap, nm.address.Hex(), nm.chainID, nm.getRPCURL())

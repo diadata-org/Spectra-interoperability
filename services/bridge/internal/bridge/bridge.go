@@ -60,7 +60,7 @@ type Bridge struct {
 	eventProcessor *processor.GenericEventProcessor
 
 	// Metrics tracking
-	metricsTracker *MetricsTracker
+	metricsTracker   *MetricsTracker
 	metricsCollector *metrics.Collector
 	// API components
 	apiServer *api.Server
@@ -96,7 +96,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 			continue // Skip chains with no contracts
 		}
 
-		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager)
+		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, 100)
 		if err != nil {
 			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
 			continue

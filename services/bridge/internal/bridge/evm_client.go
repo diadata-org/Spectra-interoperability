@@ -28,7 +28,7 @@ type WriteClient struct {
 }
 
 // NewWriteClient creates a new write client for destination operations
-func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.ContractConfig, privateKey string, queueManager *transaction.QueueManager) (*WriteClient, error) {
+func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.ContractConfig, privateKey string, queueManager *transaction.QueueManager, maxSafeGap uint64) (*WriteClient, error) {
 	if chainConfig == nil {
 		return nil, fmt.Errorf("chain config cannot be nil")
 	}
@@ -61,6 +61,7 @@ func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.C
 		client,
 		common.HexToAddress(receiverAddress),
 		privateKey,
+		maxSafeGap,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create receiver client: %w", err)
