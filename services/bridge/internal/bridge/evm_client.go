@@ -78,17 +78,23 @@ func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.C
 	}, nil
 }
 
-func (wc *WriteClient) updateLastUpdate(symbol string) {
+// updateLastUpdate updates the last update time for a specific symbol and contract
+func (wc *WriteClient) updateLastUpdate(symbol, contract string) {
 	wc.mu.Lock()
 	defer wc.mu.Unlock()
-	wc.lastUpdate[symbol] = time.Now()
+	// Key format: "chainID-symbol-contract" to track per-oracle updates
+	key := fmt.Sprintf("%d-%s-%s", wc.chainConfig.ChainID, symbol, contract)
+	wc.lastUpdate[key] = time.Now()
+	logger.Debugf("Updated lastUpdate for %s on chain %d", key, wc.chainConfig.ChainID)
 }
 
-// getLastUpdate returns the last update time for a symbol, or zero time if not found
-func (wc *WriteClient) getLastUpdate(symbol string) time.Time {
+// getLastUpdate returns the last update time for a specific symbol and contract, or zero time if not found
+func (wc *WriteClient) getLastUpdate(symbol, contract string) time.Time {
 	wc.mu.RLock()
 	defer wc.mu.RUnlock()
-	return wc.lastUpdate[symbol]
+	// Key format: "chainID-symbol-contract" to track per-oracle updates
+	key := fmt.Sprintf("%d-%s-%s", wc.chainConfig.ChainID, symbol, contract)
+	return wc.lastUpdate[key]
 }
 
 // getGasPrice gets the current gas price for a destination chain

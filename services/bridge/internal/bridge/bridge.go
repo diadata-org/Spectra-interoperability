@@ -521,14 +521,13 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 			}
 
 			// Check if update is stale based on last update in cache
-			if updateReq.Intent != nil && !updateReq.CreatedAt.IsZero() {
+			if updateReq.Intent != nil && !updateReq.CreatedAt.IsZero() && updateReq.Contract != nil {
 				destClient := b.writeClients[updateReq.DestinationChain.ChainID]
 				if destClient != nil {
-					lastUpdateTime := destClient.getLastUpdate(updateReq.Intent.Symbol)
+					lastUpdateTime := destClient.getLastUpdate(updateReq.Intent.Symbol, updateReq.Contract.Address)
 					if !lastUpdateTime.IsZero() && updateReq.CreatedAt.Before(lastUpdateTime) {
-						// Update is older than what's already in cache, skip it
-						logger.Debugf("Skipping stale update: symbol=%s, chain=%d, updateTime=%v, lastUpdateTime=%v, age=%v",
-							updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID,
+						logger.Debugf("Skipping stale update: symbol=%s, chain=%d, contract=%s, updateTime=%v, lastUpdateTime=%v, age=%v",
+							updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID, updateReq.Contract.Address,
 							updateReq.CreatedAt, lastUpdateTime, lastUpdateTime.Sub(updateReq.CreatedAt))
 						continue
 					}

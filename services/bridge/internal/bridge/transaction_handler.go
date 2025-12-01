@@ -191,8 +191,8 @@ func (h *TransactionHandler) recordConfirmation(txCtx *TransactionContext, txHas
 
 // updateState updates bridge state after successful transaction
 func (h *TransactionHandler) updateState(txCtx *TransactionContext) {
-	if txCtx.UpdateRequest.Intent != nil {
-		txCtx.DestClient.updateLastUpdate(txCtx.UpdateRequest.Intent.Symbol)
+	if txCtx.UpdateRequest.Intent != nil && txCtx.UpdateRequest.Contract != nil {
+		txCtx.DestClient.updateLastUpdate(txCtx.UpdateRequest.Intent.Symbol, txCtx.UpdateRequest.Contract.Address)
 	}
 
 	if txCtx.UpdateRequest.RouterID != "" && h.bridge.routerRegistry != nil {
