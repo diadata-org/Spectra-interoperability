@@ -178,17 +178,14 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	nm.initialized = true
 	nm.lastSync = time.Now()
 
-	// Allocate or reuse nonce
+	// Allocate new nonce
 	nonce := nm.localNonce
-	if info, exists := nm.pendingNonces[nonce]; exists && !info.Sent {
-		logger.Infof("NonceManager: Reusing pending nonce %d for retry (not yet sent), wallet=%s, chain=%d, rpc=%s", nonce, nm.address.Hex(), nm.chainID, nm.getRPCURL())
-		return nonce, nil
-	}
 	nm.pendingNonces[nonce] = &NonceInfo{Allocated: time.Now(), Sent: false}
 	nm.localNonce++
 	nm.updatePendingNonceMetrics()
 	logger.Debugf("NonceManager: Allocated nonce %d for wallet=%s (next: %d, pending: %d), chain=%d, rpc=%s", nonce, nm.address.Hex(), nm.localNonce, len(nm.pendingNonces), nm.chainID, nm.getRPCURL())
 	return nonce, nil
+
 }
 
 // syncWithChainLocked syncs local nonce with chain state (must be called with lock held)

@@ -88,33 +88,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	// Create transaction queue manager
 	queueManager := transaction.NewQueueManager(1000)
 
-	// Create destination clients
-	destClients := make(map[int64]*WriteClient)
-	for _, chainConfig := range cfgService.GetEnabledChains() {
-		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
-		if len(contracts) == 0 {
-			continue // Skip chains with no contracts
-		}
-
-		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, 100)
-		if err != nil {
-			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
-			continue
-		}
-		destClients[chainConfig.ChainID] = destClient
-	}
-
-	if len(destClients) == 0 {
-		return nil, fmt.Errorf("no destination clients available")
-	}
-
-	// Create worker pool with configured size
-	workerPool := worker.NewWorkerPool(
-		cfgService.GetInfrastructure().WorkerPool.MaxWorkers,
-		cfgService.GetInfrastructure().WorkerPool.TaskQueueSize,
-	)
-
-	// Create router registry and load routers
+	// Create router registry first (needed for calculating maxSafeGap)
 	routerRegistry := router.NewGenericRegistry()
 	// Load routers directly (convert pointers to values for registry)
 	enabledRouterPointers := cfgService.GetEnabledRouters()
@@ -150,7 +124,38 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
-	// Create channels
+	// Create destination clients
+	destClients := make(map[int64]*WriteClient)
+	for _, chainConfig := range cfgService.GetEnabledChains() {
+		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
+		if len(contracts) == 0 {
+			continue // Skip chains with no contracts
+		}
+
+		// Calculate maxSafeGap based on number of oracles (destinations) configured for this chain
+		oracleCount := countDestinationsForChain(routerRegistry, chainConfig.ChainID)
+		maxSafeGap := calculateMaxSafeGap(oracleCount)
+		logger.Infof("Chain %d (%s): %d oracles configured, maxSafeGap=%d",
+			chainConfig.ChainID, chainConfig.Name, oracleCount, maxSafeGap)
+
+		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
+		if err != nil {
+			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
+			continue
+		}
+		destClients[chainConfig.ChainID] = destClient
+	}
+
+	if len(destClients) == 0 {
+		return nil, fmt.Errorf("no destination clients available")
+	}
+
+	// Create worker pool with configured size
+	workerPool := worker.NewWorkerPool(
+		cfgService.GetInfrastructure().WorkerPool.MaxWorkers,
+		cfgService.GetInfrastructure().WorkerPool.TaskQueueSize,
+	)
+
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
 
@@ -269,6 +274,56 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	logger.Infof("Bridge initialized with %d routers", routerRegistry.Count())
 
 	return bridge, nil
+}
+
+// countDestinationsForChain counts all destinations (oracles) configured for a specific chain
+func countDestinationsForChain(routerRegistry *router.GenericRegistry, chainID int64) int {
+	if routerRegistry == nil {
+		logger.Warnf("Router registry is nil for chain %d, cannot count destinations", chainID)
+		return 0
+	}
+
+	activeRouters := routerRegistry.GetActiveRouters()
+	count := 0
+
+	for _, router := range activeRouters {
+		destinations := router.GetConfigDestinations()
+
+		for _, dest := range destinations {
+			if dest.ChainID == chainID {
+				count++
+				logger.Debugf("Found destination for chain %d: router=%s, contract=%s",
+					chainID, router.ID(), dest.Contract)
+			}
+		}
+	}
+
+	return count
+}
+
+// calculateMaxSafeGap calculates dynamic maxSafeGap based on oracle count
+func calculateMaxSafeGap(oracleCount int) uint64 {
+	const (
+		baseValue  = 5
+		multiplier = 10
+		minValue   = 5
+		maxValue   = 500
+	)
+
+	if oracleCount < 0 {
+		oracleCount = 0
+	}
+
+	calculated := baseValue + (oracleCount * multiplier)
+
+	if calculated < minValue {
+		calculated = minValue
+	}
+	if calculated > maxValue {
+		calculated = maxValue
+	}
+
+	return uint64(calculated)
 }
 
 // Start starts the bridge service

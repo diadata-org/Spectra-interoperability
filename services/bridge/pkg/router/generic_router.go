@@ -88,6 +88,16 @@ func (gr *GenericRouter) IsEnabled() bool {
 	return gr.config.Enabled
 }
 
+// GetConfigDestinations returns all destinations configured in this router
+func (gr *GenericRouter) GetConfigDestinations() []config.RouterDestination {
+	gr.mu.RLock()
+	defer gr.mu.RUnlock()
+
+	destinations := make([]config.RouterDestination, len(gr.config.Destinations))
+	copy(destinations, gr.config.Destinations)
+	return destinations
+}
+
 // ShouldRoute determines if an event should be routed
 func (gr *GenericRouter) ShouldRoute(eventName string, data *config.ExtractedData) (bool, string) {
 	gr.mu.Lock()
