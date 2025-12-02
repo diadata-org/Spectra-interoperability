@@ -3,6 +3,7 @@ package router
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
@@ -114,25 +115,41 @@ func (gr *GenericRegistry) GetRoutersForEvent(eventName string) []*GenericRouter
 
 // RouteEvent routes an event through all applicable routers
 func (gr *GenericRegistry) RouteEvent(eventName string, data *config.ExtractedData) []RoutingResult {
+	start := time.Now()
 	routers := gr.GetRoutersForEvent(eventName)
+	var wg sync.WaitGroup
 
-	var results []RoutingResult
-	for _, router := range routers {
-		shouldRoute, reason := router.ShouldRoute(eventName, data)
+	// var results []RoutingResult
+	results := make([]RoutingResult, len(routers))
 
-		result := RoutingResult{
-			RouterID: router.ID(),
-			Routed:   shouldRoute,
-			Reason:   reason,
-		}
-
-		if shouldRoute {
-			destinations := router.GetDestinations(data)
-			result.Destinations = destinations
-		}
-
-		results = append(results, result)
+	if len(routers) == 0 {
+		return []RoutingResult{}
 	}
+	for i, router := range routers {
+		wg.Add(1)
+
+		go func(idx int, r *GenericRouter) {
+			defer wg.Done()
+			shouldRoute, reason := r.ShouldRoute(eventName, data)
+
+			result := RoutingResult{
+				RouterID: r.ID(),
+				Routed:   shouldRoute,
+				Reason:   reason,
+			}
+
+			if shouldRoute {
+				result.Destinations = r.GetDestinations(data)
+			}
+			results[idx] = result
+
+		}(i, router)
+	}
+
+	wg.Wait()
+
+	elapsed := time.Since(start)
+	logger.Infof("RouteEvent for %s with %d routers took %s", eventName, len(routers), elapsed)
 
 	return results
 }
