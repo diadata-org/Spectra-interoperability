@@ -155,6 +155,9 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		cfgService.GetInfrastructure().WorkerPool.MaxWorkers,
 		cfgService.GetInfrastructure().WorkerPool.TaskQueueSize,
 	)
+	if metricsCollector != nil {
+		workerPool.SetMetricsCollector(metricsCollector)
+	}
 
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)

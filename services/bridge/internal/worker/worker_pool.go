@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
@@ -18,21 +19,23 @@ type WorkerTask struct {
 
 // WorkerPool manages a pool of workers for processing update requests
 type WorkerPool struct {
-	maxWorkers   int
-	taskQueue    chan *WorkerTask
-	workers      []*Worker
-	shutdownChan chan struct{}
-	wg           sync.WaitGroup
-	mu           sync.RWMutex
-	running      bool
+	maxWorkers       int
+	taskQueue        chan *WorkerTask
+	workers          []*Worker
+	shutdownChan     chan struct{}
+	wg               sync.WaitGroup
+	mu               sync.RWMutex
+	running          bool
+	metricsCollector *metrics.Collector
 }
 
 // Worker represents a single worker in the pool
 type Worker struct {
-	id        int
-	taskQueue chan *WorkerTask
-	quit      chan struct{}
-	wg        *sync.WaitGroup
+	id               int
+	taskQueue        chan *WorkerTask
+	quit             chan struct{}
+	wg               *sync.WaitGroup
+	metricsCollector *metrics.Collector
 }
 
 // NewWorkerPool creates a new worker pool
@@ -52,6 +55,16 @@ func NewWorkerPool(maxWorkers int, taskQueueSize int) *WorkerPool {
 	}
 }
 
+// SetMetricsCollector sets the metrics collector for the worker pool
+func (wp *WorkerPool) SetMetricsCollector(collector *metrics.Collector) {
+	wp.mu.Lock()
+	defer wp.mu.Unlock()
+	wp.metricsCollector = collector
+	if collector != nil {
+		collector.SetWorkerPoolSize(wp.maxWorkers)
+	}
+}
+
 // Start starts the worker pool
 func (wp *WorkerPool) Start(ctx context.Context) {
 	wp.mu.Lock()
@@ -66,10 +79,11 @@ func (wp *WorkerPool) Start(ctx context.Context) {
 
 	for i := 0; i < wp.maxWorkers; i++ {
 		worker := &Worker{
-			id:        i,
-			taskQueue: wp.taskQueue,
-			quit:      make(chan struct{}),
-			wg:        &wp.wg,
+			id:               i,
+			taskQueue:        wp.taskQueue,
+			quit:             make(chan struct{}),
+			wg:               &wp.wg,
+			metricsCollector: wp.metricsCollector,
 		}
 		wp.workers[i] = worker
 
@@ -133,7 +147,12 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 
 	select {
 	case wp.taskQueue <- task:
-		logger.Debugf("Task %s queued (queue: %d/%d)", task.ID, len(wp.taskQueue), cap(wp.taskQueue))
+		queueSize := len(wp.taskQueue)
+		logger.Debugf("Task %s queued (queue: %d/%d)", task.ID, queueSize, cap(wp.taskQueue))
+		// Update queue size metric
+		if wp.metricsCollector != nil {
+			wp.metricsCollector.SetTaskQueueSize(int32(queueSize))
+		}
 	default:
 		queueLen := len(wp.taskQueue)
 		queueCap := cap(wp.taskQueue)
@@ -143,7 +162,10 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 		}
 		logger.Errorf("CRITICAL: Task queue full (%d/%d), DROPPING task %s for symbol %s - consider increasing queue size or worker count",
 			queueLen, queueCap, task.ID, symbol)
-		// TODO: Add metric for dropped tasks
+		// Record dropped task metric
+		if wp.metricsCollector != nil {
+			wp.metricsCollector.IncWorkerTasksDropped()
+		}
 	}
 }
 
@@ -176,8 +198,10 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	// Process the task with retry logic
 	var err error
 	maxRetries := 3
+	retryCount := 0
 	for retry := 0; retry < maxRetries; retry++ {
 		if retry > 0 {
+			retryCount++
 			logger.Debugf("Worker %d retrying task %s (attempt %d/%d)", w.id, task.ID, retry+1, maxRetries)
 			time.Sleep(time.Second * time.Duration(retry))
 		}
@@ -194,7 +218,18 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 
 	if err != nil {
 		logger.Errorf("Worker %d task %s failed after %d retries: %v", w.id, task.ID, maxRetries, err)
+		if w.metricsCollector != nil {
+			w.metricsCollector.IncWorkerTasksFailed()
+			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())
+		}
 	} else {
-		logger.Debugf("Worker %d completed task %s in %v", w.id, task.ID, duration)
+		logger.Debugf("Worker %d completed task %s in %v (retries: %d)", w.id, task.ID, duration, retryCount)
+		if w.metricsCollector != nil {
+			w.metricsCollector.IncWorkerTasksCompleted()
+			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())
+			if retryCount > 0 {
+				w.metricsCollector.AddWorkerTaskRetries(retryCount)
+			}
+		}
 	}
 }

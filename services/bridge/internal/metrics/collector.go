@@ -41,6 +41,10 @@ type Collector struct {
 	activeWorkers          prometheus.Gauge
 	taskQueueSize          prometheus.Gauge
 	taskProcessingDuration prometheus.Histogram
+	workerTasksCompleted   prometheus.Counter
+	workerTasksFailed      prometheus.Counter
+	workerTasksDropped     prometheus.Counter
+	workerTaskRetries      prometheus.Counter
 
 	// Update channel metrics
 	updateChanSize prometheus.Gauge
@@ -152,6 +156,22 @@ func NewCollector() *Collector {
 				Name:    "bridge_task_processing_duration_seconds",
 				Help:    "Duration of task processing",
 				Buckets: prometheus.DefBuckets,
+			}),
+			workerTasksCompleted: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_worker_tasks_completed_total",
+				Help: "Total number of worker tasks completed successfully",
+			}),
+			workerTasksFailed: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_worker_tasks_failed_total",
+				Help: "Total number of worker tasks that failed",
+			}),
+			workerTasksDropped: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_worker_tasks_dropped_total",
+				Help: "Total number of worker tasks dropped due to full queue",
+			}),
+			workerTaskRetries: promauto.NewCounter(prometheus.CounterOpts{
+				Name: "bridge_worker_task_retries_total",
+				Help: "Total number of worker task retries",
 			}),
 
 			// Update channel metrics
@@ -295,6 +315,22 @@ func (c *Collector) SetTaskQueueSize(size int32) {
 
 func (c *Collector) ObserveTaskProcessingDuration(seconds float64) {
 	c.taskProcessingDuration.Observe(seconds)
+}
+
+func (c *Collector) IncWorkerTasksCompleted() {
+	c.workerTasksCompleted.Inc()
+}
+
+func (c *Collector) IncWorkerTasksFailed() {
+	c.workerTasksFailed.Inc()
+}
+
+func (c *Collector) IncWorkerTasksDropped() {
+	c.workerTasksDropped.Inc()
+}
+
+func (c *Collector) AddWorkerTaskRetries(count int) {
+	c.workerTaskRetries.Add(float64(count))
 }
 
 // Update channel metric methods

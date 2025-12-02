@@ -92,16 +92,16 @@ func NewGenericEventProcessor(
 	// All transactions now go through transaction.Client → contracts.NonceManager
 
 	gep := &GenericEventProcessor{
-		config:           cfg,
-		eventDefs:        eventDefs,
-		destinations:     destinations,
-		db:               db,
-		routerRegistry:   routerRegistry,
-		sourceClient:     sourceClient,
-		destClients:      destClients,
-		extractor:        extractor,
-		enricher:         enricher,
-		transformer:      transformer,
+		config:         cfg,
+		eventDefs:      eventDefs,
+		destinations:   destinations,
+		db:             db,
+		routerRegistry: routerRegistry,
+		sourceClient:   sourceClient,
+		destClients:    destClients,
+		extractor:      extractor,
+		enricher:       enricher,
+		transformer:    transformer,
 		// txBuilder:     nil, // removed
 		eventChan:        eventChan,
 		errorChan:        errorChan,
@@ -282,7 +282,9 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 			}
 
 			// Apply time threshold filtering with enriched data
-			filteredDestinations := router.FilterDestinationsByTimeThreshold(result.Destinations, extractedData)
+			// Pass IntentHash from event for logging
+			intentHashStr := fmt.Sprintf("%x", event.IntentHash)
+			filteredDestinations := router.FilterDestinationsByTimeThreshold(result.Destinations, extractedData, intentHashStr)
 			if len(filteredDestinations) == 0 {
 				logger.Debugf("All destinations filtered out by time threshold for router %s", result.RouterID)
 				continue
@@ -322,7 +324,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				// Extract Intent from enrichment if available (this is what gets passed to handleIntentUpdate)
 				var intent *types.OracleIntent
 				var createdAt time.Time
-				
+
 				if extractedData.Enrichment != nil {
 					if fullIntentValue, exists := extractedData.Enrichment["fullIntent"]; exists {
 						if intentFromEnrichment, ok := fullIntentValue.(*types.OracleIntent); ok {
@@ -334,7 +336,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 						}
 					}
 				}
-				
+
 				// Fallback to event timestamp if Intent timestamp not available
 				if createdAt.IsZero() && event.Timestamp != nil {
 					createdAt = time.Unix(event.Timestamp.Int64(), 0)

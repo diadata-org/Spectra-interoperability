@@ -313,7 +313,7 @@ func (gr *GenericRouter) GetDestinations(data *config.ExtractedData) []config.Ro
 
 // FilterDestinationsByTimeThreshold filters destinations based on time thresholds after enrichment
 // Uses OR logic: update if EITHER time_threshold is met OR price_deviation is met
-func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData) []config.RouterDestination {
+func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData, intentHash string) []config.RouterDestination {
 	var filteredDestinations []config.RouterDestination
 
 	for _, dest := range destinations {
@@ -337,7 +337,7 @@ func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config
 		}
 
 		if hasPriceDeviation {
-			priceDeviationMet, priceReason = gr.checkAndReservePriceDeviation(dest, data)
+			priceDeviationMet, priceReason = gr.checkAndReservePriceDeviation(dest, data, intentHash)
 		}
 
 		if timeThresholdMet || priceDeviationMet {
@@ -485,8 +485,7 @@ func (gr *GenericRouter) checkPriceDeviation(dest config.RouterDestination, data
 }
 
 // checkAndReservePriceDeviation atomically checks if price deviation is met and reserves the update slot
-// Returns true if deviation is met and slot was successfully reserved, false otherwise
-func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestination, data *config.ExtractedData) (bool, string) {
+func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestination, data *config.ExtractedData, intentHash string) (bool, string) {
 	symbol := gr.GetSymbolFromData(data)
 	currentPrice := gr.GetPriceFromData(data)
 
@@ -543,8 +542,8 @@ func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestina
 			}
 		}
 		msg := fmt.Sprintf("change %.2f%% >= threshold %.2f%% (last=%s, curr=%s)", percentChange, deviationPercent, lastPrice, currentPrice)
-		logger.Infof("Price deviation met and reserved: router=%s, chain=%d, contract=%s, symbol=%s, %s",
-			gr.config.ID, dest.ChainID, dest.Contract, symbol, msg)
+		logger.Infof("Price deviation met and reserved: router=%s, chain=%d, contract=%s, symbol=%s, intentHash=%s, %s",
+			gr.config.ID, dest.ChainID, dest.Contract, symbol, intentHash, msg)
 		return true, msg
 	}
 
