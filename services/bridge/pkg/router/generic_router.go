@@ -15,7 +15,6 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
 // GenericRouter routes events based on configuration
@@ -698,7 +697,7 @@ func (gr *GenericRouter) GetTimestampFromData(data *config.ExtractedData) uint64
 	return 0
 }
 
-// UpdateDestinationTime updates the last update time for a destination
+// UpdateDestinationTime updates the last update time and price for a destination
 func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, symbol string, data ...*config.ExtractedData) {
 	destKey := fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
 
@@ -706,48 +705,48 @@ func (gr *GenericRouter) UpdateDestinationTime(dest config.RouterDestination, sy
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
-	// Always update system time for time threshold checks
 	state.lastUpdate = time.Now()
 
-	// Only update price if timestamp is newer than what we have
-	if len(data) > 0 && data[0] != nil {
-		newPrice := gr.GetPriceFromData(data[0])
-		newTimestamp := gr.GetTimestampFromData(data[0])
-
-		if newPrice != "" {
-			// If timestamp is available (> 0), check if it's newer
-			if newTimestamp > 0 {
-				// Only update if this is the first time OR timestamp is newer
-				if state.lastTimestamp == 0 || newTimestamp > state.lastTimestamp {
-					oldTimestamp := state.lastTimestamp
-					state.lastPrice = newPrice
-					state.lastTimestamp = newTimestamp
-
-					if oldTimestamp > 0 {
-						logger.Infof("Updated price for %s: %s (timestamp: %d > previous: %d)",
-							destKey, newPrice, newTimestamp, oldTimestamp)
-					} else {
-						logger.Infof("First price for %s: %s (timestamp: %d)",
-							destKey, newPrice, newTimestamp)
-					}
-				} else if newTimestamp == state.lastTimestamp {
-					logger.Debugf("Price update skipped for %s: same timestamp %d (price: %s)",
-						destKey, newTimestamp, newPrice)
-				} else {
-					logger.Warnf("REJECTED stale price update for %s: timestamp %d <= current %d (price: %s would not replace %s)",
-						destKey, newTimestamp, state.lastTimestamp, newPrice, state.lastPrice)
-				}
-			} else {
-				// No timestamp available, fall back to always updating (backward compatibility)
-				state.lastPrice = newPrice
-				logger.Debugf("Updated price for %s: %s (no timestamp available, using legacy mode)",
-					destKey, newPrice)
-			}
-		} else {
-			logger.Debugf("Updated destination time for %s (no price available)", destKey)
-		}
-	} else {
+	if len(data) == 0 || data[0] == nil {
 		logger.Debugf("Updated destination time for %s (no data provided)", destKey)
+		return
+	}
+
+	newPrice := gr.GetPriceFromData(data[0])
+	if newPrice == "" {
+		logger.Debugf("Updated destination time for %s (no price available)", destKey)
+		return
+	}
+
+	newTimestamp := gr.GetTimestampFromData(data[0])
+
+	if newTimestamp == 0 {
+		state.lastPrice = newPrice
+		logger.Debugf("Updated price for %s: %s (no timestamp available, using legacy mode)", destKey, newPrice)
+		return
+	}
+
+	if state.lastTimestamp > 0 && newTimestamp < state.lastTimestamp {
+		logger.Warnf("REJECTED stale price update for %s: timestamp %d <= current %d (price: %s would not replace %s)",
+			destKey, newTimestamp, state.lastTimestamp, newPrice, state.lastPrice)
+		return
+	}
+
+	if state.lastTimestamp > 0 && newTimestamp == state.lastTimestamp {
+		logger.Debugf("Price update skipped for %s: same timestamp %d (price: %s)", destKey, newTimestamp, newPrice)
+		return
+	}
+
+	oldTimestamp := state.lastTimestamp
+	state.lastPrice = newPrice
+	state.lastTimestamp = newTimestamp
+
+	if oldTimestamp > 0 {
+		logger.Infof("Updated price for %s: %s (timestamp: %d > previous: %d)",
+			destKey, newPrice, newTimestamp, oldTimestamp)
+	} else {
+		logger.Infof("First price for %s: %s (timestamp: %d)",
+			destKey, newPrice, newTimestamp)
 	}
 }
 
@@ -766,23 +765,6 @@ func (gr *GenericRouter) GetStats() GenericRouterStats {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
 	return gr.stats
-}
-
-// BuildUpdateRequest builds an update request for a destination
-func (gr *GenericRouter) BuildUpdateRequest(
-	eventName string,
-	data *config.ExtractedData,
-	dest config.RouterDestination,
-) (*types.UpdateRequest, error) {
-	updateReq := &types.UpdateRequest{
-		ID:            fmt.Sprintf("%s-%s-%d", gr.config.ID, eventName, time.Now().Unix()),
-		CreatedAt:     time.Now(),
-		Priority:      1,
-		RouterID:      gr.config.ID,
-		ExtractedData: data, // Store original extracted data for OnRouted callback
-	}
-
-	return updateReq, nil
 }
 
 // ProcessingConfig returns the router's processing configuration
