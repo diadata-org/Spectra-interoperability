@@ -97,6 +97,49 @@ func (gr *GenericRouter) GetConfigDestinations() []config.RouterDestination {
 	return destinations
 }
 
+// GetConfig returns the router configuration
+func (gr *GenericRouter) GetConfig() *config.RouterConfig {
+	gr.mu.RLock()
+	defer gr.mu.RUnlock()
+	return gr.config
+}
+
+// GetSymbolsFromConfig extracts symbols from router config trigger conditions
+func GetSymbolsFromConfig(routerConfig *config.RouterConfig) []string {
+	if routerConfig == nil {
+		return nil
+	}
+
+	var symbols []string
+
+	for _, condition := range routerConfig.Triggers.Conditions {
+		if !strings.Contains(strings.ToLower(condition.Field), "symbol") {
+			continue
+		}
+
+		switch condition.Operator {
+		case "in":
+			if valueSlice, ok := condition.Value.([]interface{}); ok {
+				for _, val := range valueSlice {
+					if symbol, ok := val.(string); ok && symbol != "" {
+						symbols = append(symbols, symbol)
+					}
+				}
+			}
+		case "eq", "==":
+			if symbol, ok := condition.Value.(string); ok && symbol != "" {
+				symbols = append(symbols, symbol)
+			}
+		case "ne", "!=":
+			continue
+		default:
+			continue
+		}
+	}
+
+	return symbols
+}
+
 // ShouldRoute determines if an event should be routed
 func (gr *GenericRouter) ShouldRoute(eventName string, data *config.ExtractedData) (bool, string) {
 	gr.mu.Lock()
