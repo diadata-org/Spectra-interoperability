@@ -65,6 +65,11 @@ type Collector struct {
 
 	// Failover metrics (shared instance)
 	FailoverMetrics *Metrics
+
+	// Queue metrics
+	queueLength             *prometheus.GaugeVec
+	queueWaitDuration       *prometheus.HistogramVec
+	queueProcessingDuration *prometheus.HistogramVec
 }
 
 // NewCollector creates a new metrics collector (singleton)
@@ -210,8 +215,23 @@ func NewCollector() *Collector {
 			// Initialize intent metrics
 			IntentMetrics: NewIntentMetrics(),
 
-			// Initialize failover metrics (shared instance)
 			FailoverMetrics: NewMetrics(),
+
+			// Queue metrics
+			queueLength: promauto.NewGaugeVec(prometheus.GaugeOpts{
+				Name: "bridge_transaction_queue_length",
+				Help: "Current length of the transaction queue",
+			}, []string{"queue_key"}),
+			queueWaitDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_transaction_queue_wait_duration_seconds",
+				Help:    "Time spent in queue before processing",
+				Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+			}, []string{"queue_key"}),
+			queueProcessingDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+				Name:    "bridge_transaction_queue_processing_duration_seconds",
+				Help:    "Time spent processing the transaction request",
+				Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60},
+			}, []string{"queue_key"}),
 		}
 
 		// Initialize update channel metric to 0 to ensure it's exposed

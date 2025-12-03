@@ -281,8 +281,6 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				continue
 			}
 
-			// Apply time threshold filtering with enriched data
-			// Pass IntentHash from event for logging
 			intentHashStr := fmt.Sprintf("%x", event.IntentHash)
 			filteredDestinations := router.FilterDestinationsByTimeThreshold(result.Destinations, extractedData, intentHashStr)
 			if len(filteredDestinations) == 0 {

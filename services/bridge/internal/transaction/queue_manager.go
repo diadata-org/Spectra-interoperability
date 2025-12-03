@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 )
 
 type QueueManager struct {
@@ -12,15 +13,17 @@ type QueueManager struct {
 	mu        sync.RWMutex
 	queueSize int
 	running   bool
+	metrics   *metrics.Collector
 }
 
-func NewQueueManager(queueSize int) *QueueManager {
+func NewQueueManager(queueSize int, metrics *metrics.Collector) *QueueManager {
 	if queueSize <= 0 {
 		queueSize = 100
 	}
 	return &QueueManager{
 		queues:    make(map[string]*Queue),
 		queueSize: queueSize,
+		metrics:   metrics,
 	}
 }
 
@@ -78,7 +81,7 @@ func (qm *QueueManager) GetOrCreateQueue(walletAddress string, chainID int64) (*
 		return nil, fmt.Errorf("queue manager is not running")
 	}
 
-	queue := NewQueue(queueKey, qm.queueSize)
+	queue := NewQueue(queueKey, qm.queueSize, qm.metrics)
 	queue.Start()
 	qm.queues[queueKey] = queue
 

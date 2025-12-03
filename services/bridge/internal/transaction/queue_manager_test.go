@@ -5,7 +5,7 @@ import (
 )
 
 func TestQueueManager_StartStop(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 
 	qm.Start()
 	if !qm.running {
@@ -19,7 +19,7 @@ func TestQueueManager_StartStop(t *testing.T) {
 }
 
 func TestQueueManager_GetOrCreateQueue(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -44,7 +44,7 @@ func TestQueueManager_GetOrCreateQueue(t *testing.T) {
 }
 
 func TestQueueManager_DifferentQueues_ForDifferentWallets(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -68,7 +68,7 @@ func TestQueueManager_DifferentQueues_ForDifferentWallets(t *testing.T) {
 }
 
 func TestQueueManager_DifferentQueues_ForDifferentChains(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -92,7 +92,7 @@ func TestQueueManager_DifferentQueues_ForDifferentChains(t *testing.T) {
 }
 
 func TestQueueManager_GetOrCreateQueue_NotRunning(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 
 	walletAddr := "0x1234567890123456789012345678901234567890"
 	chainID := int64(1)
@@ -107,7 +107,7 @@ func TestQueueManager_GetOrCreateQueue_NotRunning(t *testing.T) {
 }
 
 func TestQueueManager_GetQueueStats(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -143,7 +143,7 @@ func TestQueueManager_GetQueueStats(t *testing.T) {
 }
 
 func TestQueueManager_Stop_CleansUpQueues(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 
 	walletAddr := "0x1234567890123456789012345678901234567890"
@@ -163,7 +163,7 @@ func TestQueueManager_Stop_CleansUpQueues(t *testing.T) {
 }
 
 func TestQueueManager_ConcurrentAccess(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 

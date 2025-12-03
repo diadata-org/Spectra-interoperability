@@ -9,7 +9,7 @@ import (
 )
 
 func TestClient_BuildParams_EnrichmentFullIntent(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -58,7 +58,7 @@ func TestClient_BuildParams_EnrichmentFullIntent(t *testing.T) {
 }
 
 func TestClient_BuildParams_EventRequestId(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -99,7 +99,7 @@ func TestClient_BuildParams_EventRequestId(t *testing.T) {
 }
 
 func TestClient_BuildParams_MissingEnrichment(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -129,7 +129,7 @@ func TestClient_BuildParams_MissingEnrichment(t *testing.T) {
 }
 
 func TestClient_BuildParams_InvalidABI(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -153,7 +153,7 @@ func TestClient_BuildParams_InvalidABI(t *testing.T) {
 }
 
 func TestClient_ResolveParameterValue_LiteralValue(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -177,7 +177,7 @@ func TestClient_ResolveParameterValue_LiteralValue(t *testing.T) {
 }
 
 func TestClient_ResolveParameterValue_UnsupportedVariable(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 
@@ -195,7 +195,7 @@ func TestClient_ResolveParameterValue_UnsupportedVariable(t *testing.T) {
 }
 
 func TestClient_VerifyQueueManagerIntegration(t *testing.T) {
-	qm := NewQueueManager(10)
+	qm := NewQueueManager(10, nil)
 	qm.Start()
 	defer qm.Stop()
 

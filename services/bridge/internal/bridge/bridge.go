@@ -86,7 +86,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 
 	// Create transaction queue manager
-	queueManager := transaction.NewQueueManager(1000)
+	queueManager := transaction.NewQueueManager(1000, metricsCollector)
 
 	// Create router registry first (needed for calculating maxSafeGap)
 	routerRegistry := router.NewGenericRegistry()

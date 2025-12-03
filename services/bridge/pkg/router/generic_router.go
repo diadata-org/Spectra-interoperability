@@ -433,15 +433,6 @@ func (gr *GenericRouter) checkAndReserveTimeThreshold(dest config.RouterDestinat
 
 // checkAndReservePriceDeviation atomically checks if price deviation is met and reserves the update slot
 func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestination, data *config.ExtractedData, intentHash string) (bool, string) {
-
-	var (
-		newTimestamp uint64
-		destKey      string
-		state        *DestinationState
-	)
-	if data != nil {
-		newTimestamp = gr.GetTimestampFromData(data)
-	}
 	symbol := gr.GetSymbolFromData(data)
 	currentPrice := gr.GetPriceFromData(data)
 
@@ -451,8 +442,13 @@ func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestina
 		return true, msg // Allow if we can't determine price
 	}
 
-	destKey = gr.generateDestinationKey(dest, symbol)
-	state = gr.getOrCreateDestinationState(destKey)
+	var newTimestamp uint64
+	if data != nil {
+		newTimestamp = gr.GetTimestampFromData(data)
+	}
+
+	destKey := gr.generateDestinationKey(dest, symbol)
+	state := gr.getOrCreateDestinationState(destKey)
 
 	state.mu.Lock()
 	defer state.mu.Unlock()

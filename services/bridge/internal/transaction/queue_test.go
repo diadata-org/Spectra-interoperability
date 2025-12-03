@@ -10,7 +10,7 @@ import (
 )
 
 func TestQueue_StartStop(t *testing.T) {
-	queue := NewQueue("test-queue", 10)
+	queue := NewQueue("test-queue", 10, nil)
 
 	queue.Start()
 	if !queue.running {
@@ -24,7 +24,7 @@ func TestQueue_StartStop(t *testing.T) {
 }
 
 func TestQueue_Submit_Success(t *testing.T) {
-	queue := NewQueue("test-queue", 10)
+	queue := NewQueue("test-queue", 10, nil)
 	queue.Start()
 	defer queue.Stop()
 
@@ -44,7 +44,7 @@ func TestQueue_Submit_Success(t *testing.T) {
 }
 
 func TestQueue_Submit_Error(t *testing.T) {
-	queue := NewQueue("test-queue", 10)
+	queue := NewQueue("test-queue", 10, nil)
 	queue.Start()
 	defer queue.Stop()
 
@@ -68,7 +68,7 @@ func TestQueue_Submit_Error(t *testing.T) {
 }
 
 func TestQueue_Submit_NotRunning(t *testing.T) {
-	queue := NewQueue("test-queue", 10)
+	queue := NewQueue("test-queue", 10, nil)
 
 	ctx := context.Background()
 	executor := func(ctx context.Context) (*types.Transaction, error) {
@@ -85,7 +85,7 @@ func TestQueue_Submit_NotRunning(t *testing.T) {
 }
 
 func TestQueue_Submit_ContextCancelled(t *testing.T) {
-	queue := NewQueue("test-queue", 10)
+	queue := NewQueue("test-queue", 10, nil)
 	queue.Start()
 	defer queue.Stop()
 
@@ -107,7 +107,7 @@ func TestQueue_Submit_ContextCancelled(t *testing.T) {
 }
 
 func TestQueue_Sequential_Execution(t *testing.T) {
-	queue := NewQueue("test-queue", 10)
+	queue := NewQueue("test-queue", 10, nil)
 	queue.Start()
 	defer queue.Stop()
 
@@ -165,7 +165,7 @@ func TestQueue_Sequential_Execution(t *testing.T) {
 }
 
 func TestQueue_GetQueueLength(t *testing.T) {
-	queue := NewQueue("test-queue", 100)
+	queue := NewQueue("test-queue", 100, nil)
 
 	length := queue.GetQueueLength()
 	if length != 0 {

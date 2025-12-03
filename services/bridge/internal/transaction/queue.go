@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 )
 
 type Queue struct {
@@ -20,21 +21,24 @@ type Queue struct {
 	wg       sync.WaitGroup
 	mu       sync.Mutex
 	running  bool
+	metrics  *metrics.Collector
 }
 
 type queuedRequest struct {
-	ctx      context.Context
-	executor ExecutorFunc
-	resultCh chan *Result
+	ctx         context.Context
+	executor    ExecutorFunc
+	resultCh    chan *Result
+	enqueueTime time.Time
 }
 
-func NewQueue(queueKey string, queueSize int) *Queue {
+func NewQueue(queueKey string, queueSize int, metrics *metrics.Collector) *Queue {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Queue{
 		queueKey: queueKey,
 		queue:    make(chan *queuedRequest, queueSize),
 		ctx:      ctx,
 		cancel:   cancel,
+		metrics:  metrics,
 	}
 }
 
@@ -80,13 +84,17 @@ func (q *Queue) Submit(ctx context.Context, executor ExecutorFunc) (*types.Trans
 
 	resultCh := make(chan *Result, 1)
 	req := &queuedRequest{
-		ctx:      ctx,
-		executor: executor,
-		resultCh: resultCh,
+		ctx:         ctx,
+		executor:    executor,
+		resultCh:    resultCh,
+		enqueueTime: time.Now(),
 	}
 
 	select {
 	case q.queue <- req:
+		if q.metrics != nil {
+			q.metrics.SetQueueLength(q.queueKey, len(q.queue))
+		}
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-time.After(30 * time.Second):
@@ -130,12 +138,22 @@ func (q *Queue) processRequest(req *queuedRequest) {
 	default:
 	}
 
+	// Record wait duration
+	waitDuration := time.Since(req.enqueueTime).Seconds()
+	if q.metrics != nil {
+		q.metrics.ObserveQueueWaitDuration(q.queueKey, waitDuration)
+		q.metrics.SetQueueLength(q.queueKey, len(q.queue))
+	}
+
 	startTime := time.Now()
 	tx, err := req.executor(req.ctx)
 	duration := time.Since(startTime)
 
+	if q.metrics != nil {
+		q.metrics.ObserveQueueProcessingDuration(q.queueKey, duration.Seconds())
+	}
+
 	if err != nil {
-		// Extract detailed error information for better diagnostics
 		errorDetail := extractErrorDetail(err)
 		logger.Errorf("Transaction execution failed for queue [%s] after %v: %s", q.queueKey, duration, errorDetail)
 	} else if tx != nil {
