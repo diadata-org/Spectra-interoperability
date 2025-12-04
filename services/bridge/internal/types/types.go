@@ -264,6 +264,8 @@ type UpdateRequest struct {
 	RouterID                string                          `json:"router_id,omitempty"`
 	DestinationMethodConfig *config.DestinationMethodConfig `json:"destination_method_config,omitempty"`
 	ExtractedData           *config.ExtractedData           `json:"extracted_data,omitempty"`
+
+	TriggeredByMonitoring bool `json:"triggered_by_monitoring,omitempty"`
 }
 
 // UpdateResult represents the result of an update operation

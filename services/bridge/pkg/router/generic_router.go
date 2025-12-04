@@ -15,6 +15,7 @@ import (
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/utils"
 )
 
 // GenericRouter routes events based on configuration
@@ -797,5 +798,5 @@ func (gr *GenericRouter) OnRouted(eventName string, data *config.ExtractedData) 
 
 // generateDestinationKey creates a unique key for a destination
 func (gr *GenericRouter) generateDestinationKey(dest config.RouterDestination, symbol string) string {
-	return fmt.Sprintf("%d-%s-%s", dest.ChainID, dest.Contract, symbol)
+	return utils.GenerateDestinationKey(dest.ChainID, dest.Contract, symbol)
 }

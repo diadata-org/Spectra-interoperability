@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/leader"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/processor"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/transaction"
@@ -53,6 +55,9 @@ type Bridge struct {
 	// Router system
 	routerRegistry *router.GenericRegistry
 
+	// On-chain monitor for replica failover
+	onChainMonitor *leader.OnChainMonitor
+
 	// Block scanner
 	blockScanner BlockScanner
 
@@ -88,25 +93,19 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	// Create transaction queue manager
 	queueManager := transaction.NewQueueManager(1000, metricsCollector)
 
-	// Create router registry first (needed for calculating maxSafeGap)
 	routerRegistry := router.NewGenericRegistry()
-	// Load routers directly (convert pointers to values for registry)
 	enabledRouterPointers := cfgService.GetEnabledRouters()
 
 	var enabledRouters []config.RouterConfig
 	for _, routerPtr := range enabledRouterPointers {
-		// Create a copy of the router config
 		routerCfg := *routerPtr
 
-		// Resolve contract references in destinations
 		for i := range routerCfg.Destinations {
 			dest := &routerCfg.Destinations[i]
 
-			// If using contract_ref, resolve it to get ChainID and Contract address
 			if dest.ContractRef != "" {
 				contract := cfgService.GetContractConfig(dest.ContractRef)
 				if contract != nil {
-					// Populate the legacy fields from the contract config
 					dest.ChainID = contract.ChainID
 					dest.Contract = contract.Address
 					logger.Debugf("Resolved contract_ref %s to chain %d contract %s",
@@ -124,15 +123,14 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
-	// Create destination clients
 	destClients := make(map[int64]*WriteClient)
 	for _, chainConfig := range cfgService.GetEnabledChains() {
 		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
 		if len(contracts) == 0 {
-			continue // Skip chains with no contracts
+			continue
 		}
 
-		// Calculate maxSafeGap based on number of oracles (destinations) configured for this chain
+		// For NonceManager
 		oracleCount := countDestinationsForChain(routerRegistry, chainConfig.ChainID)
 		maxSafeGap := calculateMaxSafeGap(oracleCount)
 		logger.Infof("Chain %d (%s): %d oracles configured, maxSafeGap=%d",
@@ -150,7 +148,6 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		return nil, fmt.Errorf("no destination clients available")
 	}
 
-	// Create worker pool with configured size
 	workerPool := worker.NewWorkerPool(
 		cfgService.GetInfrastructure().WorkerPool.MaxWorkers,
 		cfgService.GetInfrastructure().WorkerPool.TaskQueueSize,
@@ -162,13 +159,11 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
 
-	// Create metrics tracker
 	var metricsTracker *MetricsTracker
 	if metricsCollector != nil {
 		metricsTracker = NewMetricsTracker(metricsCollector)
 	}
 
-	// Get destination eth clients for event processor
 	destEthClients := make(map[int64]*ethclient.Client)
 	for chainID, destClient := range destClients {
 		ethClient, err := destClient.client.GetClient()
@@ -274,9 +269,51 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	// Initialize chain stats
 	bridge.initializeChainStats()
 
+	replicaConfig := cfgService.GetInfrastructure().Replica
+	monitorConfig := leader.DefaultMonitorConfig()
+
+	if replicaConfig != nil {
+		replicaConfig.ApplyEnvOverrides()
+
+		monitorConfig.Enabled = replicaConfig.Enabled
+
+		if replicaConfig.TimeThresholdOffset > 0 {
+			monitorConfig.TimeThresholdOffset = replicaConfig.TimeThresholdOffset.Duration()
+		}
+		if replicaConfig.CheckInterval > 0 {
+			monitorConfig.CheckInterval = replicaConfig.CheckInterval.Duration()
+		}
+		if replicaConfig.PriceDeviationOffset != "" {
+			if priceDevOffset := leader.ParsePriceDeviation(replicaConfig.PriceDeviationOffset); priceDevOffset != nil {
+				monitorConfig.PriceDeviationOffset = priceDevOffset
+			}
+		}
+		logMonitorConfig(monitorConfig, "initialized")
+	} else {
+		logMonitorConfig(monitorConfig, "using defaults (no replica config)")
+	}
+
+	ethClients := make(map[int64]rpc.EthClient)
+	for chainID, writeClient := range destClients {
+		ethClients[chainID] = writeClient.GetEthClient()
+	}
+
+	bridge.onChainMonitor = leader.NewOnChainMonitor(routerRegistry, ethClients, monitorConfig)
+
 	logger.Infof("Bridge initialized with %d routers", routerRegistry.Count())
 
 	return bridge, nil
+}
+
+// logMonitorConfig logs monitoring configuration values
+func logMonitorConfig(config leader.MonitorConfig, status string) {
+	priceDevPercent := "0%"
+	if config.PriceDeviationOffset != nil {
+		percent := new(big.Float).Mul(config.PriceDeviationOffset, big.NewFloat(100))
+		priceDevPercent = percent.Text('f', 2) + "%"
+	}
+	logger.Infof("Replica monitoring config %s: enabled=%v, time_threshold_offset=%v, price_deviation_offset=%s, check_interval=%v",
+		status, config.Enabled, config.TimeThresholdOffset, priceDevPercent, config.CheckInterval)
 }
 
 // countDestinationsForChain counts all destinations (oracles) configured for a specific chain
@@ -343,6 +380,12 @@ func (b *Bridge) Start(ctx context.Context) error {
 
 	// Start transaction queue manager
 	b.queueManager.Start()
+
+	// Start on-chain monitor
+	if b.onChainMonitor != nil {
+		b.onChainMonitor.Start()
+		time.Sleep(2 * time.Second) // Wait for initial check
+	}
 
 	// Start worker pool
 	b.workerPool.Start(ctx)
@@ -433,6 +476,10 @@ func (b *Bridge) Stop(ctx context.Context) error {
 		logger.Info("All bridge goroutines stopped gracefully")
 	case <-ctx.Done():
 		logger.Warn("Bridge shutdown timeout reached, some goroutines may still be running")
+	}
+
+	if b.onChainMonitor != nil {
+		b.onChainMonitor.Stop()
 	}
 
 	// Stop block scanner if running
@@ -535,6 +582,44 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 						continue
 					}
 				}
+			}
+
+			if b.onChainMonitor != nil {
+				symbol := "unknown"
+				if updateReq.Intent != nil && updateReq.Intent.Symbol != "" {
+					symbol = updateReq.Intent.Symbol
+				} else if updateReq.ExtractedData != nil && updateReq.RouterID != "" {
+					if routerInstance := b.routerRegistry.GetRouterByID(updateReq.RouterID); routerInstance != nil {
+						if s := routerInstance.GetSymbolFromData(updateReq.ExtractedData); s != "" && s != "unknown" {
+							symbol = s
+						}
+					}
+				}
+
+				var incomingPrice *big.Int
+				if updateReq.Intent != nil && updateReq.Intent.Price != nil {
+					incomingPrice = updateReq.Intent.Price
+				}
+
+				shouldProcess := b.onChainMonitor.ShouldProcess(
+					updateReq.DestinationChain.ChainID,
+					common.HexToAddress(updateReq.Contract.Address),
+					symbol,
+					incomingPrice)
+
+				if !shouldProcess {
+					logger.Infof("Skipping update - primary active for chain %d contract %s symbol %s",
+						updateReq.DestinationChain.ChainID,
+						updateReq.Contract.Address,
+						symbol)
+					continue
+				}
+
+				updateReq.TriggeredByMonitoring = true
+				logger.Infof("Processing update: monitoring check passed for chain=%d contract=%s symbol=%s",
+					updateReq.DestinationChain.ChainID,
+					updateReq.Contract.Address,
+					symbol)
 			}
 
 			// Create task ID based on available data

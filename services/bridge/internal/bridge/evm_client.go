@@ -141,3 +141,7 @@ func (wc *WriteClient) callRouterMethod(ctx context.Context, updateReq *bridgety
 
 	return wc.txClient.CallMethod(ctx, updateReq.Contract.Address, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit, updateReq)
 }
+
+func (wc *WriteClient) GetEthClient() rpc.EthClient {
+	return wc.client
+}

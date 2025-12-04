@@ -962,10 +962,33 @@ func (bs *EnhancedBlockScanner) extractContractInfo() error {
 		logger.Infof("Event %s: signature=%s, hash=%s", eventName, sigStr, sigHash.Hex())
 	}
 
-	logger.Infof("Monitoring %d contracts for %d events on chain %d",
-		len(bs.contractAddresses), len(bs.eventSignatures), bs.sourceConfig.ChainID)
+	// Build event name list for logging
+	eventNames := make([]string, 0, len(bs.eventDefinitions))
+	for eventName := range bs.eventDefinitions {
+		eventNames = append(eventNames, eventName)
+	}
+
+	contractToEvents := make(map[common.Address][]string)
+	for eventName, eventDef := range bs.eventDefinitions {
+		contractAddr := common.HexToAddress(eventDef.Contract)
+		contractToEvents[contractAddr] = append(contractToEvents[contractAddr], eventName)
+	}
+
+	logger.Infof("Block scanner initialized: monitoring %d contracts for %d events on chain %d (chain_name=%s)",
+		len(bs.contractAddresses), len(bs.eventSignatures), bs.sourceConfig.ChainID, bs.sourceConfig.Name)
+	logger.Infof("  Events being monitored: %v", eventNames)
 	for _, addr := range bs.contractAddresses {
-		logger.Infof("  - Contract: %s", addr.Hex())
+		eventsForContract := contractToEvents[addr]
+		logger.Infof("  - Contract: %s (events: %v)", addr.Hex(), eventsForContract)
+	}
+	if bs.config.ScanInterval > 0 {
+		logger.Infof("  Scan interval: %v", bs.config.ScanInterval.Duration())
+	}
+	if bs.config.BlockRange > 0 {
+		logger.Infof("  Block range per scan: %d", bs.config.BlockRange)
+	}
+	if bs.config.MaxBlockGap > 0 {
+		logger.Infof("  Max block gap: %d", bs.config.MaxBlockGap)
 	}
 
 	return nil

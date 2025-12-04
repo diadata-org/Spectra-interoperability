@@ -58,9 +58,13 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 		return fmt.Errorf("failed to send transaction: %w", err)
 	}
 
-	logger.Infof("Transaction sent: %s for %s on chain %d, router=%s, symbol=%s",
+	triggeredByMonitoring := ""
+	if txCtx.UpdateRequest.TriggeredByMonitoring {
+		triggeredByMonitoring = " (triggered by replica monitoring/failover)"
+	}
+	logger.Infof("Transaction sent: %s for %s on chain %d, router=%s, symbol=%s%s",
 		tx.Hash().Hex(), txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID,
-		txCtx.UpdateRequest.RouterID, txCtx.Symbol)
+		txCtx.UpdateRequest.RouterID, txCtx.Symbol, triggeredByMonitoring)
 
 	return h.confirm(txCtx, tx)
 }

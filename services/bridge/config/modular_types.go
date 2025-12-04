@@ -2,8 +2,16 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/spf13/viper"
 )
+
+func init() {
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+}
 
 type ModularConfig struct {
 	Infrastructure *InfrastructureConfig       `yaml:"infrastructure,omitempty" json:"infrastructure,omitempty"`
@@ -26,6 +34,7 @@ type InfrastructureConfig struct {
 	Recovery       RecoveryConfig       `yaml:"recovery" json:"recovery"`
 	API            APIConfig            `yaml:"api" json:"api"`
 	Metrics        MetricsConfig        `yaml:"metrics" json:"metrics"`
+	Replica        *ReplicaConfig       `yaml:"replica,omitempty" json:"replica,omitempty"`
 	DryRun         bool                 `yaml:"dry_run,omitempty" json:"dry_run,omitempty"`
 }
 
@@ -288,4 +297,26 @@ func (cs *ConfigService) GetEnabledRouters() []*RouterConfig {
 		}
 	}
 	return enabled
+}
+
+// ReplicaConfig configures replica monitoring and failover
+type ReplicaConfig struct {
+	Enabled              bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	TimeThresholdOffset  Duration `yaml:"time_threshold_offset,omitempty" json:"time_threshold_offset,omitempty"`
+	PriceDeviationOffset string   `yaml:"price_deviation_offset,omitempty" json:"price_deviation_offset,omitempty"`
+	CheckInterval        Duration `yaml:"check_interval,omitempty" json:"check_interval,omitempty"`
+}
+
+func (rc *ReplicaConfig) ApplyEnvOverrides() {
+	if viper.IsSet("replica_enabled") {
+		envEnabled := strings.TrimSpace(viper.GetString("replica_enabled"))
+		if envEnabled == "" {
+			return
+		}
+		oldValue := rc.Enabled
+		rc.Enabled = strings.ToLower(envEnabled) == "true" || envEnabled == "1"
+		if oldValue != rc.Enabled {
+			fmt.Printf("Replica enabled overridden from environment variable REPLICA_ENABLED=%q (was: %v, now: %v)\n", envEnabled, oldValue, rc.Enabled)
+		}
+	}
 }
