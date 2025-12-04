@@ -8,16 +8,16 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
 // GasEstimationServiceImpl implements gas estimation for multiple destinations
 type GasEstimationServiceImpl struct {
-	destClients      map[int64]*ethclient.Client
+	destClients      map[int64]rpc.EthClient
 	gasCache         *GasEstimateCache
 	defaultGasLimits map[string]uint64 // method -> default gas limit
 	gasMultipliers   map[int64]float64 // chainID -> gas multiplier
@@ -51,7 +51,7 @@ type GasEstimationStats struct {
 }
 
 // NewGasEstimationService creates a new gas estimation service
-func NewGasEstimationService(destClients map[int64]*ethclient.Client) *GasEstimationServiceImpl {
+func NewGasEstimationService(destClients map[int64]rpc.EthClient) *GasEstimationServiceImpl {
 	service := &GasEstimationServiceImpl{
 		destClients:      destClients,
 		gasCache:         NewGasEstimateCache(5 * time.Minute), // 5 minute cache

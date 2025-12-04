@@ -11,17 +11,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	ethtypes "github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
-
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/pipeline"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
+	"github.com/ethereum/go-ethereum/common"
+	ethtypes "github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // GenericEventProcessor processes events using the generic pipeline
@@ -32,7 +32,7 @@ type GenericEventProcessor struct {
 	db             *database.DB
 	routerRegistry *router.GenericRegistry
 	sourceClient   *ethclient.Client
-	destClients    map[int64]*ethclient.Client
+	destClients    map[int64]rpc.EthClient
 
 	extractor   *pipeline.DataExtractor
 	enricher    *pipeline.DataEnricher
@@ -69,7 +69,7 @@ func NewGenericEventProcessor(
 	db *database.DB,
 	routerRegistry *router.GenericRegistry,
 	sourceClient *ethclient.Client,
-	destClients map[int64]*ethclient.Client,
+	destClients map[int64]rpc.EthClient,
 	eventChan <-chan *types.EventData,
 	errorChan chan<- error,
 	updateChan chan<- *types.UpdateRequest,

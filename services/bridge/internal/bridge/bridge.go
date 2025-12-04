@@ -9,7 +9,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
@@ -164,13 +163,9 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		metricsTracker = NewMetricsTracker(metricsCollector)
 	}
 
-	destEthClients := make(map[int64]*ethclient.Client)
-	for chainID, destClient := range destClients {
-		ethClient, err := destClient.client.GetClient()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get eth client for chain %d: %w", chainID, err)
-		}
-		destEthClients[chainID] = ethClient
+	ethClients := make(map[int64]rpc.EthClient)
+	for chainID, writeClient := range destClients {
+		ethClients[chainID] = writeClient.GetEthClient()
 	}
 
 	legacyDestinations := make(map[int64]*config.DestinationConfig)
@@ -249,7 +244,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		db,
 		routerRegistry,
 		ethClient,
-		destEthClients,
+		ethClients,
 		eventChan,
 		errorChan,
 		bridge.updateChan,
@@ -291,11 +286,6 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logMonitorConfig(monitorConfig, "initialized")
 	} else {
 		logMonitorConfig(monitorConfig, "using defaults (no replica config)")
-	}
-
-	ethClients := make(map[int64]rpc.EthClient)
-	for chainID, writeClient := range destClients {
-		ethClients[chainID] = writeClient.GetEthClient()
 	}
 
 	bridge.onChainMonitor = leader.NewOnChainMonitor(routerRegistry, ethClients, monitorConfig)
