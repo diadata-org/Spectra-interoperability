@@ -19,11 +19,11 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 	if b.configService.GetInfrastructure().API.ListenAddr != "" {
 		// Create metrics collector for API
 		var metricsCollector *metrics.Collector
-		if b.metrics != nil {
+		if b.metricsManager != nil {
 			// Use the singleton metrics collector which includes IntentMetrics
 			metricsCollector = metrics.NewCollector()
 			// Override the FailoverMetrics with the bridge's instance
-			metricsCollector.FailoverMetrics = b.metrics
+			metricsCollector.FailoverMetrics = b.metricsManager.GetFailoverMetrics()
 		}
 
 		apiServer := api.NewServer(b.configService, b.db, metricsCollector, b.routerRegistry)
@@ -73,7 +73,7 @@ func (b *Bridge) handleErrors(ctx context.Context) {
 			logger.Errorf("Bridge error: %v", err)
 
 			// Record error metrics if available
-			if b.metricsTracker != nil {
+			if b.metricsManager != nil {
 				// Count errors for monitoring/alerting
 				// This enables external alerting systems to detect issues
 			}

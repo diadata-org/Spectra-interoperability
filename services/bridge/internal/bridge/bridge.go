@@ -62,11 +62,10 @@ type Bridge struct {
 	eventProcessor *processor.GenericEventProcessor
 
 	// Metrics tracking
-	metricsTracker   *MetricsTracker
-	metricsCollector *metrics.Collector
+	metricsManager *MetricsManager
+
 	// API components
 	apiServer *api.Server
-	metrics   *metrics.Metrics
 
 	// Transaction queue manager
 	queueManager *transaction.QueueManager
@@ -156,10 +155,8 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
 
-	var metricsTracker *MetricsTracker
-	if metricsCollector != nil {
-		metricsTracker = NewMetricsTracker(metricsCollector)
-	}
+	// Create metrics manager
+	metricsManager := NewMetricsManager(metricsCollector)
 
 	ethClients := make(map[int64]rpc.EthClient)
 	for chainID, writeClient := range destClients {
@@ -184,8 +181,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		lastProcessedBlock: cfgService.GetInfrastructure().Source.StartBlock,
 		workerPool:         workerPool,
 		routerRegistry:     routerRegistry,
-		metricsTracker:     metricsTracker,
-		metricsCollector:   metricsCollector,
+		metricsManager:     metricsManager,
 		queueManager:       queueManager,
 	}
 
@@ -201,8 +197,8 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	// Create generic event processor
 	// Create callback function to report queue size after enqueue
 	reportQueueSize := func() {
-		if bridge.metricsCollector != nil {
-			bridge.metricsCollector.SetUpdateChanSize(len(bridge.updateChan))
+		if bridge.metricsManager != nil {
+			bridge.metricsManager.ReportUpdateQueueSize(len(bridge.updateChan))
 		}
 	}
 
@@ -224,11 +220,6 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
 	}
 	bridge.eventProcessor = eventProcessor
-
-	// Store metrics collector for API server
-	if metricsCollector != nil {
-		bridge.metrics = metricsCollector.FailoverMetrics
-	}
 
 	// Initialize chain stats
 	bridge.initializeChainStats()
@@ -380,8 +371,8 @@ func (b *Bridge) Start(ctx context.Context) error {
 	}()
 
 	// Initialize update channel metric to 0 immediately
-	if b.metricsCollector != nil {
-		b.metricsCollector.SetUpdateChanSize(0)
+	if b.metricsManager != nil {
+		b.metricsManager.ReportUpdateQueueSize(0)
 		logger.Debugf("Initialized update channel metric to 0")
 	}
 
@@ -479,9 +470,9 @@ func (b *Bridge) reportUpdateChanMetrics(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Report initial size immediately (even if 0, to ensure metric is exposed)
-	if b.metricsCollector != nil {
+	if b.metricsManager != nil {
 		size := len(b.updateChan)
-		b.metricsCollector.SetUpdateChanSize(size)
+		b.metricsManager.ReportUpdateQueueSize(size)
 		logger.Debugf("Initial update channel size: %d", size)
 	} else {
 		logger.Warn("Metrics collector is nil, cannot report update channel size")
@@ -497,9 +488,9 @@ func (b *Bridge) reportUpdateChanMetrics(ctx context.Context) {
 			return
 		case <-ticker.C:
 			// Periodically report updateChan size (more frequently to catch items)
-			if b.metricsCollector != nil {
+			if b.metricsManager != nil {
 				size := len(b.updateChan)
-				b.metricsCollector.SetUpdateChanSize(size)
+				b.metricsManager.ReportUpdateQueueSize(size)
 				// Log when queue has items
 				if size > 0 {
 					logger.Debugf("Update channel size: %d/%d", size, cap(b.updateChan))
@@ -523,10 +514,9 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 			// Report metric: when we successfully dequeue, we know there was at least 1 item
 			// Report current size + 1 to show the size BEFORE we dequeued this item
 			// This gives a more accurate picture of queue depth
-			if b.metricsCollector != nil {
-				// Current size after dequeue + 1 (the item we just dequeued)
-				queueSize := len(b.updateChan) + 1
-				b.metricsCollector.SetUpdateChanSize(queueSize)
+			if b.metricsManager != nil {
+				queueSize := len(b.updateChan)
+				b.metricsManager.ReportUpdateQueueSize(queueSize)
 			}
 
 			// Check if update is stale based on last update in cache
@@ -610,7 +600,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 		}
 	}()
 
-	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsTracker)
+	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker())
 	return handler.Process(ctx, task.Request)
 }
 
