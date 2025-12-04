@@ -250,15 +250,15 @@ type BridgeStats struct {
 
 // UpdateRequest represents a request to update an oracle value
 type UpdateRequest struct {
-	ID               string                       `json:"id"`
-	IntentHash       common.Hash                  `json:"intent_hash"`
-	Intent           *OracleIntent                `json:"intent"`
-	Event            *EventData                   `json:"event"`
-	DestinationChain *config.DestinationConfig    `json:"destination_chain"`
-	Contract         *config.LegacyContractConfig `json:"contract"`
-	Priority         int                          `json:"priority"`
-	Retries          int                          `json:"retries"`
-	CreatedAt        time.Time                    `json:"created_at"`
+	ID               string                    `json:"id"`
+	IntentHash       common.Hash               `json:"intent_hash"`
+	Intent           *OracleIntent             `json:"intent"`
+	Event            *EventData                `json:"event"`
+	DestinationChain *config.DestinationConfig `json:"destination_chain"`
+	Contract         *config.ContractConfig    `json:"contract"`
+	Priority         int                       `json:"priority"`
+	Retries          int                       `json:"retries"`
+	CreatedAt        time.Time                 `json:"created_at"`
 
 	// New router system fields
 	RouterID                string                          `json:"router_id,omitempty"`

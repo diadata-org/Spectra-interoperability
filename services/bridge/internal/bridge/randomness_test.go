@@ -57,7 +57,7 @@ func TestRandomnessTransactionFlow(t *testing.T) {
 			ChainID: 50312,
 			Name:    "Shannon Network",
 		},
-		Contract: &config.LegacyContractConfig{
+		Contract: &config.ContractConfig{
 			Address: "0xbFaE1AdD2182cf5008497bf6580061F81ffD74cb",
 			Type:    "randomness",
 		},

@@ -28,7 +28,7 @@ import (
 type GenericEventProcessor struct {
 	config         *config.EventProcessorConfig
 	eventDefs      map[string]*config.EventDefinition
-	destinations   map[int64]*config.DestinationConfig
+	configService  *config.ConfigService
 	db             *database.DB
 	routerRegistry *router.GenericRegistry
 	sourceClient   *ethclient.Client
@@ -65,7 +65,7 @@ type GenericEventProcessor struct {
 func NewGenericEventProcessor(
 	cfg *config.EventProcessorConfig,
 	eventDefs map[string]*config.EventDefinition,
-	destinations map[int64]*config.DestinationConfig,
+	configService *config.ConfigService,
 	db *database.DB,
 	routerRegistry *router.GenericRegistry,
 	sourceClient *ethclient.Client,
@@ -94,7 +94,7 @@ func NewGenericEventProcessor(
 	gep := &GenericEventProcessor{
 		config:         cfg,
 		eventDefs:      eventDefs,
-		destinations:   destinations,
+		configService:  configService,
 		db:             db,
 		routerRegistry: routerRegistry,
 		sourceClient:   sourceClient,
@@ -288,28 +288,33 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				continue
 			}
 
-			// Process filtered destinations for this router
-			// Note: Time threshold and price deviation checks are now atomic (check-and-reserve)
-			// in FilterDestinationsByTimeThreshold, so no need for pre-emptive update here
 			for _, dest := range filteredDestinations {
-				destConfig, exists := gep.destinations[dest.ChainID]
-				if !exists || destConfig == nil {
-					logger.Warnf("Destination config not found for chain %d", dest.ChainID)
+				var chainConfig *config.ChainConfig
+				for _, chain := range gep.configService.GetEnabledChains() {
+					if chain.ChainID == dest.ChainID {
+						chainConfig = chain
+						break
+					}
+				}
+
+				if chainConfig == nil {
+					logger.Warnf("Chain config not found for chain %d", dest.ChainID)
 					continue
 				}
 
 				// Find contract config
-				var contractConfig *config.LegacyContractConfig
-				for i := range destConfig.Contracts {
-					if destConfig.Contracts[i].Address == dest.Contract {
-						contractConfig = &destConfig.Contracts[i]
+				var contractConfig *config.ContractConfig
+				contracts := gep.configService.GetContractsForChain(dest.ChainID)
+				for _, contract := range contracts {
+					if contract.Address == dest.Contract {
+						contractConfig = contract
 						break
 					}
 				}
 
 				if contractConfig == nil {
 					logger.Debugf("Contract config not found for %s, creating minimal config from router destination", dest.Contract)
-					contractConfig = &config.LegacyContractConfig{
+					contractConfig = &config.ContractConfig{
 						Address:       dest.Contract,
 						Enabled:       true,
 						GasLimit:      dest.GasLimit,
@@ -318,8 +323,13 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 					}
 				}
 
-				// Create update request using the router's method configuration
-				// Extract Intent from enrichment if available (this is what gets passed to handleIntentUpdate)
+				destConfig := &config.DestinationConfig{
+					ChainID: chainConfig.ChainID,
+					Name:    chainConfig.Name,
+					RPCURLs: chainConfig.RPCURLs,
+					Enabled: chainConfig.Enabled,
+				}
+
 				var intent *types.OracleIntent
 				var createdAt time.Time
 
@@ -338,6 +348,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				// Fallback to event timestamp if Intent timestamp not available
 				if createdAt.IsZero() && event.Timestamp != nil {
 					createdAt = time.Unix(event.Timestamp.Int64(), 0)
+					logger.Infof("Using event timestamp for CreatedAt: %s for event %s", createdAt.String(), event.EventName)
 				}
 				// Final fallback to current time
 				if createdAt.IsZero() {
@@ -347,12 +358,12 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				updateReq := &types.UpdateRequest{
 					ID:                      fmt.Sprintf("%s-%s-%d", result.RouterID, event.EventName, time.Now().Unix()),
 					Event:                   event,
-					Intent:                  intent, // Set Intent so it's available later
+					Intent:                  intent,
 					DestinationChain:        destConfig,
 					Contract:                contractConfig,
 					Priority:                1,
 					Retries:                 0,
-					CreatedAt:               createdAt, // Use timestamp from Intent (same as passed to handleIntentUpdate)
+					CreatedAt:               createdAt,
 					RouterID:                result.RouterID,
 					DestinationMethodConfig: &dest.Method,
 					ExtractedData:           extractedData,

@@ -43,24 +43,11 @@ type SourceConfig struct {
 
 // DestinationConfig represents destination chain configuration
 type DestinationConfig struct {
-	ChainID   int64                  `json:"chain_id"`
-	Name      string                 `json:"name"`
-	RPCURLs   []string               `json:"rpc_urls"` // Multiple RPC URLs for failover
-	Enabled   bool                   `json:"enabled"`
-	Contracts []LegacyContractConfig `json:"contracts"`
-}
-
-// LegacyContractConfig represents a legacy contract configuration (for compatibility)
-type LegacyContractConfig struct {
-	Name          string                  `json:"name"`
-	Address       string                  `json:"address"`
-	Type          string                  `json:"type"`
-	Enabled       bool                    `json:"enabled"`
-	GasLimit      uint64                  `json:"gas_limit"`
-	GasMultiplier float64                 `json:"gas_multiplier"`
-	MaxGasPrice   string                  `json:"max_gas_price"`
-	ABI           string                  `json:"abi"`
-	Methods       map[string]MethodConfig `json:"methods"`
+	ChainID   int64            `json:"chain_id"`
+	Name      string           `json:"name"`
+	RPCURLs   []string         `json:"rpc_urls"` // Multiple RPC URLs for failover
+	Enabled   bool             `json:"enabled"`
+	Contracts []ContractConfig `json:"contracts"`
 }
 
 // MethodConfig represents a contract method configuration

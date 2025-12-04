@@ -75,7 +75,7 @@ func TestCallRouterMethod_UsesCorrectContractAddress(t *testing.T) {
 			// Create update request with router-specified contract address
 			updateReq := &bridgetypes.UpdateRequest{
 				ID: "test-request",
-				Contract: &config.LegacyContractConfig{
+				Contract: &config.ContractConfig{
 					Name:    "test-contract",
 					Address: tt.routerDestination, // This should be used, not receiverClient address
 					Type:    "randomness",
@@ -139,7 +139,7 @@ func TestRouterDestinationBugFix(t *testing.T) {
 		// Simulate an IntArraySet event that should go to RandomRequestManager
 		updateReq := &bridgetypes.UpdateRequest{
 			ID: "RandomRequest-462-421614",
-			Contract: &config.LegacyContractConfig{
+			Contract: &config.ContractConfig{
 				Name:    "randomness_manager",
 				Address: correctAddress.Hex(), // Router specifies RandomRequestManager
 				Type:    "randomness",
@@ -194,7 +194,7 @@ func TestRouterDestinationBugFix(t *testing.T) {
 
 		updateReq := &bridgetypes.UpdateRequest{
 			ID: "IntentRegistered-421614-1757675035",
-			Contract: &config.LegacyContractConfig{
+			Contract: &config.ContractConfig{
 				Name:    "receiver",
 				Address: correctAddress.Hex(), // Router specifies PushOracleReceiver
 				Type:    "pushoracle",

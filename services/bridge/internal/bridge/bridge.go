@@ -25,12 +25,11 @@ import (
 
 // Bridge represents the main bridge service
 type Bridge struct {
-	modularConfig      *config.ModularConfig
-	configService      *config.ConfigService
-	legacyDestinations map[int64]*config.DestinationConfig // temporary for API compatibility
-	db                 *database.DB
-	readClient         rpc.EthClient
-	writeClients       map[int64]*WriteClient
+	modularConfig *config.ModularConfig
+	configService *config.ConfigService
+	db            *database.DB
+	readClient    rpc.EthClient
+	writeClients  map[int64]*WriteClient
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -167,46 +166,17 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		ethClients[chainID] = writeClient.GetEthClient()
 	}
 
-	legacyDestinations := make(map[int64]*config.DestinationConfig)
-	for _, chain := range cfgService.GetEnabledChains() {
-		contracts := cfgService.GetContractsForChain(chain.ChainID)
-		var legacyContracts []config.LegacyContractConfig
-		for _, contract := range contracts {
-			legacyContract := config.LegacyContractConfig{
-				Name:          contract.Address, // Use address as name for compatibility
-				Address:       contract.Address,
-				Type:          contract.Type,
-				Enabled:       contract.Enabled,
-				ABI:           contract.ABI,
-				GasLimit:      contract.GasLimit,
-				GasMultiplier: contract.GasMultiplier,
-				MaxGasPrice:   contract.MaxGasPrice,
-				Methods:       contract.Methods,
-			}
-			legacyContracts = append(legacyContracts, legacyContract)
-		}
-
-		legacyDestinations[chain.ChainID] = &config.DestinationConfig{
-			ChainID:   chain.ChainID,
-			Name:      chain.Name,
-			RPCURLs:   chain.RPCURLs,
-			Enabled:   chain.Enabled,
-			Contracts: legacyContracts,
-		}
-	}
-
 	// Create bridge instance now that we have all dependencies
 	bridge := &Bridge{
-		modularConfig:      modularCfg,
-		configService:      cfgService,
-		legacyDestinations: legacyDestinations,
-		db:                 db,
-		readClient:         readClient,
-		writeClients:       destClients,
-		updateChan:         make(chan *bridgetypes.UpdateRequest, 1000),
-		eventChan:          eventChan,
-		errorChan:          errorChan,
-		shutdownChan:       make(chan struct{}),
+		modularConfig: modularCfg,
+		configService: cfgService,
+		db:            db,
+		readClient:    readClient,
+		writeClients:  destClients,
+		updateChan:    make(chan *bridgetypes.UpdateRequest, 1000),
+		eventChan:     eventChan,
+		errorChan:     errorChan,
+		shutdownChan:  make(chan struct{}),
 		stats: &bridgetypes.BridgeStats{
 			ChainStats: make(map[int64]*bridgetypes.ChainStatus),
 			StartTime:  time.Now(),
@@ -239,7 +209,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	eventProcessor, err := processor.NewGenericEventProcessor(
 		&cfgService.GetInfrastructure().EventProcessor,
 		cfgService.GetEventDefinitions(),
-		legacyDestinations,
+		cfgService,
 		db,
 		routerRegistry,
 		ethClient,

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	bridgeTypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
@@ -61,6 +62,7 @@ func TestExtractContractInfo(t *testing.T) {
 	scanner := &EnhancedBlockScanner{
 		sourceConfig:     sourceConfig,
 		eventDefinitions: eventDefs,
+		config:           &config.BlockScannerConfig{},
 	}
 
 	err := scanner.extractContractInfo()
@@ -410,6 +412,7 @@ func TestBasicScannerOperations(t *testing.T) {
 	scanner := &EnhancedBlockScanner{
 		sourceConfig:     sourceConfig,
 		eventDefinitions: eventDefs,
+		config:           &config.BlockScannerConfig{},
 		stopChan:         make(chan struct{}),
 		stoppedChan:      make(chan struct{}),
 	}
