@@ -6,9 +6,11 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
@@ -31,12 +33,18 @@ type TransactionContext struct {
 
 // TransactionHandler handles the complete lifecycle of a transaction
 type TransactionHandler struct {
-	bridge *Bridge
+	writeClients   map[int64]*WriteClient
+	routerRegistry *router.GenericRegistry
+	metricsTracker *MetricsTracker
 }
 
 // NewTransactionHandler creates a new transaction handler
-func NewTransactionHandler(b *Bridge) *TransactionHandler {
-	return &TransactionHandler{bridge: b}
+func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker) *TransactionHandler {
+	return &TransactionHandler{
+		writeClients:   writeClients,
+		routerRegistry: registry,
+		metricsTracker: tracker,
+	}
 }
 
 // Process handles the complete transaction lifecycle
@@ -79,7 +87,7 @@ func (h *TransactionHandler) buildContext(ctx context.Context, updateReq *bridge
 		return nil, fmt.Errorf("destination chain is nil")
 	}
 
-	destClient := h.bridge.writeClients[updateReq.DestinationChain.ChainID]
+	destClient := h.writeClients[updateReq.DestinationChain.ChainID]
 	if destClient == nil {
 		return nil, fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
 	}
@@ -95,7 +103,7 @@ func (h *TransactionHandler) buildContext(ctx context.Context, updateReq *bridge
 		DestClient:    destClient,
 		GasPrice:      gasPrice,
 		Identifier:    extractIdentifier(updateReq),
-		Symbol:        extractSymbol(updateReq, h.bridge.routerRegistry),
+		Symbol:        extractSymbol(updateReq, h.routerRegistry),
 	}, nil
 }
 
@@ -145,7 +153,7 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transaction) error {
 	h.recordSubmission(txCtx, tx.Hash().Hex())
 
-	receipt, err := h.bridge.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash())
+	receipt, err := h.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash())
 	if err != nil {
 		h.recordFailure(txCtx, "confirmation", "receipt_timeout")
 		return fmt.Errorf("failed to get transaction receipt: %w", err)
@@ -169,8 +177,8 @@ func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transa
 
 // recordSubmission records transaction submission metrics
 func (h *TransactionHandler) recordSubmission(txCtx *TransactionContext, txHash string) {
-	if h.bridge.metricsTracker != nil && txCtx.UpdateRequest.Intent != nil {
-		h.bridge.metricsTracker.RecordIntentSubmitted(
+	if h.metricsTracker != nil && txCtx.UpdateRequest.Intent != nil {
+		h.metricsTracker.RecordIntentSubmitted(
 			txCtx.UpdateRequest.Intent,
 			fmt.Sprintf("%d", txCtx.UpdateRequest.DestinationChain.ChainID),
 			txHash,
@@ -181,15 +189,15 @@ func (h *TransactionHandler) recordSubmission(txCtx *TransactionContext, txHash 
 
 // recordFailure records transaction failure metrics
 func (h *TransactionHandler) recordFailure(txCtx *TransactionContext, stage, reason string) {
-	if h.bridge.metricsTracker != nil && txCtx.UpdateRequest.Intent != nil {
-		h.bridge.metricsTracker.RecordIntentFailed(txCtx.UpdateRequest.Intent, stage, reason)
+	if h.metricsTracker != nil && txCtx.UpdateRequest.Intent != nil {
+		h.metricsTracker.RecordIntentFailed(txCtx.UpdateRequest.Intent, stage, reason)
 	}
 }
 
 // recordConfirmation records transaction confirmation metrics
 func (h *TransactionHandler) recordConfirmation(txCtx *TransactionContext, txHash string, gasUsed uint64) {
-	if h.bridge.metricsTracker != nil && txCtx.UpdateRequest.Intent != nil {
-		h.bridge.metricsTracker.RecordIntentConfirmed(txCtx.UpdateRequest.Intent, txHash, gasUsed)
+	if h.metricsTracker != nil && txCtx.UpdateRequest.Intent != nil {
+		h.metricsTracker.RecordIntentConfirmed(txCtx.UpdateRequest.Intent, txHash, gasUsed)
 	}
 }
 
@@ -199,8 +207,8 @@ func (h *TransactionHandler) updateState(txCtx *TransactionContext) {
 		txCtx.DestClient.updateLastUpdate(txCtx.UpdateRequest.Intent.Symbol, txCtx.UpdateRequest.Contract.Address)
 	}
 
-	if txCtx.UpdateRequest.RouterID != "" && h.bridge.routerRegistry != nil {
-		router := h.bridge.routerRegistry.GetRouterByID(txCtx.UpdateRequest.RouterID)
+	if txCtx.UpdateRequest.RouterID != "" && h.routerRegistry != nil {
+		router := h.routerRegistry.GetRouterByID(txCtx.UpdateRequest.RouterID)
 		if router != nil {
 			eventName := ""
 			if txCtx.UpdateRequest.Event != nil {
@@ -305,4 +313,35 @@ func stringContains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// waitForReceipt waits for a transaction receipt
+func (h *TransactionHandler) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash) (*types.Receipt, error) {
+	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
+
+	timeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	attempts := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timeout:
+			return nil, fmt.Errorf("timeout waiting for transaction receipt after 5 minutes")
+		case <-ticker.C:
+			attempts++
+			receipt, err := client.TransactionReceipt(ctx, txHash)
+			if err != nil {
+				if attempts%12 == 0 { // Log every minute
+					logger.Debugf("Still waiting for receipt %s (attempt %d): %v", txHash.Hex(), attempts, err)
+				}
+				continue
+			}
+			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d",
+				txHash.Hex(), receipt.Status, receipt.GasUsed)
+			return receipt, nil
+		}
+	}
 }

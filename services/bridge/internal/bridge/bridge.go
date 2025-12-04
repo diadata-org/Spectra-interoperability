@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
@@ -641,39 +640,8 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 		}
 	}()
 
-	handler := NewTransactionHandler(b)
+	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsTracker)
 	return handler.Process(ctx, task.Request)
 }
 
 // callRouterMethod calls a contract method using router configuration
-
-// waitForReceipt waits for a transaction receipt
-func (b *Bridge) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash) (*types.Receipt, error) {
-	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
-
-	timeout := time.After(5 * time.Minute)
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	attempts := 0
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-timeout:
-			return nil, fmt.Errorf("timeout waiting for transaction receipt after 5 minutes")
-		case <-ticker.C:
-			attempts++
-			receipt, err := client.TransactionReceipt(ctx, txHash)
-			if err != nil {
-				if attempts%12 == 0 { // Log every minute
-					logger.Debugf("Still waiting for receipt %s (attempt %d): %v", txHash.Hex(), attempts, err)
-				}
-				continue
-			}
-			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d",
-				txHash.Hex(), receipt.Status, receipt.GasUsed)
-			return receipt, nil
-		}
-	}
-}
