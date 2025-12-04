@@ -23,7 +23,7 @@ const (
 // Server represents the API server
 type Server struct {
 	config         *config.APIConfig
-	cfg            *config.Config // Full config for failover handler
+	configService  *config.ConfigService
 	db             *database.DB
 	metrics        *metrics.Collector
 	routerRegistry interface{} // Will be *router.Registry when available
@@ -35,14 +35,14 @@ type Server struct {
 
 // NewServer creates a new API server
 func NewServer(
-	cfg *config.Config,
+	cfgService *config.ConfigService,
 	db *database.DB,
 	metricsCollector *metrics.Collector,
 	routerRegistry interface{}, // Pass as interface{} to avoid import cycle
 ) *Server {
 	s := &Server{
-		config:         &cfg.API,
-		cfg:            cfg,
+		config:         &cfgService.GetInfrastructure().API,
+		configService:  cfgService,
 		db:             db,
 		metrics:        metricsCollector,
 		routerRegistry: routerRegistry,
@@ -66,7 +66,7 @@ func NewServer(
 		logger.Warn("Metrics collector not available, failover handler will run without metrics")
 	}
 
-	failoverHandler, err := NewFailoverHandler(cfg, db, failoverMetrics, intentMetrics)
+	failoverHandler, err := NewFailoverHandler(cfgService, db, failoverMetrics, intentMetrics)
 	if err != nil {
 		logger.WithError(err).Error("Failed to create failover handler")
 	} else {

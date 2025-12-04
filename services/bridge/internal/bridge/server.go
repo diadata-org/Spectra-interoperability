@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
-	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/grpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
@@ -27,43 +26,7 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 			metricsCollector.FailoverMetrics = b.metrics
 		}
 
-		legacyDestinations := make(map[int64]*config.DestinationConfig)
-		for _, chain := range b.configService.GetEnabledChains() {
-			contracts := b.configService.GetContractsForChain(chain.ChainID)
-			var legacyContracts []config.ContractConfig
-			for _, contract := range contracts {
-				legacyContract := config.ContractConfig{
-					Name:          contract.Address,
-					Address:       contract.Address,
-					Type:          contract.Type,
-					Enabled:       contract.Enabled,
-					ABI:           contract.ABI,
-					GasLimit:      contract.GasLimit,
-					GasMultiplier: contract.GasMultiplier,
-					MaxGasPrice:   contract.MaxGasPrice,
-					Methods:       contract.Methods,
-				}
-				legacyContracts = append(legacyContracts, legacyContract)
-			}
-
-			legacyDestinations[chain.ChainID] = &config.DestinationConfig{
-				ChainID:   chain.ChainID,
-				Name:      chain.Name,
-				RPCURLs:   chain.RPCURLs,
-				Enabled:   chain.Enabled,
-				Contracts: legacyContracts,
-			}
-		}
-
-		legacyConfig := &config.Config{
-			Database:         b.configService.GetInfrastructure().Database,
-			Source:           b.configService.GetInfrastructure().Source,
-			PrivateKey:       b.configService.GetInfrastructure().PrivateKey,
-			EventDefinitions: b.configService.GetEventDefinitions(),
-			API:              b.configService.GetInfrastructure().API,
-			Destinations:     legacyDestinations,
-		}
-		apiServer := api.NewServer(legacyConfig, b.db, metricsCollector, b.routerRegistry)
+		apiServer := api.NewServer(b.configService, b.db, metricsCollector, b.routerRegistry)
 
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {

@@ -59,9 +59,9 @@ type FailoverStatus struct {
 }
 
 // NewFailoverHandler creates a new failover handler
-func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *metrics.Metrics, intentMetrics *metrics.IntentMetrics) (*FailoverHandler, error) {
+func NewFailoverHandler(cfgService *config.ConfigService, db *database.DB, serviceMetrics *metrics.Metrics, intentMetrics *metrics.IntentMetrics) (*FailoverHandler, error) {
 	// Parse private key
-	privateKeyHex := cfg.PrivateKey
+	privateKeyHex := cfgService.GetInfrastructure().PrivateKey
 	if len(privateKeyHex) == 0 {
 		return nil, fmt.Errorf("private key is required")
 	}
@@ -84,38 +84,37 @@ func NewFailoverHandler(cfg *config.Config, db *database.DB, serviceMetrics *met
 		intentMetrics: intentMetrics,
 	}
 
-	// Configure destinations
-	for _, dest := range cfg.Destinations {
-		if dest.Enabled {
-			// Find receiver contract
-			var receiverAddr string
-			for _, contract := range dest.Contracts {
-				if contract.Type == "pushoracle" && contract.Enabled {
-					receiverAddr = contract.Address
-					break
-				}
+	// Configure destinations from enabled chains
+	for _, chain := range cfgService.GetEnabledChains() {
+		// Find receiver contract for this chain
+		var receiverAddr string
+		contracts := cfgService.GetContractsForChain(chain.ChainID)
+		for _, contract := range contracts {
+			if contract.Type == "pushoracle" && contract.Enabled {
+				receiverAddr = contract.Address
+				break
 			}
+		}
 
-			if receiverAddr == "" {
-				logger.Warnf("No receiver contract found for chain %d", dest.ChainID)
+		if receiverAddr == "" {
+			logger.Warnf("No receiver contract found for chain %d", chain.ChainID)
+			continue
+		}
+
+		handler.destinations[chain.ChainID] = &DestinationConfig{
+			ChainID:         chain.ChainID,
+			ReceiverAddress: common.HexToAddress(receiverAddr),
+			GasLimit:        500000, // Default gas limit
+		}
+
+		// Create client
+		if len(chain.RPCURLs) > 0 {
+			client, err := ethclient.Dial(chain.RPCURLs[0])
+			if err != nil {
+				logger.Errorf("Failed to connect to chain %d: %v", chain.ChainID, err)
 				continue
 			}
-
-			handler.destinations[dest.ChainID] = &DestinationConfig{
-				ChainID:         dest.ChainID,
-				ReceiverAddress: common.HexToAddress(receiverAddr),
-				GasLimit:        500000, // Default gas limit
-			}
-
-			// Create client
-			if len(dest.RPCURLs) > 0 {
-				client, err := ethclient.Dial(dest.RPCURLs[0])
-				if err != nil {
-					logger.Errorf("Failed to connect to chain %d: %v", dest.ChainID, err)
-					continue
-				}
-				handler.clients[dest.ChainID] = client
-			}
+			handler.clients[chain.ChainID] = client
 		}
 	}
 
