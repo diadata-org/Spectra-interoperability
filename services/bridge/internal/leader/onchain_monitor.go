@@ -37,6 +37,10 @@ type OnChainMonitor struct {
 	cancel context.CancelFunc
 }
 
+func (m *OnChainMonitor) IsEnabled() bool {
+	return m.enabled
+}
+
 // RouterMonitor tracks one router and its destinations
 type RouterMonitor struct {
 	RouterID     string
@@ -70,7 +74,7 @@ func DefaultMonitorConfig() MonitorConfig {
 	return MonitorConfig{
 		Enabled:              false,
 		TimeThresholdOffset:  1 * time.Minute,
-		PriceDeviationOffset: big.NewFloat(0.10), // 10%
+		PriceDeviationOffset: big.NewFloat(0.50), // 10%
 		CheckInterval:        10 * time.Second,
 	}
 }
@@ -218,7 +222,7 @@ func (m *OnChainMonitor) checkRouter(routerMonitor *RouterMonitor) {
 				percentageChange.Mul(percentageChange, big.NewFloat(100))
 				dest.lastPercentageChange = percentageChange
 
-				priceDevThreshold := m.GetPriceDeviationThreshold(dest.ChainID, dest.ContractAddress, symbol)
+				priceDevThreshold := m.getPriceDeviationThresholdWithOffset(dest.ChainID, dest.ContractAddress, symbol)
 				if priceDevThreshold != nil {
 					thresholdPercent := new(big.Float).Mul(priceDevThreshold, big.NewFloat(100))
 					absChange := new(big.Float).Abs(percentageChange)
@@ -259,6 +263,11 @@ func (m *OnChainMonitor) checkRouter(routerMonitor *RouterMonitor) {
 	}
 }
 
+// FindDestination
+func (m *OnChainMonitor) FindDestination(key string) *DestinationMonitor {
+	return m.findDestination(key)
+}
+
 func (m *OnChainMonitor) findDestination(key string) *DestinationMonitor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -272,6 +281,10 @@ func (m *OnChainMonitor) findDestination(key string) *DestinationMonitor {
 		routerMonitor.mu.RUnlock()
 	}
 	return nil
+}
+
+func (m *OnChainMonitor) generateKey(chainID int64, contractAddress common.Address, symbol string) string {
+	return utils.GenerateDestinationKey(chainID, contractAddress.Hex(), symbol)
 }
 
 func (m *OnChainMonitor) getValueFromContract(dest *DestinationMonitor, symbol string) (*big.Int, uint64, error) {
@@ -336,13 +349,12 @@ func formatValue(v *big.Int) string {
 	return v.String()
 }
 
-// ShouldProcess checks if a destination should be processed
 func (m *OnChainMonitor) ShouldProcess(chainID int64, contractAddress common.Address, symbol string, incomingPrice *big.Int) bool {
 	if !m.enabled {
 		return true
 	}
 
-	key := utils.GenerateDestinationKey(chainID, contractAddress.Hex(), symbol)
+	key := m.generateKey(chainID, contractAddress, symbol)
 	dest := m.findDestination(key)
 	if dest == nil {
 		return true
@@ -365,45 +377,64 @@ func (m *OnChainMonitor) ShouldProcess(chainID int64, contractAddress common.Add
 		return true
 	}
 
-	if lastPercentageChange != nil {
-		priceDevThreshold := m.GetPriceDeviationThreshold(chainID, contractAddress, symbol)
-		if priceDevThreshold != nil {
-			thresholdPercent := new(big.Float).Mul(priceDevThreshold, big.NewFloat(100))
-			absChange := new(big.Float).Abs(lastPercentageChange)
-			if absChange.Cmp(thresholdPercent) > 0 {
-				logger.Infof("Monitoring triggered: price deviation threshold exceeded for chain=%d contract=%s symbol=%s, "+
-					"change=%.2f%% threshold=%.2f%% value=%s",
-					chainID, contractAddress.Hex(), symbol, lastPercentageChange, thresholdPercent, formatValue(currentValue))
-				return true
-			}
-		}
-	}
+	//  skip deviation checks if last update was within last 2 minutes
+	timeSinceUpdate := time.Since(time.Unix(int64(lastTimestamp), 0))
+	skipDeviationCheck := timeSinceUpdate < 2*time.Minute
 
-	if incomingPrice != nil && currentValue != nil && currentValue.Sign() != 0 {
-		priceDevThreshold := m.GetPriceDeviationThreshold(chainID, contractAddress, symbol)
-		if priceDevThreshold != nil {
-			diff := new(big.Int).Sub(incomingPrice, currentValue)
-			oldFloat := new(big.Float).SetInt(currentValue)
-			diffFloat := new(big.Float).SetInt(diff)
-			percentageChange := new(big.Float).Quo(diffFloat, oldFloat)
-			percentageChange.Mul(percentageChange, big.NewFloat(100))
-			thresholdPercent := new(big.Float).Mul(priceDevThreshold, big.NewFloat(100))
-			absChange := new(big.Float).Abs(percentageChange)
-			if absChange.Cmp(thresholdPercent) > 0 {
-				logger.Infof("Monitoring triggered: price deviation threshold exceeded (incoming vs on-chain) for chain=%d contract=%s symbol=%s, "+
-					"change=%.2f%% threshold=%.2f%% onchain_value=%s incoming_value=%s",
-					chainID, contractAddress.Hex(), symbol, percentageChange, thresholdPercent, formatValue(currentValue), incomingPrice.String())
-				return true
+	if skipDeviationCheck {
+		logger.Debugf("Skipping deviation check for chain=%d contract=%s symbol=%s (last update %v ago < 2 minutes)",
+			chainID, contractAddress.Hex(), symbol, timeSinceUpdate)
+	} else {
+		if lastPercentageChange != nil {
+			priceDevThreshold := m.getPriceDeviationThresholdWithOffset(chainID, contractAddress, symbol)
+			if priceDevThreshold != nil {
+				thresholdPercent := new(big.Float).Mul(priceDevThreshold, big.NewFloat(100))
+				absChange := new(big.Float).Abs(lastPercentageChange)
+				if absChange.Cmp(thresholdPercent) > 0 {
+					logger.Infof("Monitoring triggered: price deviation threshold exceeded for chain=%d contract=%s symbol=%s, "+
+						"change=%.2f%% threshold=%.2f%% value=%s",
+						chainID, contractAddress.Hex(), symbol, lastPercentageChange, thresholdPercent, formatValue(currentValue))
+					return true
+				}
 			}
 		}
-	}
+
+		if incomingPrice != nil {
+			freshValue, _, err := m.getValueFromContract(dest, symbol)
+			if err != nil {
+				logger.Warnf("Failed to fetch fresh on-chain value for chain=%d contract=%s symbol=%s, using cached value: %v",
+					chainID, contractAddress.Hex(), symbol, err)
+				// Fall back to cached value if fetch fails
+				freshValue = currentValue
+			}
+
+			if freshValue != nil && freshValue.Sign() != 0 {
+				priceDevThreshold := m.getPriceDeviationThresholdWithOffset(chainID, contractAddress, symbol)
+				if priceDevThreshold != nil {
+					diff := new(big.Int).Sub(incomingPrice, freshValue)
+					oldFloat := new(big.Float).SetInt(freshValue)
+					diffFloat := new(big.Float).SetInt(diff)
+					percentageChange := new(big.Float).Quo(diffFloat, oldFloat)
+					percentageChange.Mul(percentageChange, big.NewFloat(100))
+					thresholdPercent := new(big.Float).Mul(priceDevThreshold, big.NewFloat(100))
+					absChange := new(big.Float).Abs(percentageChange)
+					if absChange.Cmp(thresholdPercent) > 0 {
+						logger.Infof("Monitoring triggered: price deviation threshold exceeded (incoming vs on-chain) for chain=%d contract=%s symbol=%s, "+
+							"change=%.2f%% threshold=%.2f%% onchain_value=%s incoming_value=%s",
+							chainID, contractAddress.Hex(), symbol, percentageChange, thresholdPercent, formatValue(freshValue), incomingPrice.String())
+						return true
+					}
+				}
+			}
+		}
+	} // End of skipDeviationCheck else block
 
 	if timeThreshold == 0 {
 		timeThreshold = 5 * time.Minute
 	}
 	totalThreshold := timeThreshold + m.timeThresholdOffset
 
-	timeSinceUpdate := time.Since(time.Unix(int64(lastTimestamp), 0))
+	// Time threshold check always proceeds (not skipped by 2-minute rule)
 	if timeSinceUpdate > totalThreshold {
 		logger.Infof("Monitoring triggered: time threshold exceeded for chain=%d contract=%s symbol=%s, "+
 			"time_since_update=%v threshold=%v value=%s",
@@ -414,9 +445,8 @@ func (m *OnChainMonitor) ShouldProcess(chainID int64, contractAddress common.Add
 	return false
 }
 
-// GetPriceDeviationThreshold returns the price deviation threshold for a destination
 func (m *OnChainMonitor) GetPriceDeviationThreshold(chainID int64, contractAddress common.Address, symbol string) *big.Float {
-	key := utils.GenerateDestinationKey(chainID, contractAddress.Hex(), symbol)
+	key := m.generateKey(chainID, contractAddress, symbol)
 	dest := m.findDestination(key)
 
 	if dest == nil || dest.PriceDeviation == "" {
@@ -427,9 +457,28 @@ func (m *OnChainMonitor) GetPriceDeviationThreshold(chainID int64, contractAddre
 	return new(big.Float).Add(priceDeviation, m.priceDeviationOffset)
 }
 
-// GetInactivityThreshold returns the inactivity threshold for a destination
+func (m *OnChainMonitor) GetPriceDeviationThresholdWithOffset(chainID int64, contractAddress common.Address, symbol string) *big.Float {
+	return m.getPriceDeviationThresholdWithOffset(chainID, contractAddress, symbol)
+}
+
+func (m *OnChainMonitor) getPriceDeviationThresholdWithOffset(chainID int64, contractAddress common.Address, symbol string) *big.Float {
+	key := m.generateKey(chainID, contractAddress, symbol)
+	dest := m.findDestination(key)
+
+	if dest == nil || dest.PriceDeviation == "" {
+		baseThreshold := big.NewFloat(0.10 / 100.0)
+		offsetPercent := m.priceDeviationOffset
+		offsetAmount := new(big.Float).Mul(baseThreshold, offsetPercent)
+		return new(big.Float).Add(baseThreshold, offsetAmount)
+	}
+
+	baseThreshold := parsePriceDeviation(dest.PriceDeviation)
+	offsetAmount := new(big.Float).Mul(baseThreshold, m.priceDeviationOffset)
+	return new(big.Float).Add(baseThreshold, offsetAmount)
+}
+
 func (m *OnChainMonitor) GetInactivityThreshold(chainID int64, contractAddress common.Address, symbol string) time.Duration {
-	key := utils.GenerateDestinationKey(chainID, contractAddress.Hex(), symbol)
+	key := m.generateKey(chainID, contractAddress, symbol)
 	dest := m.findDestination(key)
 
 	timeThreshold := 5 * time.Minute
@@ -441,6 +490,30 @@ func (m *OnChainMonitor) GetInactivityThreshold(chainID int64, contractAddress c
 	}
 
 	return timeThreshold + m.timeThresholdOffset
+}
+
+func (m *OnChainMonitor) GetTimeThresholdOffset() time.Duration {
+	return m.timeThresholdOffset
+}
+
+func (m *OnChainMonitor) GetMonitoringInfo(chainID int64, contractAddress common.Address, symbol string) (onChainValue *big.Int, lastTimestamp uint64, timeThreshold time.Duration) {
+	key := m.generateKey(chainID, contractAddress, symbol)
+	dest := m.findDestination(key)
+	if dest == nil {
+		return nil, 0, 0
+	}
+
+	dest.mu.RLock()
+	defer dest.mu.RUnlock()
+
+	onChainValue = dest.lastValue
+	lastTimestamp = dest.lastTimestamp
+	timeThreshold = dest.TimeThreshold.Duration()
+	if timeThreshold == 0 {
+		timeThreshold = 5 * time.Minute
+	}
+
+	return onChainValue, lastTimestamp, timeThreshold
 }
 
 func ParsePriceDeviation(s string) *big.Float {
