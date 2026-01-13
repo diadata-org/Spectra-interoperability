@@ -1,6 +1,3 @@
-
-
-
 ## Table of Contents
 
 - [Spectra](#spectra)
@@ -23,8 +20,6 @@
   - [Request Oracle Flow](#request-oracle-flow)
   - [Example Requesting Price from Lasernet](#example-requesting-price-from-lasernet)
 
-
-
 # Spectra
 
 Diadata utilizes Hyperlane to transfer or provide data to destination chains. Currently, the supported testnets are sepolia.
@@ -41,11 +36,9 @@ The OracleTrigger smart contract is deployed on the `Lasernet` chain. It retriev
 
 The OracleUpdateRecipient smart contract is deployed on the destination chain. It receives and processes oracle price updates from `Lasernet` using either a push-based or request-based mechanism.
 
-
 ### 3. OracleService
 
 The OracleService operates at defined intervals to fetch updated values from the `Lasernet`. It then performs transactions with the OracleTrigger, providing the chain ID and symbol. This process facilitates bridging the data to the destination chain via Hyperlane
-
 
 ### Spectra Flow
 
@@ -53,7 +46,7 @@ The OracleService operates at defined intervals to fetch updated values from the
 
 # Push Based Oracle
 
- The Push-Based Oracle system enables contracts to receive real-time updates based on predefined criteria such as fixed intervals, specific price deviations, or a combination of both. This design provides flexibility and efficiency for decentralized applications needing accurate and timely data.
+The Push-Based Oracle system enables contracts to receive real-time updates based on predefined criteria such as fixed intervals, specific price deviations, or a combination of both. This design provides flexibility and efficiency for decentralized applications needing accurate and timely data.
 
 ## Usage
 
@@ -63,22 +56,23 @@ In this method, any contract that needs data can read directly from the Oracle c
 
 The updates mapping is a key-value store where:
 
- - Key: A unique identifier, typically a string, representing the asset or data type (e.g., DIA/USD, BTC/USD).
- - Value: A Data struct containing:
-    - key: The identifier of the data entry (redundant for reference but useful for integrity checks).
-    - timestamp: The timestamp of the latest update.
-    - value: The most recent value associated with the key.
+- Key: A unique identifier, typically a string, representing the asset or data type (e.g., DIA/USD, BTC/USD).
+- Value: A Data struct containing:
+  - key: The identifier of the data entry (redundant for reference but useful for integrity checks).
+  - timestamp: The timestamp of the latest update.
+  - value: The most recent value associated with the key.
 
 Example
+
 ```solidity
 
 contract PriceConsumer {
     Oracle public oracle;
-    
+
     constructor(address _oracle) {
         oracle = Oracle(_oracle);
     }
-    
+
     function getLatestPrice(string memory _key) public view returns (uint128) {
         return oracle.updates(_key).value;
     }
@@ -90,12 +84,11 @@ Example Oracle contract
 
 - **Sepolia**: [`0x76a4BA6e4A40Bc613821e2a468a1e94FcCa4CE83`](https://sepolia.etherscan.io/address/0x76a4BA6e4A40Bc613821e2a468a1e94FcCa4CE83)
 
-
 ### Method 2: Direct Delivery to Contracts
 
 In this method, updates are pushed to the receiving contract via a callback mechanism. The receiving contract must implement a specific interface and define a callback function to handle the incoming data.
 
-- Your contract must implement  [IMessageRecipient](./contracts/contracts/interfaces/IMessageRecipient.sol)  and [IInterchainSecurityModule](./contracts/contracts/interfaces/IInterchainSecurityModule.sol).
+- Your contract must implement [IMessageRecipient](./contracts/contracts/interfaces/IMessageRecipient.sol) and [IInterchainSecurityModule](./contracts/contracts/interfaces/IInterchainSecurityModule.sol).
 - The Oracle invokes the handle callback function in the receiving contract to deliver updates. The data payload is decoded and can be stored or processed as needed.
 
 ```solidity
@@ -118,21 +111,20 @@ function handle(
 ## Access Oracle
 
 - To access oracle, use the updates(pair_name) function. Here’s how you can interact with it:
-    - Use the full pair name (e.g., DIA/USD) as the pair_name
-    - Query the contract using Etherscan's "Read" section.
+  - Use the full pair name (e.g., DIA/USD) as the pair_name
+  - Query the contract using Etherscan's "Read" section.
 
 ![Dia Oracle Etherscan](.images/diaoracle.png)
 
 - The response contains the following data fields:
 
-    - Key: The identifier of the asset pair (e.g., DIA/USD).
-    - Timestamp: The time of the latest price update.
-    - Value: The most recent price of the asset.
+  - Key: The identifier of the asset pair (e.g., DIA/USD).
+  - Timestamp: The time of the latest price update.
+  - Value: The most recent price of the asset.
 
-# Request Based Oracle 
+# Request Based Oracle
 
- Request Based Oracle  enables the creation of requests for asset prices on a source blockchain. These requests are sent through a mailbox on the current chain and ultimately delivered to the DIA chain, which retrieves and delivers the required price data.
-
+Request Based Oracle enables the creation of requests for asset prices on a source blockchain. These requests are sent through a mailbox on the current chain and ultimately delivered to the DIA chain, which retrieves and delivers the required price data.
 
 ## How It Works
 
@@ -142,31 +134,28 @@ A request can be made from the source chain for an asset symbol whose price is r
 
 MailBox
 
- - **Sepolia**: [`0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766`](https://sepolia.etherscan.io/address/0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766)
-- **Lasertnet**: [`0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a`](https://testnet-explorer.diadata.org/address/0xB1869f5e26C7e673ECFF555F5AbAbF83c145044a)
- 
+- **Sepolia**: [`0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766`](https://sepolia.etherscan.io/address/0xfFAEF09B3cd11D9b20d1a19bECca54EEC2884766)
+- **Lasertnet**: [`0x16cD72271498bcaD5aeB9f2D785bA82dC5AfA5E2`](https://testnet-explorer.diadata.org/address/0x16cD72271498bcaD5aeB9f2D785bA82dC5AfA5E2)
 
 Reciepient
 
-- **Lasertnet**: [`0x97C989740aE765518FA85E64ED61512D39765e43`](https://testnet-explorer.diadata.org/address/0x97C989740aE765518FA85E64ED61512D39765e43)
+- **Lasertnet**: [`0x9bb71344Ed950F9cFD85EE1C7258553B01d95FA0`](https://testnet-explorer.diadata.org/address/0x9bb71344Ed950F9cFD85EE1C7258553B01d95FA0)
 
 ISM Address
 
-
-- **Lasertnet**: [`0x005Fa5AcC38C06B89274f3b57347F1663e253039`](https://testnet-explorer.diadata.org/address/0x005Fa5AcC38C06B89274f3b57347F1663e253039)
-- **Sepolia**: [`0x8576852644F126348e33bAf3AaFea2C58Fb5e1Aa`](https://sepolia.etherscan.io/address/0x8576852644F126348e33bAf3AaFea2C58Fb5e1Aa)
-
+- **Sepolia**: [`0xb869617a3CFcdA07A4cC230d996120074e7c817e`](https://sepolia.etherscan.io/address/0xb869617a3cfcda07a4cc230d996120074e7c817e)
+- **Lasertnet**: [`0x61D217a26D0Bff1D2b4c6f5880e621071326aadC`](https://testnet-explorer.diadata.org/address/0x61D217a26D0Bff1D2b4c6f5880e621071326aadC)
 
 ### 2. Request Body Format
 
 The request body is formatted as follows in JavaScript:
 
 ```js
-const key =  "WBTC/USD"; // Assuming key is an address or a bytes32 value
+const key = "WBTC/USD"; // Assuming key is an address or a bytes32 value
 
 const requestBody = abiCoder.encode(
-    ["string"],  // Types of the parameters
-    [key]        // Values to encode
+  ["string"], // Types of the parameters
+  [key] // Values to encode
 );
 ```
 
@@ -179,12 +168,9 @@ The request body is formatted as follows in solidity:
 
 ### Message Delivery Process
 
-Once a request is created, it is transmitted to the Hyperlane mailbox. The message is then relayed to the OracleRequestRecipient contract  , where the price data is fetched from the Oracle Metadata Contract.
+Once a request is created, it is transmitted to the Hyperlane mailbox. The message is then relayed to the OracleRequestRecipient contract , where the price data is fetched from the Oracle Metadata Contract.
 
 - **Lasernet Metadada**: [`0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6`](https://testnet-explorer.diadata.org/address/0x7Dd70B4B76130Bc29E33635d2d1F88e088dF84A6)
-
-
-
 
 ### Response and Callback
 
@@ -194,21 +180,15 @@ Reciepient
 
 - **Lasernet OracleRequestRecipient**: [`0x97C989740aE765518FA85E64ED61512D39765e43`](https://testnet-explorer.diadata.org/address/0x97C989740aE765518FA85E64ED61512D39765e43)
 
-
 Example Request Based Oracle
 
 - **Sepolia**: [`0x3b64691c14bca163c8230e726c6f880b0e74ab0d`](https://sepolia.etherscan.io/address/0x3b64691c14bca163c8230e726c6f880b0e74ab0d)
 
- 
-
-
-
-### Request Oracle  Flow
-
+### Request Oracle Flow
 
 ![Request Flow](.images/request.drawio.png)
- 
-```js 
+
+```js
 
  function handle(
         uint32 _origin,
@@ -235,7 +215,7 @@ To create a contract for a price request from the lasernet, you need to implemen
 
 #### IMessageRecipient
 
- This interface allows the contract to receive messages back from the DIA chain, likely for handling the price quote response.
+This interface allows the contract to receive messages back from the DIA chain, likely for handling the price quote response.
 
 #### ISpecifiesInterchainSecurityModule
 
@@ -326,7 +306,7 @@ contract RequestBasedOracleExample is
         lastSender = _sender;
         lastData = _data;
     }
- 
+
 
     function setInterchainSecurityModule(address _ism) external onlyOwner {
         interchainSecurityModule = IInterchainSecurityModule(_ism);
