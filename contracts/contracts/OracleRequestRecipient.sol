@@ -195,7 +195,7 @@ contract OracleRequestRecipient is
     receive() external payable {}
 
     /**
-     * @notice Withdraw ETH to reover stuck funds
+     * @notice Withdraw ETH to recover stuck funds
      */
     function retrieveLostTokens(address receiver) external onlyOwner {
         if (receiver == address(0)) {

@@ -36,7 +36,7 @@ contract ProtocolFeeHookTest is Test {
         uint256 gasPrice = 10;
         vm.fee(gasPrice);
 
-        uint256 expectedFee = customGasUsed * gasPrice;
+        uint256 expectedFee = customGasUsed * gasPrice + feeHook.minFeeWei();
         uint256 fee = feeHook.quoteDispatch("dummy", "dummy");
 
         assertEq(
@@ -90,8 +90,13 @@ contract ProtocolFeeHookTest is Test {
 
         address recipient = address(0xC0FFEE);
         uint256 initialBalance = recipient.balance;
+        uint256 contractBalance = address(feeHook).balance;
 
-        feeHook.withdrawFees(recipient);
+        // Expect the FeesWithdrawn event to be emitted before the external call
+        vm.expectEmit(true, false, false, true);
+        emit IProtocolFeeHook.FeesWithdrawn(recipient, contractBalance);
+
+        feeHook.withdrawFees(recipient,contractBalance);
 
         assertEq(
             address(feeHook).balance,
@@ -111,7 +116,7 @@ contract ProtocolFeeHookTest is Test {
 
         vm.prank(nonAdmin);
         vm.expectRevert("Ownable: caller is not the owner");
-        feeHook.withdrawFees(nonAdmin);
+        feeHook.withdrawFees(nonAdmin,1 ether);
     }
 
     function testReceiveFallback() public {
@@ -171,12 +176,12 @@ contract ProtocolFeeHookTest is Test {
 
         // Expect a revert with the error "InvalidFeeRecipient"
         vm.expectRevert(IProtocolFeeHook.InvalidFeeRecipient.selector);
-        feeHook.withdrawFees(address(0));
+        feeHook.withdrawFees(address(0),1 ether);
     }
 
     function testWithdrawFeesNoBalance() public {
         vm.expectRevert(IProtocolFeeHook.NoBalanceToWithdraw.selector);
-        feeHook.withdrawFees(address(0xC0FFEE));
+        feeHook.withdrawFees(address(0xC0FFEE),1 ether);
     }
 
     function testWithdrawFeesTransferFailure() public {
@@ -190,7 +195,7 @@ contract ProtocolFeeHookTest is Test {
 
         // Expect the FeeTransferFailed revert
         vm.expectRevert(IProtocolFeeHook.FeeTransferFailed.selector);
-        feeHook.withdrawFees(nonPayableAddress);
+        feeHook.withdrawFees(nonPayableAddress,1 ether);
     }
 
     function testSupportsMetadataFalse() public {
@@ -235,7 +240,7 @@ contract ProtocolFeeHookTest is Test {
         vm.prank(trustedMailbox);
         feeHook.postDispatch{ value: requiredFee }(mess, mess);
 
-        vm.expectRevert("MessageAlreadyValidated");
+        vm.expectRevert(IProtocolFeeHook.MessageAlreadyValidated.selector);
 
         feeHook.postDispatch{ value: requiredFee }(mess, mess);
     }
@@ -249,7 +254,7 @@ contract ProtocolFeeHookTest is Test {
         address recipient = address(0xC0FFEE);
 
         vm.expectRevert(IProtocolFeeHook.NoBalanceToWithdraw.selector);
-        feeHook.withdrawFees(recipient);
+        feeHook.withdrawFees(recipient,1 ether);
     }
 
     function testSetGasUsedPerTx() public {

@@ -1,0 +1,55 @@
+# Attestor Service Configuration
+
+# RPC Configuration
+rpc:
+  url: https://testnet-rpc.diadata.org
+  registry_url: https://testnet-rpc.diadata.org
+
+# Oracle Configuration
+oracle:
+  address: "0x0087342f5f4c7AB23a37c045c3EF710749527c88"
+
+# Registry Configuration
+registry:
+  address: ""  # Set your intent registry contract address
+
+# Attestor Configuration
+attestor:
+  private_key: ""  # Set your private key (or use ATTESTOR_ATTESTOR_PRIVATE_KEY env var)
+  symbols:
+    - BTC/USD
+    - ETH/USD
+  polling_time: 300ms
+  batch_mode: true
+
+# Logging Configuration
+logging:
+  level: info
+
+# Metrics Configuration
+metrics:
+  port: 8080
+
+# API Server Configuration
+api:
+  port: 8081
+
+# Environment Variable Override
+# You can override any configuration value using environment variables with the ATTESTOR_ prefix:
+# - ATTESTOR_RPC_URL or ATTESTOR_RPC_URLS (comma-separated for multiple URLs)
+# - ATTESTOR_RPC_REGISTRY_URL or ATTESTOR_RPC_REGISTRY_URLS (comma-separated for multiple URLs)
+# - ATTESTOR_ORACLE_ADDRESS
+# - ATTESTOR_REGISTRY_ADDRESS
+# - ATTESTOR_ATTESTOR_PRIVATE_KEY
+# - ATTESTOR_ATTESTOR_SYMBOLS (comma-separated)
+# - ATTESTOR_ATTESTOR_POLLING_TIME (e.g., "5s", "300ms")
+# - ATTESTOR_ATTESTOR_BATCH_MODE (true/false)
+# - ATTESTOR_ATTESTOR_MODE (prime/replica)
+# - ATTESTOR_LOGGING_LEVEL
+# - ATTESTOR_METRICS_PORT
+# - ATTESTOR_API_PORT
+#
+# Environment variables use dot notation converted to underscores:
+# - rpc.url -> ATTESTOR_RPC_URL
+# - attestor.private_key -> ATTESTOR_ATTESTOR_PRIVATE_KEY
+# - etc.

@@ -1,0 +1,14 @@
+name: lumina
+chain_id: 100640
+rpc_url: https://rpc-dia-lasernet-dipfsyyx2w.t.conduit.xyz
+forge_profile: lumina
+accounts:
+  deployer:
+    type: alias
+    name: deployer
+default_contracts: {}
+verification:
+  verifier: blockscout
+  verifier_url: https://testnet-explorer.diadata.org/api
+  explorer_url: https://testnet-explorer.diadata.org/address/{address}
+  watch: true

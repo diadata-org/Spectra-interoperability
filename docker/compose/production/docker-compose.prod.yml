@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for bridge and monitor
+  postgres:
+    image: postgres:15-alpine
+    container_name: spectra-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../../services/bridge/internal/database/migrations:/docker-entrypoint-initdb.d/bridge:ro
+      - ../../../services/hyperlane-monitor/internal/database/migrations:/docker-entrypoint-initdb.d/monitor:ro
+    networks:
+      - spectra-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Attestor service - publishes oracle intents to registry
+  attestor:
+    build:
+      context: ../../../services/attestor
+      dockerfile: ../../../docker/dockerfiles/attestor.Dockerfile
+    container_name: spectra-attestor-prod
+    restart: always
+    environment:
+      - ATTESTOR_ATTESTOR_PRIVATE_KEY=${ATTESTOR_PRIVATE_KEY}
+      - ATTESTOR_REGISTRY_ADDRESS=${ATTESTOR_REGISTRY_ADDRESS}
+      - ATTESTOR_RPC_URL=${ATTESTOR_RPC_URL}
+      - ATTESTOR_ORACLE_ADDRESS=${ATTESTOR_ORACLE_ADDRESS}
+      - ATTESTOR_LOGGING_LEVEL=info
+    volumes:
+      - ../../../services/attestor/config.yaml:/app/config.yaml:ro
+    ports:
+      - "${ATTESTOR_METRICS_PORT:-9090}:8080"
+      - "${ATTESTOR_API_PORT:-9091}:8081"
+    networks:
+      - spectra-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # Bridge service - monitors registry and routes to receivers
+  bridge:
+    build:
+      context: ../../../services/bridge
+      dockerfile: ../../../docker/dockerfiles/bridge.Dockerfile
+    container_name: spectra-bridge-prod
+    restart: always
+    environment:
+      - BRIDGE_PRIVATE_KEY=${BRIDGE_PRIVATE_KEY}
+      - DATABASE_URL=postgres://bridge:${BRIDGE_DB_PASSWORD}@postgres:5432/oracle_bridge?sslmode=disable
+      - LOG_LEVEL=info
+    volumes:
+      - ../../../services/bridge/config.json:/app/config.json:ro
+    ports:
+      - "${BRIDGE_API_PORT:-9092}:8080"
+      - "${BRIDGE_GRPC_PORT:-9093}:8082"
+      - "${BRIDGE_METRICS_PORT:-9094}:8083"
+    networks:
+      - spectra-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  # Hyperlane monitor - monitors message delivery and triggers failover
+  hyperlane-monitor:
+    build:
+      context: ../../../services/hyperlane-monitor
+      dockerfile: ../../../docker/dockerfiles/hyperlane-monitor.Dockerfile
+    container_name: spectra-hyperlane-monitor-prod
+    restart: always
+    environment:
+      - DATABASE_URL=postgres://monitor:${MONITOR_DB_PASSWORD}@postgres:5432/hyperlane_monitor?sslmode=disable
+      - LOG_LEVEL=info
+    volumes:
+      - ../../../services/hyperlane-monitor/config/config.json:/app/config.json:ro
+    ports:
+      - "${MONITOR_METRICS_PORT:-9095}:9091"
+    networks:
+      - spectra-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bridge:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9091/metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  spectra-network:
+    driver: bridge

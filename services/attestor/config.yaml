@@ -1,0 +1,56 @@
+# Attestor Service Configuration for Lumina (Lasernet)
+
+# RPC Configuration
+rpc:
+  url: https://testnet-rpc.diadata.org
+  urls:
+    - https://testnet-rpc.diadata.org
+  registry_url: https://testnet-rpc.diadata.org
+
+# Oracle Configuration
+oracle:
+  address: "0xFA3c5e662aB985317b90914305c263b6Ab02452d"
+
+# Registry Configuration (deployed on Lasernet)
+registry:
+  address: "0x30e2876ab98f62b7fFFBC5CC5B1c876BCd4B9a7b"
+
+# Attestor Configuration
+attestor:
+  # private_key should be set via ATTESTOR_ATTESTOR_PRIVATE_KEY environment variable
+  symbols:
+    - BTC/USD
+    - ETH/USD
+  polling_time: 5s
+  batch_mode: false
+  mode: prime  # Options: prime, replica
+  replica_backup_delay: 300  # Seconds to wait before replica submits 
+  intent_type: OracleUpdate
+  intent_version: "1.0"
+  guardian:
+    default:
+      max_deviation_bips: 500      # 5% deviation tolerance
+      max_timestamp_age: 3600      # 1 hour
+      min_guardian_matches: 1      # at least 1 guardian match
+    symbols:
+      BTC/USD:
+        max_deviation_bips: 300    # 3% deviation for BTC
+        max_timestamp_age: 1800    # 30 minutes
+        min_guardian_matches: 1
+      ETH/USD:
+        max_deviation_bips: 400    # 4% deviation for ETH
+        max_timestamp_age: 2400    # 40 minutes
+        min_guardian_matches: 1
+      
+
+# Logging Configuration
+logging:
+  level: info
+
+# Metrics Configuration
+metrics:
+  port: 8080
+
+# API Server Configuration
+api:
+  port: 8081

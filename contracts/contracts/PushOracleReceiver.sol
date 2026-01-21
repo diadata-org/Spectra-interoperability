@@ -100,7 +100,7 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
      */
     function setInterchainSecurityModule(
         address _ism
-    ) external onlyOwner validateAddress(_ism) {
+    ) external override onlyOwner validateAddress(_ism) {
         emit InterchainSecurityModuleUpdated(
             address(interchainSecurityModule),
             _ism
@@ -113,7 +113,7 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
      */
     function setPaymentHook(
         address payable _paymentHook
-    ) external onlyOwner validateAddress(_paymentHook) {
+    ) external override onlyOwner validateAddress(_paymentHook) {
         emit PaymentHookUpdated(paymentHook, _paymentHook);
         paymentHook = _paymentHook;
     }
@@ -123,7 +123,7 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
      */
     function setTrustedMailBox(
         address _mailbox
-    ) external onlyOwner validateAddress(_mailbox) {
+    ) external override onlyOwner validateAddress(_mailbox) {
         emit TrustedMailBoxUpdated(trustedMailBox, _mailbox);
         trustedMailBox = _mailbox;
     }
@@ -133,7 +133,7 @@ contract PushOracleReceiver is IPushOracleReceiver, Ownable {
      */
     function retrieveLostTokens(
         address receiver
-    ) external onlyOwner validateAddress(receiver) {
+    ) external override onlyOwner validateAddress(receiver) {
         uint256 balance = address(this).balance;
         if (balance == 0) revert NoBalanceToWithdraw();
 

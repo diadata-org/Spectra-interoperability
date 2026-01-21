@@ -1,0 +1,51 @@
+name: Attestor CI
+
+on:
+  push:
+    paths:
+      - 'services/attestor/**'
+      - '.github/workflows/attestor-ci.yml'
+  pull_request:
+    paths:
+      - 'services/attestor/**'
+      - '.github/workflows/attestor-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  attestor:
+    name: Lint / Vet / Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: services/attestor
+    env:
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: services/attestor/go.mod
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Lint (gofmt)
+        run: |
+          fmt_out=$(gofmt -l .)
+          if [[ -n "$fmt_out" ]]; then
+            echo "The following files need gofmt:" && echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
