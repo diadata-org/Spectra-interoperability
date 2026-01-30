@@ -41,7 +41,6 @@ func (m *OnChainMonitor) IsEnabled() bool {
 	return m.enabled
 }
 
-// RouterMonitor tracks one router and its destinations
 type RouterMonitor struct {
 	RouterID     string
 	destinations map[string]*DestinationMonitor
@@ -74,7 +73,7 @@ func DefaultMonitorConfig() MonitorConfig {
 	return MonitorConfig{
 		Enabled:              false,
 		TimeThresholdOffset:  1 * time.Minute,
-		PriceDeviationOffset: big.NewFloat(0.50), // 10%
+		PriceDeviationOffset: big.NewFloat(0.50), // 50%
 		CheckInterval:        10 * time.Second,
 	}
 }
@@ -117,11 +116,12 @@ func NewOnChainMonitor(
 				continue
 			}
 
+			contractAddress := common.HexToAddress(dest.Contract)
 			for _, symbol := range symbols {
 				key := utils.GenerateDestinationKey(dest.ChainID, dest.Contract, symbol)
 				routerMonitor.destinations[key] = &DestinationMonitor{
 					RouterDestination: dest,
-					ContractAddress:   common.HexToAddress(dest.Contract),
+					ContractAddress:   contractAddress,
 					Client:            ethClient,
 				}
 			}

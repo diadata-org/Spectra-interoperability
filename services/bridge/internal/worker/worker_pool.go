@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
@@ -27,6 +28,7 @@ type WorkerPool struct {
 	mu               sync.RWMutex
 	running          bool
 	metricsCollector *metrics.Collector
+	activeWorkers    int32 // Track number of currently active workers
 }
 
 // Worker represents a single worker in the pool
@@ -36,6 +38,7 @@ type Worker struct {
 	quit             chan struct{}
 	wg               *sync.WaitGroup
 	metricsCollector *metrics.Collector
+	pool             *WorkerPool // Reference to parent pool for metrics
 }
 
 // NewWorkerPool creates a new worker pool
@@ -84,12 +87,16 @@ func (wp *WorkerPool) Start(ctx context.Context) {
 			quit:             make(chan struct{}),
 			wg:               &wp.wg,
 			metricsCollector: wp.metricsCollector,
+			pool:             wp,
 		}
 		wp.workers[i] = worker
 
 		wp.wg.Add(1)
 		go worker.start(ctx)
 	}
+
+	// Start health monitor goroutine
+	go wp.healthMonitor(ctx)
 
 	logger.Infof("Started worker pool with %d workers", wp.maxWorkers)
 }
@@ -128,6 +135,46 @@ func (wp *WorkerPool) Stop(ctx context.Context) {
 	}
 
 	wp.running = false
+}
+
+// healthMonitor periodically monitors worker pool health and reports metrics
+func (wp *WorkerPool) healthMonitor(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-wp.shutdownChan:
+			return
+		case <-ticker.C:
+			activeCount := atomic.LoadInt32(&wp.activeWorkers)
+			queueSize := len(wp.taskQueue)
+			queueCap := cap(wp.taskQueue)
+
+			// Report metrics if collector is available
+			if wp.metricsCollector != nil {
+				wp.metricsCollector.SetActiveWorkers(activeCount)
+				wp.metricsCollector.SetTaskQueueSize(int32(queueSize))
+			}
+
+			// Log warning if queue is getting full (>80% capacity)
+			if queueCap > 0 && float64(queueSize)/float64(queueCap) > 0.8 {
+				logger.Warnf("Worker pool queue nearing capacity: %d/%d (%.1f%%), active workers: %d/%d",
+					queueSize, queueCap, float64(queueSize)/float64(queueCap)*100, activeCount, wp.maxWorkers)
+			}
+
+			// Log warning if all workers are busy and queue has items
+			if int(activeCount) >= wp.maxWorkers && queueSize > 0 {
+				logger.Warnf("All %d workers busy with %d tasks queued - consider increasing worker count",
+					wp.maxWorkers, queueSize)
+			}
+
+			logger.Debugf("Worker pool health: active=%d/%d, queue=%d/%d",
+				activeCount, wp.maxWorkers, queueSize, queueCap)
+		}
+	}
 }
 
 // Submit submits a task to the worker pool
@@ -191,6 +238,10 @@ func (w *Worker) start(ctx context.Context) {
 
 // processTask processes a single task
 func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
+	// Track active workers
+	atomic.AddInt32(&w.pool.activeWorkers, 1)
+	defer atomic.AddInt32(&w.pool.activeWorkers, -1)
+
 	startTime := time.Now()
 
 	logger.Debugf("Worker %d processing task %s", w.id, task.ID)

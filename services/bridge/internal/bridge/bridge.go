@@ -33,7 +33,6 @@ type Bridge struct {
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
-	eventChan    chan *bridgetypes.EventData
 	errorChan    chan error
 	shutdownChan chan struct{}
 
@@ -55,11 +54,8 @@ type Bridge struct {
 	// On-chain monitor for replica failover
 	onChainMonitor *leader.OnChainMonitor
 
-	// Block scanner
-	blockScanner BlockScanner
-
-	// Event processor
-	eventProcessor *processor.GenericEventProcessor
+	// Event source
+	eventSource *EventSource
 
 	// Metrics tracking
 	metricsManager *MetricsManager
@@ -120,9 +116,35 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 
 	destClients := make(map[int64]*WriteClient)
-	for _, chainConfig := range cfgService.GetEnabledChains() {
+	enabledChains := cfgService.GetEnabledChains()
+
+	if len(enabledChains) == 0 {
+		return nil, fmt.Errorf("no enabled chains found in configuration - check that chains have 'enabled: true'")
+	}
+
+	logger.Infof("Found %d enabled chain(s), attempting to create destination clients...", len(enabledChains))
+
+	var failedChains []string
+	for _, chainConfig := range enabledChains {
 		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
 		if len(contracts) == 0 {
+			logger.Warnf("Chain %d (%s): no enabled contracts found - skipping", chainConfig.ChainID, chainConfig.Name)
+			failedChains = append(failedChains, fmt.Sprintf("%d (%s): no enabled contracts", chainConfig.ChainID, chainConfig.Name))
+			continue
+		}
+
+		// Check if there's at least one enabled
+		hasReceiverContract := false
+		for _, contract := range contracts {
+			if (contract.Type == "receiver" || contract.Type == "pushoracle") && contract.Enabled {
+				hasReceiverContract = true
+				break
+			}
+		}
+		if !hasReceiverContract {
+			logger.Warnf("Chain %d (%s): no enabled receiver/pushoracle contracts found (found %d contracts but none are receiver/pushoracle type)",
+				chainConfig.ChainID, chainConfig.Name, len(contracts))
+			failedChains = append(failedChains, fmt.Sprintf("%d (%s): no enabled receiver/pushoracle contract", chainConfig.ChainID, chainConfig.Name))
 			continue
 		}
 
@@ -134,14 +156,24 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 
 		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
 		if err != nil {
-			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
+			logger.Errorf("Failed to create destination client for chain %d (%s): %v", chainConfig.ChainID, chainConfig.Name, err)
+			failedChains = append(failedChains, fmt.Sprintf("%d (%s): %v", chainConfig.ChainID, chainConfig.Name, err))
 			continue
 		}
 		destClients[chainConfig.ChainID] = destClient
+		logger.Infof("Successfully created destination client for chain %d (%s)", chainConfig.ChainID, chainConfig.Name)
 	}
 
 	if len(destClients) == 0 {
-		return nil, fmt.Errorf("no destination clients available")
+		errorMsg := "no destination clients available. Reasons:\n"
+		if len(failedChains) > 0 {
+			for _, reason := range failedChains {
+				errorMsg += fmt.Sprintf("  - Chain %s\n", reason)
+			}
+		} else {
+			errorMsg += "  - No enabled chains found in configuration\n"
+		}
+		return nil, fmt.Errorf(errorMsg)
 	}
 
 	workerPool := worker.NewWorkerPool(
@@ -171,7 +203,6 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		readClient:    readClient,
 		writeClients:  destClients,
 		updateChan:    make(chan *bridgetypes.UpdateRequest, 1000),
-		eventChan:     eventChan,
 		errorChan:     errorChan,
 		shutdownChan:  make(chan struct{}),
 		stats: &bridgetypes.BridgeStats{
@@ -185,13 +216,16 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		queueManager:       queueManager,
 	}
 
+	var scanner BlockScanner
+	var eventProcessor *processor.GenericEventProcessor
+
 	// Create block scanner if enabled
 	if cfgService.GetInfrastructure().BlockScanner.Enabled {
-		scanner, err := CreateBlockScanner(cfgService, readClient, db, eventChan, errorChan)
+		s, err := CreateBlockScanner(cfgService, readClient, db, eventChan, errorChan)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create block scanner: %w", err)
 		}
-		bridge.blockScanner = scanner
+		scanner = s
 	}
 
 	// Create generic event processor
@@ -202,7 +236,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		}
 	}
 
-	eventProcessor, err := processor.NewGenericEventProcessor(
+	ep, err := processor.NewGenericEventProcessor(
 		&cfgService.GetInfrastructure().EventProcessor,
 		cfgService.GetEventDefinitions(),
 		cfgService,
@@ -219,7 +253,10 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	if err != nil {
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
 	}
-	bridge.eventProcessor = eventProcessor
+	eventProcessor = ep
+
+	// Wrap scanner and processor in EventSource
+	bridge.eventSource = NewEventSource(scanner, eventProcessor, eventChan, bridge.updateChan, errorChan)
 
 	// Initialize chain stats
 	bridge.initializeChainStats()
@@ -340,28 +377,18 @@ func (b *Bridge) Start(ctx context.Context) error {
 	// Start worker pool
 	b.workerPool.Start(ctx)
 
-	// Start block scanner if enabled
-	if b.blockScanner != nil {
-		if err := b.blockScanner.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start block scanner: %w", err)
+	// Start event source (scanner + processor)
+	if b.eventSource != nil {
+		if err := b.eventSource.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start event source: %w", err)
 		}
-		logger.Info("Block scanner started")
-
-		// Start generic event processor
-		if b.eventProcessor != nil {
-			if err := b.eventProcessor.Start(ctx); err != nil {
-				return fmt.Errorf("failed to start event processor: %w", err)
-			}
-			logger.Info("Generic event processor started")
-		}
-
-		// Start error handler
-		b.wg.Add(1)
-		go func() {
-			defer b.wg.Done()
-			b.handleErrors(ctx)
-		}()
 	}
+
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		b.handleErrors(ctx)
+	}()
 
 	// Start update processor
 	b.wg.Add(1)
@@ -432,10 +459,10 @@ func (b *Bridge) Stop(ctx context.Context) error {
 		b.onChainMonitor.Stop()
 	}
 
-	// Stop block scanner if running
-	if b.blockScanner != nil {
-		if err := b.blockScanner.Stop(); err != nil {
-			logger.Errorf("Failed to stop block scanner: %v", err)
+	// Stop event source (scanner + processor)
+	if b.eventSource != nil {
+		if err := b.eventSource.Stop(ctx); err != nil {
+			logger.Errorf("Error stopping event source: %v", err)
 		}
 	}
 
@@ -471,7 +498,7 @@ func (b *Bridge) reportUpdateChanMetrics(ctx context.Context) {
 
 	// Report initial size immediately (even if 0, to ensure metric is exposed)
 	if b.metricsManager != nil {
-		size := len(b.updateChan)
+		size := b.eventSource.GetQueueSize()
 		b.metricsManager.ReportUpdateQueueSize(size)
 		logger.Debugf("Initial update channel size: %d", size)
 	} else {
@@ -489,7 +516,7 @@ func (b *Bridge) reportUpdateChanMetrics(ctx context.Context) {
 		case <-ticker.C:
 			// Periodically report updateChan size (more frequently to catch items)
 			if b.metricsManager != nil {
-				size := len(b.updateChan)
+				size := b.eventSource.GetQueueSize()
 				b.metricsManager.ReportUpdateQueueSize(size)
 				// Log when queue has items
 				if size > 0 {
@@ -510,12 +537,12 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 			return
 		case <-b.shutdownChan:
 			return
-		case updateReq := <-b.updateChan:
+		case updateReq := <-b.eventSource.GetUpdateChan():
 			// Report metric: when we successfully dequeue, we know there was at least 1 item
 			// Report current size + 1 to show the size BEFORE we dequeued this item
 			// This gives a more accurate picture of queue depth
 			if b.metricsManager != nil {
-				queueSize := len(b.updateChan)
+				queueSize := b.eventSource.GetQueueSize()
 				b.metricsManager.ReportUpdateQueueSize(queueSize)
 			}
 
@@ -564,11 +591,15 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 					continue
 				}
 
-				updateReq.TriggeredByMonitoring = true
-				logger.Infof("Processing update: monitoring check passed for chain=%d contract=%s symbol=%s",
-					updateReq.DestinationChain.ChainID,
-					updateReq.Contract.Address,
-					symbol)
+				// Only set TriggeredByMonitoring if replica failover is actually enabled
+				// (not just monitoring-only mode)
+				if b.onChainMonitor.IsEnabled() {
+					updateReq.TriggeredByMonitoring = true
+					logger.Infof("Processing update: monitoring check passed for chain=%d contract=%s symbol=%s",
+						updateReq.DestinationChain.ChainID,
+						updateReq.Contract.Address,
+						symbol)
+				}
 			}
 
 			// Create task ID based on available data
@@ -600,8 +631,6 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 		}
 	}()
 
-	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker())
+	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker(), b.onChainMonitor)
 	return handler.Process(ctx, task.Request)
 }
-
-// callRouterMethod calls a contract method using router configuration
