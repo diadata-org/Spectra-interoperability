@@ -2,8 +2,8 @@
 set -euo pipefail
 
 #######################################
-# PushOracleReceiverV2 Monitor
-# Monitors oracle updates and logs:
+# PushOracleReceiverV2 Multi-Chain Monitor
+# Monitors ALL chains and ALL receivers:
 # - Received updates
 # - Expected updates (based on deviation)
 # - Missed updates
@@ -15,10 +15,8 @@ LOG_DIR="${ROOT_DIR}/.local-stack/logs"
 LOG_FILE="${LOG_DIR}/receiver-monitor.log"
 STATE_FILE="${LOG_DIR}/receiver-state.json"
 METRICS_FILE="${LOG_DIR}/receiver-metrics.json"
-
-RPC_URL="${RPC_URL:-http://localhost:8545}"
-RECEIVER_ADDR_FILE="${ROOT_DIR}/.local-stack/contracts/push_oracle_receiver_v2.addr"
-DIA_ORACLE_ADDR_FILE="${ROOT_DIR}/.local-stack/contracts/dia_oracle_v2.addr"
+MULTICHAIN_DIR="${ROOT_DIR}/.local-stack/multichain"
+CONTRACTS_DIR="${ROOT_DIR}/.local-stack/contracts"
 
 # Monitoring parameters
 POLL_INTERVAL="${POLL_INTERVAL:-5}"           # Seconds between checks
@@ -34,27 +32,73 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Store discovered receivers: "chain_id:receiver_num:address"
+RECEIVERS=()
+DIA_ORACLE_ADDR=""
+SOURCE_CHAIN_ID=""
+
+# Get port for a chain ID
+get_chain_port() {
+    local chain_id="$1"
+    # Ports start at 8545 for chain 31337
+    echo $((8545 + chain_id - 31337))
+}
+
 #######################################
 # Initialization
 #######################################
 
+discover_receivers() {
+    RECEIVERS=()
+    
+    # Check for multichain setup first
+    if [ -d "$MULTICHAIN_DIR" ]; then
+        for chain_dir in "$MULTICHAIN_DIR"/*/; do
+            if [ -d "$chain_dir" ]; then
+                local chain_id=$(basename "$chain_dir")
+                
+                # Find DIA Oracle on source chain (31337)
+                if [ "$chain_id" = "31337" ] && [ -f "${chain_dir}/dia_oracle_v2.addr" ]; then
+                    DIA_ORACLE_ADDR=$(cat "${chain_dir}/dia_oracle_v2.addr")
+                    SOURCE_CHAIN_ID="31337"
+                fi
+                
+                # Find all receivers on this chain
+                shopt -s nullglob
+                for receiver_file in "${chain_dir}"/push_oracle_receiver_v2_*.addr; do
+                    if [ -f "$receiver_file" ]; then
+                        local receiver_num=$(echo "$receiver_file" | sed 's/.*push_oracle_receiver_v2_\([0-9]*\)\.addr/\1/')
+                        local receiver_addr=$(cat "$receiver_file")
+                        RECEIVERS+=("${chain_id}:${receiver_num}:${receiver_addr}")
+                    fi
+                done
+                shopt -u nullglob
+            fi
+        done
+    fi
+    
+    # Fallback to single-chain setup
+    if [ ${#RECEIVERS[@]} -eq 0 ]; then
+        if [ -f "${CONTRACTS_DIR}/push_oracle_receiver_v2.addr" ]; then
+            local receiver_addr=$(cat "${CONTRACTS_DIR}/push_oracle_receiver_v2.addr")
+            RECEIVERS+=("31337:1:${receiver_addr}")
+            SOURCE_CHAIN_ID="31337"
+        fi
+        if [ -f "${CONTRACTS_DIR}/dia_oracle_v2.addr" ]; then
+            DIA_ORACLE_ADDR=$(cat "${CONTRACTS_DIR}/dia_oracle_v2.addr")
+        fi
+    fi
+}
+
 init() {
     mkdir -p "$LOG_DIR"
     
-    # Check if receiver address exists
-    if [ ! -f "$RECEIVER_ADDR_FILE" ]; then
-        echo "Error: Receiver address file not found: $RECEIVER_ADDR_FILE"
-        echo "Run ./scripts/start-local.sh first"
+    discover_receivers
+    
+    if [ ${#RECEIVERS[@]} -eq 0 ]; then
+        echo "Error: No receivers found"
+        echo "Run ./scripts/start-local.sh or ./scripts/start-multichain.sh first"
         exit 1
-    fi
-    
-    RECEIVER_ADDR=$(cat "$RECEIVER_ADDR_FILE")
-    
-    # Check if DIA oracle address exists
-    if [ -f "$DIA_ORACLE_ADDR_FILE" ]; then
-        DIA_ORACLE_ADDR=$(cat "$DIA_ORACLE_ADDR_FILE")
-    else
-        DIA_ORACLE_ADDR=""
     fi
     
     # Initialize state file if not exists
@@ -69,17 +113,28 @@ init() {
     "total_updates": 0,
     "total_deviations_detected": 0,
     "total_missed_updates": 0,
+    "receivers": ${#RECEIVERS[@]},
     "symbols": {}
 }
 EOF
     
     log_info "Monitor initialized"
-    log_info "Receiver: $RECEIVER_ADDR"
-    log_info "DIA Oracle: ${DIA_ORACLE_ADDR:-N/A}"
+    log_info "Source Oracle: ${DIA_ORACLE_ADDR:-N/A} (Chain: ${SOURCE_CHAIN_ID:-N/A})"
+    log_info "Receivers discovered: ${#RECEIVERS[@]}"
+    for receiver in "${RECEIVERS[@]}"; do
+        IFS=':' read -r chain_id num addr <<< "$receiver"
+        log_info "  Chain $chain_id Receiver $num: $addr"
+    done
     log_info "Deviation threshold: ${DEVIATION_THRESHOLD}%"
     log_info "Time threshold: ${TIME_THRESHOLD}s"
     log_info "Poll interval: ${POLL_INTERVAL}s"
     log_info "Log file: $LOG_FILE"
+}
+
+get_rpc_url() {
+    local chain_id="$1"
+    local port=$(get_chain_port "$chain_id")
+    echo "http://localhost:$port"
 }
 
 #######################################
@@ -131,10 +186,13 @@ log_error() {
 #######################################
 
 # Get price from PushOracleReceiverV2 (returns "value timestamp" as integers)
+# Args: symbol rpc_url receiver_addr
 get_receiver_price() {
     local symbol="$1"
+    local rpc_url="$2"
+    local receiver_addr="$3"
     local result
-    result=$(cast call --rpc-url "$RPC_URL" "$RECEIVER_ADDR" \
+    result=$(cast call --rpc-url "$rpc_url" "$receiver_addr" \
         "getValue(string)(uint128,uint128)" "$symbol" 2>/dev/null || echo "0\n0")
     # Parse and normalize the output
     # Format is: "value [scientific]\ntimestamp [scientific]"
@@ -167,14 +225,16 @@ print(f'{val} {ts}')
 }
 
 # Get price from DIAOracleV2 (source oracle)
+# Uses source chain RPC
 get_source_price() {
     local symbol="$1"
-    if [ -z "$DIA_ORACLE_ADDR" ]; then
+    if [ -z "$DIA_ORACLE_ADDR" ] || [ -z "$SOURCE_CHAIN_ID" ]; then
         echo "0 0"
         return
     fi
+    local source_rpc=$(get_rpc_url "$SOURCE_CHAIN_ID")
     local result
-    result=$(cast call --rpc-url "$RPC_URL" "$DIA_ORACLE_ADDR" \
+    result=$(cast call --rpc-url "$source_rpc" "$DIA_ORACLE_ADDR" \
         "getValue(string)(uint128,uint128)" "$symbol" 2>/dev/null || echo "0\n0")
     # Parse and normalize the output
     python3 -c "
@@ -244,10 +304,13 @@ except:
 # State Management
 #######################################
 
-# Get previous state for a symbol
+# Get previous state for a receiver+symbol
+# Args: chain_id receiver_num symbol
 get_state() {
-    local symbol="$1"
-    local key=$(echo "$symbol" | tr '/' '_')
+    local chain_id="$1"
+    local receiver_num="$2"
+    local symbol="$3"
+    local key="${chain_id}_${receiver_num}_$(echo "$symbol" | tr '/' '_')"
     python3 -c "
 import json
 try:
@@ -260,15 +323,18 @@ except:
 " 2>/dev/null || echo "0 0 0 0 0"
 }
 
-# Save state for a symbol
+# Save state for a receiver+symbol
+# Args: chain_id receiver_num symbol value timestamp source_value source_timestamp [last_deviation_time]
 save_state() {
-    local symbol="$1"
-    local value="$2"
-    local timestamp="$3"
-    local source_value="$4"
-    local source_timestamp="$5"
-    local last_deviation_time="${6:-0}"
-    local key=$(echo "$symbol" | tr '/' '_')
+    local chain_id="$1"
+    local receiver_num="$2"
+    local symbol="$3"
+    local value="$4"
+    local timestamp="$5"
+    local source_value="$6"
+    local source_timestamp="$7"
+    local last_deviation_time="${8:-0}"
+    local key="${chain_id}_${receiver_num}_$(echo "$symbol" | tr '/' '_')"
     
     python3 -c "
 import json
@@ -349,12 +415,20 @@ with open('$METRICS_FILE', 'w') as f:
 # Monitoring Logic
 #######################################
 
-check_symbol() {
-    local symbol="$1"
+# Check a single receiver for a symbol
+# Args: chain_id receiver_num receiver_addr symbol
+check_receiver_symbol() {
+    local chain_id="$1"
+    local receiver_num="$2"
+    local receiver_addr="$3"
+    local symbol="$4"
     local now=$(date +%s)
     
+    local rpc_url=$(get_rpc_url "$chain_id")
+    local short_addr="${receiver_addr:0:6}...${receiver_addr: -4}"
+    
     # Get current receiver price
-    local receiver_result=$(get_receiver_price "$symbol")
+    local receiver_result=$(get_receiver_price "$symbol" "$rpc_url" "$receiver_addr")
     local receiver_value=$(echo "$receiver_result" | awk '{print $1}')
     local receiver_timestamp=$(echo "$receiver_result" | awk '{print $2}')
     
@@ -364,7 +438,7 @@ check_symbol() {
     local source_timestamp=$(echo "$source_result" | awk '{print $2}')
     
     # Get previous state
-    local prev_state=$(get_state "$symbol")
+    local prev_state=$(get_state "$chain_id" "$receiver_num" "$symbol")
     local prev_value=$(echo "$prev_state" | awk '{print $1}')
     local prev_timestamp=$(echo "$prev_state" | awk '{print $2}')
     local prev_source_value=$(echo "$prev_state" | awk '{print $3}')
@@ -373,13 +447,12 @@ check_symbol() {
     # Convert to human readable
     local receiver_price=$(wei_to_price "$receiver_value")
     local source_price=$(wei_to_price "$source_value")
-    local prev_receiver_price=$(wei_to_price "$prev_value")
     
-    # Check for new update (use Python for safe comparison)
+    # Check for new update
     local is_new_update=$(python3 -c "print('yes' if '$receiver_timestamp' != '$prev_timestamp' and '$receiver_timestamp' != '0' else 'no')" 2>/dev/null || echo "no")
     if [ "$is_new_update" = "yes" ]; then
-        log_update "$symbol: New update received! Price: \$$receiver_price (ts: $receiver_timestamp)"
-        update_metrics "update" "$symbol" "$receiver_price"
+        log_update "[Chain:$chain_id] [${short_addr}] $symbol: New update received! Price: \$$receiver_price (ts: $receiver_timestamp)"
+        update_metrics "update" "${chain_id}_${receiver_num}_${symbol}" "$receiver_price"
     fi
     
     # Check deviation between source and receiver
@@ -389,10 +462,10 @@ check_symbol() {
         local deviation_exceeded=$(python3 -c "print('yes' if float('$deviation') >= float('$DEVIATION_THRESHOLD') else 'no')" 2>/dev/null || echo "no")
         
         if [ "$deviation_exceeded" = "yes" ]; then
-            log_deviation "$symbol: Deviation detected! Source: \$$source_price, Receiver: \$$receiver_price, Deviation: ${deviation}%"
-            update_metrics "deviation" "$symbol"
+            log_deviation "[Chain:$chain_id] [${short_addr}] $symbol: Deviation detected! Source: \$$source_price, Receiver: \$$receiver_price, Deviation: ${deviation}%"
+            update_metrics "deviation" "${chain_id}_${receiver_num}_${symbol}"
             
-            # Check if update is overdue (use Python for arithmetic)
+            # Check if update is overdue
             local time_check=$(python3 -c "
 try:
     now = int('$now')
@@ -409,13 +482,13 @@ except:
             
             if [[ "$time_check" == overdue* ]]; then
                 local time_since=$(echo "$time_check" | awk '{print $2}')
-                log_missed "$symbol: UPDATE EXPECTED! Deviation: ${deviation}% > ${DEVIATION_THRESHOLD}%, Time since update: ${time_since}s > ${TIME_THRESHOLD}s"
-                update_metrics "missed" "$symbol"
+                log_missed "[Chain:$chain_id] [${short_addr}] $symbol: UPDATE EXPECTED! Deviation: ${deviation}% > ${DEVIATION_THRESHOLD}%, Time since update: ${time_since}s > ${TIME_THRESHOLD}s"
+                update_metrics "missed" "${chain_id}_${receiver_num}_${symbol}"
             fi
         fi
     fi
     
-    # Check for stale data (use Python for arithmetic)
+    # Check for stale data
     local stale_check=$(python3 -c "
 try:
     ts = int('$receiver_timestamp')
@@ -435,47 +508,85 @@ except:
     
     if [[ "$stale_check" == stale* ]]; then
         local age=$(echo "$stale_check" | awk '{print $2}')
-        log_warning "$symbol: Data is stale! Last update: ${age}s ago"
+        log_warning "[Chain:$chain_id] [${short_addr}] $symbol: Data is stale! Last update: ${age}s ago"
     fi
     
     # Save current state
-    save_state "$symbol" "$receiver_value" "$receiver_timestamp" "$source_value" "$source_timestamp" "$now"
+    save_state "$chain_id" "$receiver_num" "$symbol" "$receiver_value" "$receiver_timestamp" "$source_value" "$source_timestamp" "$now"
+}
+
+# Check all receivers for all symbols
+check_all_receivers() {
+    for receiver in "${RECEIVERS[@]}"; do
+        IFS=':' read -r chain_id receiver_num receiver_addr <<< "$receiver"
+        for symbol in "${SYMBOLS[@]}"; do
+            check_receiver_symbol "$chain_id" "$receiver_num" "$receiver_addr" "$symbol"
+        done
+    done
 }
 
 print_status() {
     echo ""
-    echo "═══════════════════════════════════════════════════════════════"
-    echo "  PushOracleReceiverV2 Monitor Status - $(timestamp)"
-    echo "═══════════════════════════════════════════════════════════════"
+    echo "══════════════════════════════════════════════════════════════════════════════════════"
+    echo "  Multi-Chain PushOracleReceiverV2 Monitor - $(timestamp)"
+    echo "  Source Oracle: ${DIA_ORACLE_ADDR:-N/A} (Chain: ${SOURCE_CHAIN_ID:-N/A})"
+    echo "  Receivers: ${#RECEIVERS[@]} | Symbols: ${SYMBOLS[*]}"
+    echo "══════════════════════════════════════════════════════════════════════════════════════"
     
-    for symbol in "${SYMBOLS[@]}"; do
-        local receiver_result=$(get_receiver_price "$symbol")
-        local receiver_value=$(echo "$receiver_result" | awk '{print $1}')
-        local receiver_timestamp=$(echo "$receiver_result" | awk '{print $2}')
-        local receiver_price=$(wei_to_price "$receiver_value")
+    local now=$(date +%s)
+    
+    # Get and display source prices
+    echo ""
+    echo "  Source Prices:"
+    local eth_source_result=$(get_source_price "ETH/USD")
+    local eth_source_value=$(echo "$eth_source_result" | awk '{print $1}')
+    local eth_source_price=$(wei_to_price "$eth_source_value")
+    echo "    ETH/USD: \$$eth_source_price"
+    
+    local btc_source_result=$(get_source_price "BTC/USD")
+    local btc_source_value=$(echo "$btc_source_result" | awk '{print $1}')
+    local btc_source_price=$(wei_to_price "$btc_source_value")
+    echo "    BTC/USD: \$$btc_source_price"
+    
+    echo ""
+    printf "  %-8s | %-10s | %-42s | %-10s | %-12s | %-10s | %-8s\n" \
+        "Chain" "Receiver" "Contract" "Symbol" "Price" "Deviation" "Age"
+    echo "  ---------|------------|--------------------------------------------|-----------.|--------------|------------|--------"
+    
+    for receiver in "${RECEIVERS[@]}"; do
+        IFS=':' read -r chain_id receiver_num receiver_addr <<< "$receiver"
+        local rpc_url=$(get_rpc_url "$chain_id")
         
-        local source_result=$(get_source_price "$symbol")
-        local source_value=$(echo "$source_result" | awk '{print $1}')
-        local source_price=$(wei_to_price "$source_value")
-        
-        local now=$(date +%s)
-        
-        # Calculate age using Python
-        local age=$(python3 -c "
+        for symbol in "${SYMBOLS[@]}"; do
+            local receiver_result=$(get_receiver_price "$symbol" "$rpc_url" "$receiver_addr")
+            local receiver_value=$(echo "$receiver_result" | awk '{print $1}')
+            local receiver_timestamp=$(echo "$receiver_result" | awk '{print $2}')
+            local receiver_price=$(wei_to_price "$receiver_value")
+            
+            # Get source value for this symbol
+            local source_value
+            if [ "$symbol" = "ETH/USD" ]; then
+                source_value="$eth_source_value"
+            else
+                source_value="$btc_source_value"
+            fi
+            
+            # Calculate age
+            local age=$(python3 -c "
 try:
     ts = int('$receiver_timestamp')
     if ts == 0:
-        print('N/A (no data)')
+        print('N/A')
     else:
         now = int('$now')
         age = now - ts
-        print(f'{age}s ago')
+        print(f'{age}s')
 except:
     print('N/A')
 " 2>/dev/null || echo "N/A")
-        
-        # Calculate deviation
-        local deviation=$(python3 -c "
+            
+            # Calculate deviation
+            local deviation=$(python3 -c "
 try:
     src = int('$source_value')
     rcv = int('$receiver_value')
@@ -483,21 +594,31 @@ try:
         print('N/A')
     else:
         dev = abs(src - rcv) / rcv * 100
-        print(f'{dev:.4f}%')
+        print(f'{dev:.2f}%')
 except:
     print('N/A')
 " 2>/dev/null || echo "N/A")
-        
-        echo ""
-        echo "  $symbol:"
-        echo "    Receiver Price:  \$$receiver_price"
-        echo "    Source Price:    \$$source_price"
-        echo "    Deviation:       $deviation"
-        echo "    Last Update:     $age"
+            
+            # Color code based on status
+            local status_color="$NC"
+            if [[ "$deviation" != "N/A" ]]; then
+                local dev_num=$(echo "$deviation" | tr -d '%')
+                local is_high=$(python3 -c "print('yes' if float('$dev_num') >= float('$DEVIATION_THRESHOLD') else 'no')" 2>/dev/null || echo "no")
+                if [ "$is_high" = "yes" ]; then
+                    status_color="$YELLOW"
+                fi
+            fi
+            if [[ "$age" == "N/A" ]] || [[ "$receiver_price" == "0.00" ]]; then
+                status_color="$RED"
+            fi
+            
+            printf "  ${status_color}%-8s${NC} | ${status_color}%-10s${NC} | ${status_color}%-42s${NC} | ${status_color}%-10s${NC} | ${status_color}\$%-11s${NC} | ${status_color}%-10s${NC} | ${status_color}%-8s${NC}\n" \
+                "$chain_id" "#$receiver_num" "$receiver_addr" "$symbol" "$receiver_price" "$deviation" "$age"
+        done
     done
     
     echo ""
-    echo "═══════════════════════════════════════════════════════════════"
+    echo "══════════════════════════════════════════════════════════════════════════════════════"
     echo ""
 }
 
@@ -512,15 +633,15 @@ monitor_loop() {
     print_status
     
     while true; do
-        for symbol in "${SYMBOLS[@]}"; do
-            check_symbol "$symbol"
-        done
+        check_all_receivers
         sleep "$POLL_INTERVAL"
     done
 }
 
 show_help() {
-    echo "PushOracleReceiverV2 Monitor"
+    echo "Multi-Chain PushOracleReceiverV2 Monitor"
+    echo ""
+    echo "Monitors ALL chains and ALL receivers from the multichain deployment."
     echo ""
     echo "Usage: $0 [command]"
     echo ""
@@ -532,7 +653,6 @@ show_help() {
     echo "  help      Show this help"
     echo ""
     echo "Environment Variables:"
-    echo "  RPC_URL              RPC endpoint (default: http://localhost:8545)"
     echo "  POLL_INTERVAL        Seconds between checks (default: 5)"
     echo "  DEVIATION_THRESHOLD  Deviation % to trigger alert (default: 0.5)"
     echo "  TIME_THRESHOLD       Seconds before update expected (default: 120)"
