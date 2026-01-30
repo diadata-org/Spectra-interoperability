@@ -31,6 +31,32 @@ func ParseAttestorMode(s string) (AttestorMode, error) {
 	return mode, nil
 }
 
+type OracleClientType string
+
+const (
+	OracleClientTypeGuarded OracleClientType = "guarded"
+	OracleClientTypeDIAV2   OracleClientType = "dia_v2"
+)
+
+// String returns the string representation of the oracle client type
+func (t OracleClientType) String() string {
+	return string(t)
+}
+
+// IsValid checks if the oracle client type is valid
+func (t OracleClientType) IsValid() bool {
+	return t == OracleClientTypeGuarded || t == OracleClientTypeDIAV2
+}
+
+// ParseOracleClientType parses a string into OracleClientType
+func ParseOracleClientType(s string) (OracleClientType, error) {
+	clientType := OracleClientType(s)
+	if !clientType.IsValid() {
+		return "", fmt.Errorf("invalid oracle client type: %s (must be 'guarded' or 'dia_v2')", s)
+	}
+	return clientType, nil
+}
+
 // AttestorConfig holds attestor-specific configuration
 type AttestorConfig struct {
 	PrivateKey    string        `mapstructure:"private_key"`
@@ -43,7 +69,8 @@ type AttestorConfig struct {
 
 // OracleConfig holds oracle configuration
 type OracleConfig struct {
-	Address string `mapstructure:"address"`
+	Address   string          `mapstructure:"address"`
+	ClientType OracleClientType `mapstructure:"client_type"`
 }
 
 // RegistryConfig holds registry configuration

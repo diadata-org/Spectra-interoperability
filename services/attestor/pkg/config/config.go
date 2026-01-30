@@ -29,7 +29,8 @@ type Config struct {
 	} `mapstructure:"rpc"`
 
 	Oracle struct {
-		Address string `mapstructure:"address"`
+		Address    string          `mapstructure:"address"`
+		ClientType OracleClientType `mapstructure:"client_type"`
 	} `mapstructure:"oracle"`
 
 	Registry struct {
@@ -119,11 +120,16 @@ func Init(configPath string) (*Config, error) {
 	v.BindEnv("attestor.replica_backup_delay", "ATTESTOR_ATTESTOR_REPLICA_BACKUP_DELAY")
 	v.BindEnv("attestor.intent_type", "ATTESTOR_ATTESTOR_INTENT_TYPE")
 	v.BindEnv("attestor.intent_version", "ATTESTOR_ATTESTOR_INTENT_VERSION")
+	v.BindEnv("oracle.client_type", "ATTESTOR_ORACLE_CLIENT_TYPE")
+	v.BindEnv("attestor.guardian.default.max_deviation_bips", "ATTESTOR_GUARDIAN_MAX_DEVIATION_BIPS")
+	v.BindEnv("attestor.guardian.default.max_timestamp_age", "ATTESTOR_GUARDIAN_MAX_TIMESTAMP_AGE")
+	v.BindEnv("attestor.guardian.default.min_guardian_matches", "ATTESTOR_GUARDIAN_MIN_GUARDIAN_MATCHES")
 
 	// Set defaults
 	v.SetDefault("rpc.url", "https://testnet-rpc.diadata.org")
 	v.SetDefault("rpc.registry_url", "https://testnet-rpc.diadata.org")
 	v.SetDefault("oracle.address", "0x0087342f5f4c7AB23a37c045c3EF710749527c88")
+	v.SetDefault("oracle.client_type", "guarded")
 	v.SetDefault("attestor.symbols", []string{"BTC/USD", "ETH/USD"})
 	v.SetDefault("attestor.polling_time", "300ms")
 	v.SetDefault("attestor.batch_mode", true)
@@ -154,6 +160,17 @@ func Init(configPath string) (*Config, error) {
 
 	if !cfg.Attestor.Mode.IsValid() {
 		return nil, fmt.Errorf("invalid attestor mode: %s (must be 'prime' or 'replica')", cfg.Attestor.Mode)
+	}
+
+	// Parse and validate oracle client type
+	if cfg.Oracle.ClientType == "" {
+		cfg.Oracle.ClientType = OracleClientTypeGuarded // Default to guarded
+	} else {
+		clientType, err := ParseOracleClientType(string(cfg.Oracle.ClientType))
+		if err != nil {
+			return nil, fmt.Errorf("invalid oracle client type: %w", err)
+		}
+		cfg.Oracle.ClientType = clientType
 	}
 
 	// Normalize RPC URLs configuration: convert single URL to array if needed
@@ -196,6 +213,10 @@ func validateConfig(cfg *Config) error {
 
 	if cfg.Oracle.Address == "" {
 		return fmt.Errorf("oracle address not configured")
+	}
+
+	if !cfg.Oracle.ClientType.IsValid() {
+		return fmt.Errorf("invalid oracle client type: %s (must be 'guarded' or 'dia_v2')", cfg.Oracle.ClientType)
 	}
 
 	if cfg.Registry.Address == "" {
