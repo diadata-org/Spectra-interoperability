@@ -236,6 +236,24 @@ func (w *Worker) start(ctx context.Context) {
 	}
 }
 
+// WorkerPoolStats contains worker pool statistics
+type WorkerPoolStats struct {
+	ActiveTasks   int32
+	PendingTasks  int
+	MaxWorkers    int
+	TotalCapacity int
+}
+
+// GetStats returns current worker pool statistics
+func (wp *WorkerPool) GetStats() WorkerPoolStats {
+	return WorkerPoolStats{
+		ActiveTasks:   atomic.LoadInt32(&wp.activeWorkers),
+		PendingTasks:  len(wp.taskQueue),
+		MaxWorkers:    wp.maxWorkers,
+		TotalCapacity: cap(wp.taskQueue),
+	}
+}
+
 // processTask processes a single task
 func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	// Track active workers
@@ -244,7 +262,26 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 
 	startTime := time.Now()
 
-	logger.Debugf("Worker %d processing task %s", w.id, task.ID)
+	// Use Info level for task start to ensure visibility in production
+	symbol := "unknown"
+	chainID := int64(0)
+	routerID := "unknown"
+	if task.Request != nil {
+		routerID = task.Request.RouterID
+		if task.Request.Intent != nil && task.Request.Intent.Symbol != "" {
+			symbol = task.Request.Intent.Symbol
+		}
+		if task.Request.DestinationChain != nil {
+			chainID = task.Request.DestinationChain.ChainID
+		}
+	}
+	logger.Infof("[WORKER-%d] Starting task: %s, router=%s, symbol=%s, chain=%d, active_workers=%d",
+		w.id, task.ID, routerID, symbol, chainID, atomic.LoadInt32(&w.pool.activeWorkers))
+
+	// Create timeout context to prevent workers from blocking forever
+	// 6 minutes = enough time for receipt wait (5 min) + RPC calls
+	taskCtx, cancel := context.WithTimeout(ctx, 6*time.Minute)
+	defer cancel()
 
 	// Process the task with retry logic
 	var err error
@@ -257,8 +294,15 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 			time.Sleep(time.Second * time.Duration(retry))
 		}
 
-		err = task.Handler(ctx, task)
+		err = task.Handler(taskCtx, task)
 		if err == nil {
+			break
+		}
+
+		// Don't retry on context timeout/cancellation
+		if taskCtx.Err() != nil {
+			logger.Warnf("[WORKER-%d] Task %s context expired, not retrying: %v", w.id, task.ID, taskCtx.Err())
+			err = taskCtx.Err()
 			break
 		}
 
@@ -268,13 +312,15 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	duration := time.Since(startTime)
 
 	if err != nil {
-		logger.Errorf("Worker %d task %s failed after %d retries: %v", w.id, task.ID, maxRetries, err)
+		logger.Errorf("[WORKER-%d] Task FAILED after %d retries: %s, router=%s, symbol=%s, chain=%d, duration=%v, error=%v",
+			w.id, maxRetries, task.ID, routerID, symbol, chainID, duration, err)
 		if w.metricsCollector != nil {
 			w.metricsCollector.IncWorkerTasksFailed()
 			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())
 		}
 	} else {
-		logger.Debugf("Worker %d completed task %s in %v (retries: %d)", w.id, task.ID, duration, retryCount)
+		logger.Infof("[WORKER-%d] Task COMPLETED: %s, router=%s, symbol=%s, chain=%d, duration=%v, retries=%d",
+			w.id, task.ID, routerID, symbol, chainID, duration, retryCount)
 		if w.metricsCollector != nil {
 			w.metricsCollector.IncWorkerTasksCompleted()
 			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())

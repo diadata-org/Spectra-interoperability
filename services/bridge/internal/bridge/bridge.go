@@ -538,6 +538,20 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 		case <-b.shutdownChan:
 			return
 		case updateReq := <-b.eventSource.GetUpdateChan():
+			// Log that we received an update from the queue
+			symbol := "unknown"
+			if updateReq.Intent != nil && updateReq.Intent.Symbol != "" {
+				symbol = updateReq.Intent.Symbol
+			} else if updateReq.Event != nil {
+				symbol = updateReq.Event.EventName
+			}
+			chainID := int64(0)
+			if updateReq.DestinationChain != nil {
+				chainID = updateReq.DestinationChain.ChainID
+			}
+			logger.Infof("[UPDATE-DEQUEUE] Received update from queue: router=%s, symbol=%s, chain=%d, queue_remaining=%d",
+				updateReq.RouterID, symbol, chainID, b.eventSource.GetQueueSize())
+
 			// Report metric: when we successfully dequeue, we know there was at least 1 item
 			// Report current size + 1 to show the size BEFORE we dequeued this item
 			// This gives a more accurate picture of queue depth
@@ -613,6 +627,7 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 				taskID = fmt.Sprintf("Process Updates unknown-%d-%d", updateReq.DestinationChain.ChainID, time.Now().Unix())
 			}
 
+			logger.Infof("[UPDATE-SUBMIT] Submitting to worker pool: task=%s, router=%s", taskID, updateReq.RouterID)
 			b.workerPool.Submit(&worker.WorkerTask{
 				ID:      taskID,
 				Request: updateReq,

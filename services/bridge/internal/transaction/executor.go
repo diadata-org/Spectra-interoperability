@@ -125,7 +125,7 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 	// Refresh auth to get the newly allocated nonce
 	auth = e.receiverClient.GetAuth()
 	auth.GasLimit = req.GasLimit
-	auth.GasPrice = req.GasPrice
+
 	auth.Context = ctx
 
 	// Get the nonce that was allocated

@@ -52,12 +52,17 @@ func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router
 
 // Process handles the complete transaction lifecycle
 func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes.UpdateRequest) error {
+	startTime := time.Now()
+	logger.Infof("[TX-HANDLER] Starting transaction processing: router=%s, chain=%d, contract=%s",
+		updateReq.RouterID, updateReq.DestinationChain.ChainID, updateReq.Contract.Address)
+
 	txCtx, err := h.buildContext(ctx, updateReq)
 	if err != nil {
+		logger.Errorf("[TX-HANDLER] Failed to build context: router=%s, error=%v", updateReq.RouterID, err)
 		return err
 	}
 
-	logger.Infof("Processing update for %s on chain %d", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID)
+	logger.Infof("Processing update for %s on chain %d (elapsed=%v)", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, time.Since(startTime))
 
 	if err := h.validate(txCtx); err != nil {
 		return err
@@ -157,9 +162,16 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transaction) error {
 	h.recordSubmission(txCtx, tx.Hash().Hex())
 
+	logger.Infof("[TX-CONFIRM] Waiting for receipt: tx=%s, router=%s, symbol=%s, chain=%d",
+		tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol, txCtx.UpdateRequest.DestinationChain.ChainID)
+
+	confirmStartTime := time.Now()
 	receipt, err := h.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash())
 	if err != nil {
 		h.recordFailure(txCtx, "confirmation", "receipt_timeout")
+		logger.Errorf("[TX-CONFIRM] Failed to get receipt after %v: tx=%s, router=%s, symbol=%s, chain=%d, error=%v",
+			time.Since(confirmStartTime), tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol,
+			txCtx.UpdateRequest.DestinationChain.ChainID, err)
 		return fmt.Errorf("failed to get transaction receipt: %w", err)
 	}
 
@@ -173,8 +185,8 @@ func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transa
 	h.recordConfirmation(txCtx, tx.Hash().Hex(), receipt.GasUsed)
 	h.updateState(txCtx)
 
-	logger.Infof("Transaction confirmed: %s, status: %d, gas used: %d, router=%s, symbol=%s",
-		tx.Hash().Hex(), receipt.Status, receipt.GasUsed, txCtx.UpdateRequest.RouterID, txCtx.Symbol)
+	logger.Infof("Transaction confirmed: %s, status: %d, gas used: %d, router=%s, symbol=%s, confirm_time=%v",
+		tx.Hash().Hex(), receipt.Status, receipt.GasUsed, txCtx.UpdateRequest.RouterID, txCtx.Symbol, time.Since(confirmStartTime))
 
 	return nil
 }
