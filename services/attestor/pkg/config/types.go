@@ -69,7 +69,7 @@ type AttestorConfig struct {
 
 // OracleConfig holds oracle configuration
 type OracleConfig struct {
-	Address   string          `mapstructure:"address"`
+	Address    string           `mapstructure:"address"`
 	ClientType OracleClientType `mapstructure:"client_type"`
 }
 

@@ -374,12 +374,12 @@ func (oc *GuardedOracleClient) GetGuardedValue(ctx context.Context, symbol strin
 	numMinGuardianMatches := big.NewInt(int64(params.MinGuardianMatches))
 
 	logger.WithFields(map[string]interface{}{
-		"symbol":            symbol,
-		"oracle_address":    oc.oracleAddr.Hex(),
-		"client_type":       "guarded",
-		"contract_function": "getGuardedValue(string,uint256,uint256,uint256)",
-		"maxDeviationBips":  params.MaxDeviationBips,
-		"maxTimestampAge":   params.MaxTimestampAge,
+		"symbol":             symbol,
+		"oracle_address":     oc.oracleAddr.Hex(),
+		"client_type":        "guarded",
+		"contract_function":  "getGuardedValue(string,uint256,uint256,uint256)",
+		"maxDeviationBips":   params.MaxDeviationBips,
+		"maxTimestampAge":    params.MaxTimestampAge,
 		"minGuardianMatches": params.MinGuardianMatches,
 	}).Info("GuardedOracleClient: Calling getGuardedValue with guardian validation")
 
@@ -410,11 +410,11 @@ func (oc *GuardedOracleClient) GetValue(ctx context.Context, symbol string) (*bi
 
 func (oc *GuardedOracleClient) fetchOracleValue(ctx context.Context, symbol string, maxDeviationBips, maxTimestampAge, numMinGuardianMatches *big.Int) (*big.Int, *big.Int, error) {
 	logger.WithFields(map[string]interface{}{
-		"symbol":            symbol,
-		"oracle_address":    oc.oracleAddr.Hex(),
-		"function":          "getGuardedValue(string,uint256,uint256,uint256)",
+		"symbol":         symbol,
+		"oracle_address": oc.oracleAddr.Hex(),
+		"function":       "getGuardedValue(string,uint256,uint256,uint256)",
 	}).Debug("Packing contract call for GuardedOracle.getGuardedValue")
-	
+
 	data, err := oc.oracleABI.Pack("getGuardedValue", symbol, maxDeviationBips, maxTimestampAge, numMinGuardianMatches)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to pack input data for getGuardedValue: %v", err)
@@ -426,10 +426,10 @@ func (oc *GuardedOracleClient) fetchOracleValue(ctx context.Context, symbol stri
 		"oracle_address": oc.oracleAddr.Hex(),
 		"function":       "getGuardedValue(string,uint256,uint256,uint256)",
 	}).Info("Calling GuardedOracle contract: getGuardedValue")
-	
+
 	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("contract call failed for getGuardedValue(%s, %d, %d, %d): %v", 
+		return nil, nil, fmt.Errorf("contract call failed for getGuardedValue(%s, %d, %d, %d): %v",
 			symbol, maxDeviationBips.Int64(), maxTimestampAge.Int64(), numMinGuardianMatches.Int64(), err)
 	}
 
