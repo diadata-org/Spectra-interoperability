@@ -65,8 +65,8 @@ func TestGenericRouter_ShouldRoute(t *testing.T) {
 
 func TestGetSymbolsFromConfig(t *testing.T) {
 	tests := []struct {
-		name           string
-		routerConfig   *config.RouterConfig
+		name            string
+		routerConfig    *config.RouterConfig
 		expectedSymbols []string
 	}{
 		{
@@ -273,8 +273,8 @@ func TestGetSymbolsFromConfig(t *testing.T) {
 			expectedSymbols: []string{},
 		},
 		{
-			name: "nil router config",
-			routerConfig:   nil,
+			name:            "nil router config",
+			routerConfig:    nil,
 			expectedSymbols: []string{},
 		},
 		{

@@ -17,13 +17,13 @@ func (b *Bridge) initializeChainStats() {
 		logger.Warnf("configService is nil, skipping chain stats initialization")
 		return
 	}
-	
+
 	infra := b.configService.GetInfrastructure()
 	if infra == nil {
 		logger.Warnf("Infrastructure config is nil, skipping chain stats initialization")
 		return
 	}
-	
+
 	// Source chain stats
 	sourceConfig := infra.Source
 	b.stats.ChainStats[sourceConfig.ChainID] = &bridgetypes.ChainStatus{
