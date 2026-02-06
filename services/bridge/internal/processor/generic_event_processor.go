@@ -381,9 +381,10 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				select {
 				case gep.updateChan <- updateReq:
 					routersUsed++
+					atomic.AddUint64(&gep.stats.UpdatesCreated, 1)
 					symbol := router.GetSymbolFromData(extractedData)
-					logger.Infof("Queued update: event=%s, router=%s, symbol=%s, chain=%d, contract=%s",
-						event.EventName, result.RouterID, symbol, dest.ChainID, dest.Contract)
+					logger.Infof("Queued update: event=%s, router=%s, symbol=%s, chain=%d, contract=%s, queue_size=%d/%d",
+						event.EventName, result.RouterID, symbol, dest.ChainID, dest.Contract, len(gep.updateChan), cap(gep.updateChan))
 					// Report queue size immediately after enqueueing
 					if gep.reportQueueSize != nil {
 						gep.reportQueueSize()

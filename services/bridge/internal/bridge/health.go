@@ -17,13 +17,13 @@ func (b *Bridge) initializeChainStats() {
 		logger.Warnf("configService is nil, skipping chain stats initialization")
 		return
 	}
-	
+
 	infra := b.configService.GetInfrastructure()
 	if infra == nil {
 		logger.Warnf("Infrastructure config is nil, skipping chain stats initialization")
 		return
 	}
-	
+
 	// Source chain stats
 	sourceConfig := infra.Source
 	b.stats.ChainStats[sourceConfig.ChainID] = &bridgetypes.ChainStatus{
@@ -62,6 +62,19 @@ func (b *Bridge) healthCheck(ctx context.Context) {
 
 // performHealthCheck performs health checks on all chains
 func (b *Bridge) performHealthCheck(ctx context.Context) {
+	// Log worker pool status for debugging
+	if b.workerPool != nil {
+		workerStats := b.workerPool.GetStats()
+		queueSize := 0
+		if b.eventSource != nil {
+			queueSize = b.eventSource.GetQueueSize()
+		}
+		logger.Infof("[HEALTH] Worker pool: active=%d/%d, pending=%d/%d, update_queue=%d",
+			workerStats.ActiveTasks, workerStats.MaxWorkers,
+			workerStats.PendingTasks, workerStats.TotalCapacity,
+			queueSize)
+	}
+
 	// Check source chain
 	sourceConfig := b.configService.GetInfrastructure().Source
 	if err := b.checkChainHealth(ctx, b.readClient, sourceConfig.ChainID); err != nil {

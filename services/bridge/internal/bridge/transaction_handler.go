@@ -12,6 +12,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/leader"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
 )
@@ -36,25 +37,32 @@ type TransactionHandler struct {
 	writeClients   map[int64]*WriteClient
 	routerRegistry *router.GenericRegistry
 	metricsTracker *MetricsTracker
+	onChainMonitor *leader.OnChainMonitor // Optional: for replica monitoring info
 }
 
 // NewTransactionHandler creates a new transaction handler
-func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker) *TransactionHandler {
+func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker, monitor *leader.OnChainMonitor) *TransactionHandler {
 	return &TransactionHandler{
 		writeClients:   writeClients,
 		routerRegistry: registry,
 		metricsTracker: tracker,
+		onChainMonitor: monitor,
 	}
 }
 
 // Process handles the complete transaction lifecycle
 func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes.UpdateRequest) error {
+	startTime := time.Now()
+	logger.Infof("[TX-HANDLER] Starting transaction processing: router=%s, chain=%d, contract=%s",
+		updateReq.RouterID, updateReq.DestinationChain.ChainID, updateReq.Contract.Address)
+
 	txCtx, err := h.buildContext(ctx, updateReq)
 	if err != nil {
+		logger.Errorf("[TX-HANDLER] Failed to build context: router=%s, error=%v", updateReq.RouterID, err)
 		return err
 	}
 
-	logger.Infof("Processing update for %s on chain %d", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID)
+	logger.Infof("Processing update for %s on chain %d (elapsed=%v)", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, time.Since(startTime))
 
 	if err := h.validate(txCtx); err != nil {
 		return err
@@ -67,8 +75,9 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 	}
 
 	triggeredByMonitoring := ""
-	if txCtx.UpdateRequest.TriggeredByMonitoring {
-		triggeredByMonitoring = " (triggered by replica monitoring/failover)"
+	if txCtx.UpdateRequest.TriggeredByMonitoring && h.onChainMonitor != nil {
+		monitoringInfo := h.getMonitoringInfo(txCtx)
+		triggeredByMonitoring = monitoringInfo
 	}
 	logger.Infof("Transaction sent: %s for %s on chain %d, router=%s, symbol=%s%s",
 		tx.Hash().Hex(), txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID,
@@ -153,9 +162,16 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transaction) error {
 	h.recordSubmission(txCtx, tx.Hash().Hex())
 
+	logger.Infof("[TX-CONFIRM] Waiting for receipt: tx=%s, router=%s, symbol=%s, chain=%d",
+		tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol, txCtx.UpdateRequest.DestinationChain.ChainID)
+
+	confirmStartTime := time.Now()
 	receipt, err := h.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash())
 	if err != nil {
 		h.recordFailure(txCtx, "confirmation", "receipt_timeout")
+		logger.Errorf("[TX-CONFIRM] Failed to get receipt after %v: tx=%s, router=%s, symbol=%s, chain=%d, error=%v",
+			time.Since(confirmStartTime), tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol,
+			txCtx.UpdateRequest.DestinationChain.ChainID, err)
 		return fmt.Errorf("failed to get transaction receipt: %w", err)
 	}
 
@@ -169,8 +185,8 @@ func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transa
 	h.recordConfirmation(txCtx, tx.Hash().Hex(), receipt.GasUsed)
 	h.updateState(txCtx)
 
-	logger.Infof("Transaction confirmed: %s, status: %d, gas used: %d, router=%s, symbol=%s",
-		tx.Hash().Hex(), receipt.Status, receipt.GasUsed, txCtx.UpdateRequest.RouterID, txCtx.Symbol)
+	logger.Infof("Transaction confirmed: %s, status: %d, gas used: %d, router=%s, symbol=%s, confirm_time=%v",
+		tx.Hash().Hex(), receipt.Status, receipt.GasUsed, txCtx.UpdateRequest.RouterID, txCtx.Symbol, time.Since(confirmStartTime))
 
 	return nil
 }
@@ -313,6 +329,78 @@ func stringContains(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// getMonitoringInfo returns detailed monitoring information when transaction is triggered by replica monitoring
+func (h *TransactionHandler) getMonitoringInfo(txCtx *TransactionContext) string {
+	if h.onChainMonitor == nil {
+		return " (triggered by replica monitoring/failover)"
+	}
+
+	chainID := txCtx.UpdateRequest.DestinationChain.ChainID
+	contractAddress := common.HexToAddress(txCtx.UpdateRequest.Contract.Address)
+	symbol := txCtx.Symbol
+
+	// Get configured threshold (base + 10% of base)
+	threshold := h.onChainMonitor.GetPriceDeviationThresholdWithOffset(chainID, contractAddress, symbol)
+	if threshold == nil {
+		return " (triggered by replica monitoring/failover)"
+	}
+	thresholdPercent := new(big.Float).Mul(threshold, big.NewFloat(100))
+
+	// Get on-chain value and calculate deviation
+	var deviationPercent *big.Float
+	var triggerReason string
+
+	// Get monitoring info from monitor
+	onChainValue, lastTimestamp, timeThreshold := h.onChainMonitor.GetMonitoringInfo(chainID, contractAddress, symbol)
+
+	// Calculate deviation from incoming price
+	if txCtx.UpdateRequest.Intent != nil && txCtx.UpdateRequest.Intent.Price != nil && onChainValue != nil && onChainValue.Sign() != 0 {
+		incomingPrice := txCtx.UpdateRequest.Intent.Price
+		diff := new(big.Int).Sub(incomingPrice, onChainValue)
+		oldFloat := new(big.Float).SetInt(onChainValue)
+		diffFloat := new(big.Float).SetInt(diff)
+		deviationPercent = new(big.Float).Quo(diffFloat, oldFloat)
+		deviationPercent.Mul(deviationPercent, big.NewFloat(100))
+	}
+
+	// Determine trigger reason
+	if lastTimestamp > 0 {
+		timeSinceUpdate := time.Since(time.Unix(int64(lastTimestamp), 0))
+		totalThreshold := timeThreshold + h.onChainMonitor.GetTimeThresholdOffset()
+		if timeSinceUpdate > totalThreshold {
+			triggerReason = fmt.Sprintf("time threshold exceeded (%v > %v)", timeSinceUpdate, totalThreshold)
+		} else if deviationPercent != nil {
+			absDeviation := new(big.Float).Abs(deviationPercent)
+			if absDeviation.Cmp(thresholdPercent) > 0 {
+				triggerReason = fmt.Sprintf("price deviation threshold exceeded (%.2f%% > %.2f%%)", absDeviation, thresholdPercent)
+			} else {
+				// This shouldn't happen if we're processing, but log it for debugging
+				triggerReason = fmt.Sprintf("price deviation + 10%% of base not reached (%.2f%% <= %.2f%%)", absDeviation, thresholdPercent)
+			}
+		}
+	}
+
+	// Build info string
+	info := " (triggered by replica monitoring/failover"
+	if thresholdPercent != nil {
+		info += fmt.Sprintf(", configured_threshold=%.2f%%", thresholdPercent)
+	}
+	if deviationPercent != nil {
+		absDeviation := new(big.Float).Abs(deviationPercent)
+		info += fmt.Sprintf(", deviation_from_onchain=%.2f%%", absDeviation)
+	} else {
+		info += ", deviation_from_onchain=N/A"
+	}
+	if triggerReason != "" {
+		info += fmt.Sprintf(", trigger=%s", triggerReason)
+	} else {
+		info += ", trigger=unknown"
+	}
+	info += ")"
+
+	return info
 }
 
 // waitForReceipt waits for a transaction receipt

@@ -95,12 +95,13 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	logFields := map[string]interface{}{
-		"symbols":      cfg.Attestor.Symbols,
-		"oracle":       cfg.Oracle.Address,
-		"registry":     cfg.Registry.Address,
-		"polling_time": cfg.Attestor.PollingTime.String(),
-		"batch_mode":   cfg.Attestor.BatchMode,
-		"mode":         cfg.Attestor.Mode.String(),
+		"symbols":            cfg.Attestor.Symbols,
+		"oracle":             cfg.Oracle.Address,
+		"oracle_client_type": cfg.Oracle.ClientType.String(),
+		"registry":           cfg.Registry.Address,
+		"polling_time":       cfg.Attestor.PollingTime.String(),
+		"batch_mode":         cfg.Attestor.BatchMode,
+		"mode":               cfg.Attestor.Mode.String(),
 	}
 
 	if cfg.Attestor.Mode == config.ModeReplica {
@@ -177,15 +178,36 @@ type dependencies struct {
 
 // createDependencies creates all the service dependencies
 func createDependencies(cfg *config.Config) (*dependencies, error) {
-	// Create oracle client
-	oracleClient, err := client.NewGuardedOracleClient(
-		cfg.RPC.URLs,
-		cfg.Oracle.Address,
-		"", // signed address not used in new architecture
-		cfg.Attestor.PrivateKey,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create oracle client: %w", err)
+	var oracleClient interfaces.OracleReader
+	var err error
+
+	switch cfg.Oracle.ClientType {
+	case config.OracleClientTypeGuarded:
+		oracleClient, err = client.NewGuardedOracleClient(
+			cfg.RPC.URLs,
+			cfg.Oracle.Address,
+			"",
+			cfg.Attestor.PrivateKey,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create guarded oracle client: %w", err)
+		}
+		logger.WithField("client_type", "guarded").Info("Using GuardedOracleClient")
+
+	case config.OracleClientTypeDIAV2:
+		oracleClient, err = client.NewDIAOracleV2Client(
+			cfg.RPC.URLs,
+			cfg.Oracle.Address,
+			"",
+			cfg.Attestor.PrivateKey,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create DIAOracleV2 client: %w", err)
+		}
+		logger.WithField("client_type", "dia_v2").Info("Using DIAOracleV2Client")
+
+	default:
+		return nil, fmt.Errorf("unsupported oracle client type: %s", cfg.Oracle.ClientType)
 	}
 
 	// Create registry client

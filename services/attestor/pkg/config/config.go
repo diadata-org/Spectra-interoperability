@@ -1,10 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/logger"
 	"github.com/spf13/viper"
 )
 
@@ -20,6 +22,65 @@ func parseCSV(input string) []string {
 	return result
 }
 
+// parseAssetGuardianFromJSON parses per-asset guardian config from viper
+// Expected JSON format (set via ATTESTOR_GUARDIAN_ASSETS_CONFIG env var):
+//
+//	{
+//	  "BTC/USD": {
+//	    "max_deviation_bips": 100,
+//	    "max_timestamp_age": 1800,
+//	    "min_guardian_matches": 1
+//	  },
+//	  "DEX:BTC/USD": {
+//	    "max_deviation_bips": 150,
+//	    "min_guardian_matches": 2
+//	  }
+//	}
+func parseAssetGuardianFromJSON(v *viper.Viper) (map[string]GuardianParams, error) {
+	// Get the JSON string from viper (bound to ATTESTOR_GUARDIAN_ASSETS_CONFIG)
+	jsonConfig := v.GetString("attestor.guardian.assets_config")
+
+	if jsonConfig == "" {
+		return nil, nil
+	}
+
+	jsonConfig = strings.TrimSpace(jsonConfig)
+	if jsonConfig == "" {
+		return nil, nil
+	}
+
+	var rawConfig map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(jsonConfig), &rawConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse ATTESTOR_GUARDIAN_ASSETS_CONFIG JSON: %w\n", err)
+	}
+
+	if len(rawConfig) == 0 {
+		return nil, nil
+	}
+
+	assetConfig := make(map[string]GuardianParams)
+
+	// Parse each asset's configuration
+	for symbol, rawParams := range rawConfig {
+		// Validate symbol is not empty
+		symbol = strings.TrimSpace(symbol)
+		if symbol == "" {
+			return nil, fmt.Errorf("invalid ATTESTOR_GUARDIAN_ASSETS_CONFIG: empty symbol key found")
+		}
+
+		var params GuardianParams
+		if err := json.Unmarshal(rawParams, &params); err != nil {
+			return nil, fmt.Errorf("failed to parse guardian parameters for symbol %q: %w\n"+
+				"Please ensure the parameters are valid. Expected format:\n"+
+				`{"max_deviation_bips": int, "max_timestamp_age": int, "min_guardian_matches": int}`, symbol, err)
+		}
+
+		assetConfig[symbol] = params
+	}
+
+	return assetConfig, nil
+}
+
 type Config struct {
 	RPC struct {
 		URL          string   `mapstructure:"url"`
@@ -29,7 +90,8 @@ type Config struct {
 	} `mapstructure:"rpc"`
 
 	Oracle struct {
-		Address string `mapstructure:"address"`
+		Address    string           `mapstructure:"address"`
+		ClientType OracleClientType `mapstructure:"client_type"`
 	} `mapstructure:"oracle"`
 
 	Registry struct {
@@ -67,9 +129,9 @@ type GuardianConfig struct {
 }
 
 type GuardianParams struct {
-	MaxDeviationBips   int `mapstructure:"max_deviation_bips"`
-	MaxTimestampAge    int `mapstructure:"max_timestamp_age"`
-	MinGuardianMatches int `mapstructure:"min_guardian_matches"`
+	MaxDeviationBips   int `mapstructure:"max_deviation_bips" json:"max_deviation_bips"`
+	MaxTimestampAge    int `mapstructure:"max_timestamp_age" json:"max_timestamp_age"`
+	MinGuardianMatches int `mapstructure:"min_guardian_matches" json:"min_guardian_matches"`
 }
 
 // GetParamsForSymbol returns guardian parameters for a specific symbol.
@@ -119,11 +181,17 @@ func Init(configPath string) (*Config, error) {
 	v.BindEnv("attestor.replica_backup_delay", "ATTESTOR_ATTESTOR_REPLICA_BACKUP_DELAY")
 	v.BindEnv("attestor.intent_type", "ATTESTOR_ATTESTOR_INTENT_TYPE")
 	v.BindEnv("attestor.intent_version", "ATTESTOR_ATTESTOR_INTENT_VERSION")
+	v.BindEnv("oracle.client_type", "ATTESTOR_ORACLE_CLIENT_TYPE")
+	v.BindEnv("attestor.guardian.default.max_deviation_bips", "ATTESTOR_GUARDIAN_MAX_DEVIATION_BIPS")
+	v.BindEnv("attestor.guardian.default.max_timestamp_age", "ATTESTOR_GUARDIAN_MAX_TIMESTAMP_AGE")
+	v.BindEnv("attestor.guardian.default.min_guardian_matches", "ATTESTOR_GUARDIAN_MIN_GUARDIAN_MATCHES")
+	v.BindEnv("attestor.guardian.assets_config", "ATTESTOR_GUARDIAN_ASSETS_CONFIG")
 
 	// Set defaults
 	v.SetDefault("rpc.url", "https://testnet-rpc.diadata.org")
 	v.SetDefault("rpc.registry_url", "https://testnet-rpc.diadata.org")
 	v.SetDefault("oracle.address", "0x0087342f5f4c7AB23a37c045c3EF710749527c88")
+	v.SetDefault("oracle.client_type", "guarded")
 	v.SetDefault("attestor.symbols", []string{"BTC/USD", "ETH/USD"})
 	v.SetDefault("attestor.polling_time", "300ms")
 	v.SetDefault("attestor.batch_mode", true)
@@ -154,6 +222,41 @@ func Init(configPath string) (*Config, error) {
 
 	if !cfg.Attestor.Mode.IsValid() {
 		return nil, fmt.Errorf("invalid attestor mode: %s (must be 'prime' or 'replica')", cfg.Attestor.Mode)
+	}
+
+	// Parse and validate oracle client type
+	if cfg.Oracle.ClientType == "" {
+		cfg.Oracle.ClientType = OracleClientTypeGuarded // Default to guarded
+	} else {
+		clientType, err := ParseOracleClientType(string(cfg.Oracle.ClientType))
+		if err != nil {
+			return nil, fmt.Errorf("invalid oracle client type: %w", err)
+		}
+		cfg.Oracle.ClientType = clientType
+	}
+
+	assetGuardianFromJSON, err := parseAssetGuardianFromJSON(v)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse ATTESTOR_GUARDIAN_ASSETS_CONFIG: %w", err)
+	}
+
+	if len(assetGuardianFromJSON) > 0 {
+		if cfg.Attestor.Guardian.Symbols == nil {
+			cfg.Attestor.Guardian.Symbols = make(map[string]GuardianParams)
+		}
+
+		logger.Info("Loading per-asset guardian configuration from ATTESTOR_GUARDIAN_ASSETS_CONFIG")
+
+		for symbol, params := range assetGuardianFromJSON {
+			cfg.Attestor.Guardian.Symbols[symbol] = params
+
+			logger.WithFields(map[string]interface{}{
+				"symbol":               symbol,
+				"max_deviation_bips":   params.MaxDeviationBips,
+				"max_timestamp_age":    params.MaxTimestampAge,
+				"min_guardian_matches": params.MinGuardianMatches,
+			}).Info("Loaded per-asset guardian configuration")
+		}
 	}
 
 	// Normalize RPC URLs configuration: convert single URL to array if needed
@@ -196,6 +299,10 @@ func validateConfig(cfg *Config) error {
 
 	if cfg.Oracle.Address == "" {
 		return fmt.Errorf("oracle address not configured")
+	}
+
+	if !cfg.Oracle.ClientType.IsValid() {
+		return fmt.Errorf("invalid oracle client type: %s (must be 'guarded' or 'dia_v2')", cfg.Oracle.ClientType)
 	}
 
 	if cfg.Registry.Address == "" {

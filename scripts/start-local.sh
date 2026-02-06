@@ -10,6 +10,83 @@ NC='\033[0m' # No Color
 
 # Global variables
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+#######################################
+# DEPENDENCY CHECKS
+#######################################
+
+check_dependencies() {
+    log_info "Checking required dependencies..."
+    local missing_deps=()
+
+    # Check Docker
+    if ! command -v docker &> /dev/null; then
+        missing_deps+=("docker")
+    else
+        if ! docker info &> /dev/null; then
+            log_error "Docker is installed but not running. Please start Docker Desktop."
+            exit 1
+        fi
+        log_success "Docker: $(docker --version | cut -d' ' -f3 | tr -d ',')"
+    fi
+
+    # Check Docker Compose
+    if ! docker compose version &> /dev/null; then
+        missing_deps+=("docker-compose")
+    else
+        log_success "Docker Compose: $(docker compose version --short)"
+    fi
+
+    # Check Foundry tools (anvil, cast, forge)
+    if ! command -v anvil &> /dev/null; then
+        missing_deps+=("anvil (Foundry)")
+    else
+        log_success "Anvil: $(anvil --version 2>/dev/null | head -1 | cut -d' ' -f2)"
+    fi
+
+    if ! command -v cast &> /dev/null; then
+        missing_deps+=("cast (Foundry)")
+    else
+        log_success "Cast: $(cast --version 2>/dev/null | head -1 | cut -d' ' -f2)"
+    fi
+
+    if ! command -v forge &> /dev/null; then
+        missing_deps+=("forge (Foundry)")
+    else
+        log_success "Forge: $(forge --version 2>/dev/null | head -1 | cut -d' ' -f2)"
+    fi
+
+    # Check Python3
+    if ! command -v python3 &> /dev/null; then
+        missing_deps+=("python3")
+    else
+        log_success "Python3: $(python3 --version | cut -d' ' -f2)"
+    fi
+
+    # Check Go (optional, only needed for local builds)
+    if command -v go &> /dev/null; then
+        log_success "Go: $(go version | cut -d' ' -f3)"
+    else
+        log_warning "Go not found (optional, Docker builds will work)"
+    fi
+
+    # Report missing dependencies
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log_error "Missing required dependencies:"
+        for dep in "${missing_deps[@]}"; do
+            echo "  - $dep"
+        done
+        echo ""
+        log_info "Installation instructions:"
+        echo "  Docker: https://docs.docker.com/get-docker/"
+        echo "  Foundry: curl -L https://foundry.paradigm.xyz | bash && foundryup"
+        echo "  Python3: brew install python3 (macOS) or apt install python3 (Linux)"
+        exit 1
+    fi
+
+    log_success "All dependencies satisfied!"
+    echo ""
+}
 CONTRACTS_DIR="${ROOT_DIR}/contracts"
 LOCAL_CONTRACTS_DIR="${CONTRACTS_DIR}"
 ATTESTOR_DIR="${ROOT_DIR}/services/attestor"
@@ -43,6 +120,8 @@ REGISTRY_ADDR_FILE="${CONTRACTS_ADDR_DIR}/oracle_intent_registry.addr"
 RECEIVER_ADDR_FILE="${CONTRACTS_ADDR_DIR}/push_oracle_receiver_v2.addr"
 PROTOCOL_FEE_HOOK_FILE="${CONTRACTS_ADDR_DIR}/protocol_fee_hook.addr"
 DIA_ORACLE_ADDR_FILE="${CONTRACTS_ADDR_DIR}/dia_oracle_v2.addr"
+DIA_ORACLE_RANDOMNESS_ADDR_FILE="${CONTRACTS_ADDR_DIR}/dia_oracle_randomness.addr"
+RANDOM_REQUEST_MANAGER_ADDR_FILE="${CONTRACTS_ADDR_DIR}/random_request_manager.addr"
 
 # Logging functions
 log_info() {
@@ -61,17 +140,27 @@ log_error() {
     echo -e "${RED}❌ $1${NC}" >&2
 }
 
+# Flag to indicate if we started services (for cleanup)
+SERVICES_STARTED=false
+
 # Cleanup function
 cleanup() {
     local exit_code=$?
-    if [ $exit_code -ne 0 ]; then
-        log_error "Script failed. Cleaning up..."
+    
+    # Only cleanup if services were started
+    if [ "$SERVICES_STARTED" = "true" ]; then
+        log_info "Cleaning up..."
+        
         # Stop Docker services
         docker compose -f "${COMPOSE_FILE}" down --remove-orphans 2>/dev/null || true
+        
         # Stop Anvil
         if [ -n "${ANVIL_PID:-}" ]; then
             kill $ANVIL_PID 2>/dev/null || true
         fi
+        # Also kill any running anvil processes on port 8545
+        pkill -f "anvil.*8545" 2>/dev/null || true
+        
         # Stop price updater
         if [ -n "${PRICE_UPDATER_PID:-}" ]; then
             kill $PRICE_UPDATER_PID 2>/dev/null || true
@@ -81,11 +170,36 @@ cleanup() {
             kill $(cat "${ROOT_DIR}/.temp/price-updater.pid") 2>/dev/null || true
             rm -f "${ROOT_DIR}/.temp/price-updater.pid"
         fi
+        
+        if [ $exit_code -ne 0 ]; then
+            log_error "Script exited with error code: $exit_code"
+        else
+            log_success "Cleanup complete"
+        fi
     fi
     exit $exit_code
 }
 
 trap cleanup EXIT INT TERM
+
+# Stop command for easy cleanup
+stop_all() {
+    log_info "Stopping all services..."
+    
+    # Stop Docker services
+    docker compose -f "${COMPOSE_FILE}" down --remove-orphans 2>/dev/null || true
+    
+    # Stop Anvil
+    pkill -f "anvil.*8545" 2>/dev/null || true
+    
+    # Stop price updater
+    if [ -f "${ROOT_DIR}/.temp/price-updater.pid" ]; then
+        kill $(cat "${ROOT_DIR}/.temp/price-updater.pid") 2>/dev/null || true
+        rm -f "${ROOT_DIR}/.temp/price-updater.pid"
+    fi
+    
+    log_success "All services stopped"
+}
 
 
 
@@ -97,8 +211,9 @@ start_anvil() {
     pkill -f "anvil.*8545" || true
     sleep 2
 
-    # Start anvil in background
-    anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --balance 10000 &
+    # Start anvil in background with WebSocket support
+    # --ipc enables IPC, which is needed for WebSocket subscriptions to work
+    anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --balance 10000 --ipc &
     ANVIL_PID=$!
 
     # Wait for anvil to be ready
@@ -138,6 +253,8 @@ deploy_all_contracts() {
     deploy_registry
     deploy_protocol_fee_hook
     deploy_receiver
+    deploy_dia_oracle_randomness
+    deploy_random_request_manager
     configure_contracts
     fund_receiver
     initialize_oracle_prices
@@ -233,6 +350,8 @@ deploy_receiver() {
 
     local output
     cd "${CONTRACTS_DIR}"
+    # IMPORTANT: Use same domain parameters as OracleIntentRegistry for EIP-712 signature verification
+    # Domain: "DIA Oracle" version "1.0", chainId 31337, verifyingContract = registry_addr
     if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
         --rpc-url "${ANVIL_RPC}" \
         --private-key "${DEFAULT_KEY}" \
@@ -254,6 +373,88 @@ deploy_receiver() {
 
     echo "$address" > "${RECEIVER_ADDR_FILE}"
     log_success "PushOracleReceiverV2 deployed at $address"
+
+    # Verify domain separator matches by getting it from both contracts
+    log_info "Verifying domain separator consistency..."
+    local registry_domain receiver_domain
+
+    registry_domain=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast call \
+        --rpc-url "${ANVIL_RPC}" \
+        "$registry_addr" \
+        "domainSeparator()(bytes32)" 2>/dev/null || echo "")
+
+    receiver_domain=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast call \
+        --rpc-url "${ANVIL_RPC}" \
+        "$address" \
+        "domainSeparator()(bytes32)" 2>/dev/null || echo "")
+
+    if [ -n "$registry_domain" ] && [ -n "$receiver_domain" ]; then
+        if [ "$registry_domain" = "$receiver_domain" ]; then
+            log_success "✅ Domain separators match: $registry_domain"
+        else
+            log_error "❌ Domain separator mismatch!"
+            log_error "   Registry: $registry_domain"
+            log_error "   Receiver: $receiver_domain"
+            log_error "   Signatures will fail - intents cannot be verified!"
+            return 1
+        fi
+    else
+        log_warning "⚠️  Could not verify domain separators (contracts may not expose domainSeparator())"
+    fi
+}
+
+# Deploy DIAOracleRandomness
+deploy_dia_oracle_randomness() {
+    log_info "🚀 Deploying DIAOracleRandomness..."
+    local output
+    cd "${CONTRACTS_DIR}"
+    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        --broadcast \
+        "contracts/VRF/DIAOracleRandomness.sol:DIAOracleRandomness" 2>&1); then
+        log_error "Failed to deploy DIAOracleRandomness"
+        echo "$output" >&2
+        return 1
+    fi
+
+    local address
+    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
+    if [ -z "$address" ]; then
+        log_error "Failed to capture DIAOracleRandomness address"
+        echo "$output" >&2
+        return 1
+    fi
+
+    echo "$address" > "${DIA_ORACLE_RANDOMNESS_ADDR_FILE}"
+    log_success "DIAOracleRandomness deployed at $address"
+}
+
+# Deploy RandomRequestManager
+deploy_random_request_manager() {
+    log_info "🚀 Deploying RandomRequestManager..."
+    local output
+    cd "${CONTRACTS_DIR}"
+    if ! output=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge create \
+        --rpc-url "${ANVIL_RPC}" \
+        --private-key "${DEFAULT_KEY}" \
+        --broadcast \
+        "contracts/VRF/RandomRequestManager.sol:RandomRequestManager" 2>&1); then
+        log_error "Failed to deploy RandomRequestManager"
+        echo "$output" >&2
+        return 1
+    fi
+
+    local address
+    address=$(echo "$output" | awk '/Deployed to:/ {print $3}')
+    if [ -z "$address" ]; then
+        log_error "Failed to capture RandomRequestManager address"
+        echo "$output" >&2
+        return 1
+    fi
+
+    echo "$address" > "${RANDOM_REQUEST_MANAGER_ADDR_FILE}"
+    log_success "RandomRequestManager deployed at $address"
 }
 
 # Configure contracts
@@ -314,17 +515,17 @@ fund_receiver() {
     local receiver_addr
     receiver_addr=$(cat "${RECEIVER_ADDR_FILE}")
 
-    # Fund the receiver with 1 ETH
+    # Fund the receiver with 100 ETH for extensive testing
     if ! FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast send \
         --rpc-url "${ANVIL_RPC}" \
         --private-key "${DEFAULT_KEY}" \
-        --value "1ether" \
+        --value "100ether" \
         "$receiver_addr"; then
         log_error "Failed to fund PushOracleReceiverV2"
         return 1
     fi
 
-    log_success "PushOracleReceiverV2 funded with 1 ETH"
+    log_success "PushOracleReceiverV2 funded with 100 ETH"
 }
 
 # Initialize oracle with initial prices
@@ -410,16 +611,19 @@ create_wallets() {
 create_attestor_env() {
     log_info "Creating attestor environment configuration..."
     cat <<ENV > "${CONFIG_DIR}/attestor.env"
-RPC_URLS=http://host.docker.internal:8545
-PRIVATE_KEY=${DEFAULT_KEY}
-INTENT_REGISTRY_ADDRESS=$(cat "${REGISTRY_ADDR_FILE}")
-SYMBOLS=BTC/USD,ETH/USD
-POLLING_TIME=5s
-BATCH_MODE=false
-INTENT_TYPE=OracleUpdate
-INTENT_VERSION=1.0
-METRICS_PORT=8080
-API_PORT=8081
+ATTESTOR_RPC_URLS=http://host.docker.internal:8545
+ATTESTOR_ORACLE_ADDRESS=$(cat "${DIA_ORACLE_ADDR_FILE}")
+ATTESTOR_ORACLE_CLIENT_TYPE=dia_v2
+ATTESTOR_REGISTRY_ADDRESS=$(cat "${REGISTRY_ADDR_FILE}")
+ATTESTOR_ATTESTOR_PRIVATE_KEY=${DEFAULT_KEY}
+ATTESTOR_ATTESTOR_SYMBOLS=BTC/USD,ETH/USD
+ATTESTOR_ATTESTOR_POLLING_TIME=5s
+ATTESTOR_ATTESTOR_BATCH_MODE=false
+ATTESTOR_ATTESTOR_MODE=prime
+ATTESTOR_ATTESTOR_INTENT_TYPE=OracleUpdate
+ATTESTOR_ATTESTOR_INTENT_VERSION=1.0
+ATTESTOR_METRICS_PORT=8080
+ATTESTOR_API_PORT=8081
 ENV
 
     # Create config.yaml for local development
@@ -432,10 +636,13 @@ rpc:
   urls:
     - http://host.docker.internal:8545
   registry_url: http://host.docker.internal:8545
+  registry_urls:
+    - http://host.docker.internal:8545
 
 # Oracle Configuration
 oracle:
   address: "$(cat "${DIA_ORACLE_ADDR_FILE}")"
+  client_type: "dia_v2"
 
 # Registry Configuration
 registry:
@@ -443,17 +650,17 @@ registry:
 
 # Attestor Configuration
 attestor:
+  private_key: "${DEFAULT_KEY}"
   symbols:
     - BTC/USD
     - ETH/USD
   polling_time: 5s
   batch_mode: false
-  intent_type: OracleUpdate
-  intent_version: "1.0"
+  mode: prime
 
 # Logging Configuration
 logging:
-  level: info
+  level: debug
 
 # Metrics Configuration
 metrics:
@@ -565,6 +772,22 @@ contracts:
                 fieldsmapping:
                     intent: fullIntent
                 gaslimit: 300000
+    random_request_manager:
+        chain_id: 31337
+        address: $(cat "${RANDOM_REQUEST_MANAGER_ADDR_FILE}")
+        type: randomness
+        enabled: true
+        abi: '[{"name":"fulfillRandomInt","type":"function","inputs":[{"name":"requestId","type":"uint256"},{"name":"randomInts","type":"int256[]"}]}]'
+        gas_limit: 500000
+        gas_multiplier: 1.2
+        max_gas_price: "100000000000"
+        methods:
+            fulfill_random:
+                methodname: fulfillRandomInt
+                fieldsmapping:
+                    requestId: requestId
+                    randomInts: randomInts
+                gaslimit: 500000
 YAML
 
     # 4. Create events.yaml
@@ -587,6 +810,25 @@ event_definitions:
                 - \${event.intentHash}
             returns:
                 fullIntent: "0"
+    IntArraySet:
+        contract: $(cat "${DIA_ORACLE_RANDOMNESS_ADDR_FILE}")
+        abi: '{"name":"IntArraySet","type":"event","inputs":[{"name":"requestId","type":"uint256","indexed":false},{"name":"round","type":"int256","indexed":true},{"name":"seed","type":"string","indexed":false},{"name":"signature","type":"string","indexed":false}]}'
+        dataextraction:
+            requestId: requestId
+            round: topics[1]
+            seed: seed
+            signature: signature
+        enrichment:
+            contract: ""
+            method: getIntArray
+            abi: '{"name":"getIntArray","type":"function","inputs":[{"name":"requestId_","type":"uint256"}],"outputs":[{"name":"requestId","type":"uint256"},{"name":"randomInts","type":"int256[]"},{"name":"round","type":"int64"},{"name":"seed","type":"string"},{"name":"signature","type":"string"}]}'
+            params:
+                - \${event.requestId}
+            returns:
+                randomInts: "1"
+                fullRound: "2"
+                fullSeed: "3"
+                fullSignature: "4"
 YAML
 
     # 5. Create router configs
@@ -595,25 +837,29 @@ YAML
         "oracle_intent_router_eth.yaml"
         "oracle_intent_router_sol.yaml"
         "oracle_intent_router.yaml"
+        "randomness_router.yaml"
     )
     local router_names=(
         "oracle_intent_router_btc"
         "oracle_intent_router_eth"
         "oracle_intent_router_sol"
         "oracle_intent_router"
+        "randomness_router_local"
     )
     local router_ids=(
         "oracle_intent_router_btc_001"
         "oracle_intent_router_eth_001"
         "oracle_intent_router_sol_001"
         "oracle_intent_router_001"
+        "randomness_router_001"
     )
-    local router_thresholds=("1s" "1s" "1s" "2s")
+    local router_thresholds=("1s" "1s" "1s" "2s" "1s")
     local router_conditions=(
-        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ==\n              value: BTC/USD\n'
-        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ==\n              value: ETH/USD\n'
-        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ==\n              value: SOL/USD\n'
-        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: !=\n              value: BTC/USD\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: !=\n              value: ETH/USD\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: !=\n              value: SOL/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: eq\n              value: BTC/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: eq\n              value: ETH/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: eq\n              value: SOL/USD\n'
+        $'        conditions:\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ne\n              value: BTC/USD\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ne\n              value: ETH/USD\n            - field: ${enrichment.fullIntent.Symbol}\n              operator: ne\n              value: SOL/USD\n'
+        $'        conditions: []\n'
     )
 
     for ((i = 0; i < ${#router_files[@]}; i++)); do
@@ -623,7 +869,38 @@ YAML
         local time_threshold="${router_thresholds[$i]}"
         local conditions_block="${router_conditions[$i]}"
 
-        cat <<YAML > "${file_path}"
+        # Special handling for randomness router
+        if [ "$router_name" = "randomness_router_local" ]; then
+            cat <<YAML > "${file_path}"
+router:
+    id: ${router_id}
+    name: ${router_name}
+    type: event
+    enabled: true
+    private_key_env: PRIVATE_KEY
+    triggers:
+        events:
+            - IntArraySet
+${conditions_block}
+    processing:
+        datasource: enrichment
+        transformations: []
+        validationenabled: true
+    destinations:
+        - contract_ref: random_request_manager
+          time_threshold: ${time_threshold}
+          method:
+            name: fulfillRandomInt
+            abi: '{"name":"fulfillRandomInt","type":"function","inputs":[{"name":"requestId","type":"uint256"},{"name":"randomInts","type":"int256[]"}]}'
+            params:
+                requestId: \${event.requestId}
+                randomInts: \${enrichment.randomInts}
+            value: "0"
+            gaslimit: 500000
+            gasmultiplier: 1.2
+YAML
+        else
+            cat <<YAML > "${file_path}"
 router:
     id: ${router_id}
     name: ${router_name}
@@ -641,6 +918,7 @@ ${conditions_block}
     destinations:
         - contract_ref: push_oracle_receiver
           time_threshold: ${time_threshold}
+          price_deviation: "0.5%"
           method:
             name: handleIntentUpdate
             abi: '{"name":"handleIntentUpdate","type":"function","inputs":[{"name":"intent","type":"tuple","components":[{"name":"intentType","type":"string"},{"name":"version","type":"string"},{"name":"chainId","type":"uint256"},{"name":"nonce","type":"uint256"},{"name":"expiry","type":"uint256"},{"name":"symbol","type":"string"},{"name":"price","type":"uint256"},{"name":"timestamp","type":"uint256"},{"name":"source","type":"string"},{"name":"signature","type":"bytes"},{"name":"signer","type":"address"}]}]}'
@@ -650,6 +928,7 @@ ${conditions_block}
             gaslimit: 300000
             gasmultiplier: 1.2
 YAML
+        fi
     done
 
     log_success "Bridge modular YAML configuration created at ${BRIDGE_CONFIG_DIR} with ${#router_files[@]} routers"
@@ -679,7 +958,7 @@ start_docker_services() {
     fi
     log_success "Docker images built successfully"
 
-    # Start only the services (not anvil since we have it running on host)
+    # Start all services (not anvil since we have it running on host)
     if ! docker compose -f "${COMPOSE_FILE}" up -d postgres attestor bridge; then
         log_error "Failed to start Docker services"
         return 1
@@ -688,28 +967,130 @@ start_docker_services() {
     log_success "Docker services started successfully"
 }
 
-# Wait for services to be healthy
+# Wait for services to be healthy with proper health checks
 wait_for_services() {
-    log_info "Waiting for services to start..."
-    sleep 5
+    log_info "Waiting for services to be healthy..."
 
-    # Check if services are running
-    if docker ps --filter "name=spectra-interoperability-postgres-1" --filter "status=running" | grep -q postgres; then
-        log_success "Postgres service is running"
+    # Wait for Postgres
+    log_info "Waiting for Postgres..."
+    local postgres_ready=false
+    for i in {1..30}; do
+        if docker exec spectra-interoperability-postgres-1 pg_isready -U bridge &>/dev/null; then
+            postgres_ready=true
+            break
+        fi
+        sleep 1
+    done
+    if $postgres_ready; then
+        log_success "Postgres is healthy"
     else
-        log_warning "Postgres service may still be starting"
+        log_error "Postgres failed to become healthy"
+        docker logs spectra-interoperability-postgres-1 --tail 20 2>/dev/null || true
+        return 1
     fi
 
-    if docker ps --filter "name=spectra-interoperability-attestor-1" --filter "status=running" | grep -q attestor; then
-        log_success "Attestor service is running"
+    # Wait for Attestor
+    log_info "Waiting for Attestor..."
+    local attestor_ready=false
+    for i in {1..60}; do
+        if curl -s http://localhost:8081/health &>/dev/null; then
+            attestor_ready=true
+            break
+        fi
+        # Check if container is still running
+        if ! docker ps --filter "name=spectra-interoperability-attestor-1" --filter "status=running" | grep -q attestor; then
+            log_error "Attestor container exited unexpectedly"
+            docker logs spectra-interoperability-attestor-1 --tail 30 2>/dev/null || true
+            return 1
+        fi
+        sleep 2
+    done
+    if $attestor_ready; then
+        log_success "Attestor is healthy"
     else
-        log_warning "Attestor service may still be starting"
+        log_warning "Attestor health endpoint not responding (may still be starting)"
+        docker logs spectra-interoperability-attestor-1 --tail 10 2>/dev/null || true
     fi
 
-    if docker ps --filter "name=spectra-interoperability-bridge-1" --filter "status=running" | grep -q bridge; then
-        log_success "Bridge service is running"
+    # Wait for Bridge
+    log_info "Waiting for Bridge..."
+    local bridge_ready=false
+    for i in {1..60}; do
+        if curl -s http://localhost:8082/metrics &>/dev/null; then
+            bridge_ready=true
+            break
+        fi
+        # Check if container is still running
+        if ! docker ps --filter "name=spectra-interoperability-bridge-1" --filter "status=running" | grep -q bridge; then
+            log_error "Bridge container exited unexpectedly"
+            docker logs spectra-interoperability-bridge-1 --tail 30 2>/dev/null || true
+            return 1
+        fi
+        sleep 2
+    done
+    if $bridge_ready; then
+        log_success "Bridge is healthy"
     else
-        log_warning "Bridge service may still be starting"
+        log_warning "Bridge metrics endpoint not responding (may still be starting)"
+        docker logs spectra-interoperability-bridge-1 --tail 10 2>/dev/null || true
+    fi
+
+    echo ""
+    log_success "All core services are running!"
+}
+
+# Health check function to verify system is operational
+run_health_checks() {
+    log_info "Running system health checks..."
+    local all_healthy=true
+
+    # Check Anvil RPC
+    if curl -s -X POST -H "Content-Type: application/json" \
+       --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+       "$ANVIL_RPC" &>/dev/null; then
+        log_success "Anvil RPC: OK"
+    else
+        log_error "Anvil RPC: FAILED"
+        all_healthy=false
+    fi
+
+    # Check Postgres
+    if docker exec spectra-interoperability-postgres-1 pg_isready -U bridge &>/dev/null; then
+        log_success "Postgres: OK"
+    else
+        log_error "Postgres: FAILED"
+        all_healthy=false
+    fi
+
+    # Check contract deployments
+    local registry_addr=$(cat "${REGISTRY_ADDR_FILE}" 2>/dev/null || echo "")
+    if [ -n "$registry_addr" ]; then
+        local code=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast code --rpc-url "$ANVIL_RPC" "$registry_addr" 2>/dev/null || echo "0x")
+        if [ "$code" != "0x" ] && [ -n "$code" ]; then
+            log_success "Contracts deployed: OK"
+        else
+            log_error "Contracts: No code at registry address"
+            all_healthy=false
+        fi
+    else
+        log_error "Contracts: Registry address file not found"
+        all_healthy=false
+    fi
+
+    # Check Docker services
+    local services=("postgres" "attestor" "bridge")
+    for svc in "${services[@]}"; do
+        if docker ps --filter "name=spectra-interoperability-${svc}-1" --filter "status=running" | grep -q "$svc"; then
+            log_success "Docker $svc: Running"
+        else
+            log_warning "Docker $svc: Not running"
+        fi
+    done
+
+    if $all_healthy; then
+        log_success "All health checks passed!"
+    else
+        log_warning "Some health checks failed"
     fi
 }
 
@@ -741,9 +1122,25 @@ show_summary() {
     echo "  🏭 OracleIntentRegistry: $(cat "${REGISTRY_ADDR_FILE}")"
     echo "  💰 ProtocolFeeHook: $(cat "${PROTOCOL_FEE_HOOK_FILE}")"
     echo "  📡 PushOracleReceiverV2: $(cat "${RECEIVER_ADDR_FILE}")"
-    echo "  💰 Receiver Balance: 1 ETH"
+    echo "  🎲 DIAOracleRandomness: $(cat "${DIA_ORACLE_RANDOMNESS_ADDR_FILE}")"
+    echo "  🎯 RandomRequestManager: $(cat "${RANDOM_REQUEST_MANAGER_ADDR_FILE}")"
+    echo "  💰 Receiver Balance: 100 ETH"
     echo "  🔑 Authorized Signer: $DEFAULT_ADDRESS"
     echo "  🗄️  Postgres DSN: ${POSTGRES_DSN}"
+    echo ""
+    echo "🔐 EIP-712 Domain Configuration:"
+    local registry_addr receiver_addr registry_domain
+    registry_addr=$(cat "${REGISTRY_ADDR_FILE}")
+    receiver_addr=$(cat "${RECEIVER_ADDR_FILE}")
+    registry_domain=$(FOUNDRY_DISABLE_NIGHTLY_WARNING=1 cast call \
+        --rpc-url "${ANVIL_RPC}" \
+        "$registry_addr" \
+        "domainSeparator()(bytes32)" 2>/dev/null || echo "N/A")
+    echo "  📝 Domain Name: DIA Oracle"
+    echo "  🔢 Domain Version: 1.0"
+    echo "  🔗 Chain ID: 31337"
+    echo "  ✍️  Verifying Contract: $registry_addr (OracleIntentRegistry)"
+    echo "  🔑 Domain Separator: $registry_domain"
     echo ""
     echo "🔧 Configuration Files:"
     echo "  ⚖️  Attestor env: ${CONFIG_DIR}/attestor.env"
@@ -757,7 +1154,8 @@ show_summary() {
     echo "        ├── oracle_intent_router_btc.yaml"
     echo "        ├── oracle_intent_router_eth.yaml"
     echo "        ├── oracle_intent_router_sol.yaml"
-    echo "        └── oracle_intent_router.yaml"
+    echo "        ├── oracle_intent_router.yaml"
+    echo "        └── randomness_router.yaml"
     echo "  📄 Contract addresses: ${CONTRACTS_ADDR_DIR}/"
     echo "  🔑 Wallets: ${WALLETS_DIR}/"
     echo ""
@@ -769,15 +1167,20 @@ show_summary() {
     echo "  ⛏️  Anvil RPC: ${ANVIL_RPC}"
     echo "  📊 Attestor metrics: http://localhost:8080/metrics"
     echo "  🔍 Attestor API: http://localhost:8081/health"
+    echo "  🔍 Bridge metrics: http://localhost:8082/metrics"
     echo ""
     echo "📈 Oracle Information:"
     echo "  🔄 Price updates every 10 seconds (ETH/USD & BTC/USD)"
     echo "  📊 Price updater log: ${ROOT_DIR}/.temp/price-updater.log"
     echo ""
     echo "🌉 Bridge Router Configuration:"
-    echo "  📝 Event: IntentRegistered from OracleIntentRegistry"
-    echo "  🎯 Destination: PushOracleReceiverV2.handleIntentUpdate()"
-    echo "  🧭 Routers: BTC, ETH, SOL dedicated routers plus a fallback router"
+    echo "  📝 Events:"
+    echo "    - IntentRegistered from OracleIntentRegistry"
+    echo "    - IntArraySet from DIAOracleRandomness"
+    echo "  🎯 Destinations:"
+    echo "    - PushOracleReceiverV2.handleIntentUpdate()"
+    echo "    - RandomRequestManager.fulfillRandomInt()"
+    echo "  🧭 Routers: BTC, ETH, SOL dedicated routers, fallback router, and randomness router"
     echo "  🔐 Router Signer: $DEFAULT_ADDRESS (authorized in registry)"
     echo ""
     log_info "Anvil is running with PID: $ANVIL_PID"
@@ -787,36 +1190,102 @@ show_summary() {
     log_info "Press Ctrl+C to stop everything and exit"
 }
 
+# Show usage
+show_usage() {
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  start     Start the local development environment (default)"
+    echo "  stop      Stop all running services"
+    echo "  status    Show status of all services"
+    echo "  logs      Show logs from Docker services"
+    echo "  help      Show this help message"
+}
+
+# Show status of services
+show_status() {
+    log_info "Service Status:"
+    echo ""
+    
+    # Check Anvil
+    if curl -s -X POST -H "Content-Type: application/json" \
+       --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
+       "$ANVIL_RPC" &>/dev/null; then
+        log_success "Anvil: Running at $ANVIL_RPC"
+    else
+        log_error "Anvil: Not running"
+    fi
+    
+    # Check Docker services
+    echo ""
+    docker compose -f "${COMPOSE_FILE}" ps 2>/dev/null || log_warning "Docker compose not running"
+}
+
+# Show logs
+show_logs() {
+    docker compose -f "${COMPOSE_FILE}" logs -f --tail 100
+}
+
 # Main execution
 main() {
-    log_info "🚀 Starting Spectra Local Development Environment"
-    echo ""
+    local command="${1:-start}"
+    
+    case "$command" in
+        start)
+            log_info "🚀 Starting Spectra Local Development Environment"
+            echo ""
 
+            # Mark that we're starting services (for cleanup)
+            SERVICES_STARTED=true
 
+            # Step 0: Check dependencies
+            check_dependencies
 
-    # Step 1: Start Anvil blockchain
-    start_anvil
+            # Step 1: Start Anvil blockchain
+            start_anvil
 
-    # Step 2: Set up contracts and deploy
-    setup_and_deploy_contracts
+            # Step 2: Set up contracts and deploy
+            setup_and_deploy_contracts
 
-    # Step 3: Create wallets and configurations
-    create_wallets_and_configs
+            # Step 3: Create wallets and configurations
+            create_wallets_and_configs
 
-    # Step 4: Start Docker services
-    start_docker_services
+            # Step 4: Start Docker services
+            start_docker_services
 
-    # Wait for services to be healthy
-    wait_for_services
+            # Wait for services to be healthy
+            wait_for_services
 
-    # Start price updater
-    start_price_updater
+            # Run health checks
+            run_health_checks
 
-    # Show summary
-    show_summary
+            # Start price updater
+            start_price_updater
 
-    # Keep script running (Anvil in foreground)
-    wait $ANVIL_PID
+            # Show summary
+            show_summary
+
+            # Keep script running (Anvil in foreground)
+            wait $ANVIL_PID
+            ;;
+        stop)
+            stop_all
+            ;;
+        status)
+            show_status
+            ;;
+        logs)
+            show_logs
+            ;;
+        help|--help|-h)
+            show_usage
+            ;;
+        *)
+            log_error "Unknown command: $command"
+            show_usage
+            exit 1
+            ;;
+    esac
 }
 
 main "$@"

@@ -211,18 +211,43 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 	price, timestamp, err := s.oracle.GetGuardedValue(ctx, symbol, guardianParams)
 	s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
 
-	logger.WithFields(map[string]interface{}{
-		"symbol":             symbol,
-		"price":              price.String(),
-		"timestamp":          timestamp.String(),
-		"MaxDeviationBips":   guardianParams.MaxDeviationBips,
-		"MaxTimestampAge":    guardianParams.MaxTimestampAge,
-		"MinGuardianMatches": guardianParams.MinGuardianMatches,
-	}).Info("Retrieving oracle value")
+	// Log oracle value retrieval with appropriate detail level based on client type
+	logFields := map[string]interface{}{
+		"symbol":    symbol,
+		"price":     "<nil>",
+		"timestamp": "<nil>",
+	}
+	if price != nil {
+		logFields["price"] = price.String()
+	}
+	if timestamp != nil {
+		logFields["timestamp"] = timestamp.String()
+	}
+
+	if s.config.Oracle.ClientType == config.OracleClientTypeGuarded {
+		logFields["MaxDeviationBips"] = guardianParams.MaxDeviationBips
+		logFields["MaxTimestampAge"] = guardianParams.MaxTimestampAge
+		logFields["MinGuardianMatches"] = guardianParams.MinGuardianMatches
+	}
+
+	logger.WithFields(logFields).Info("Retrieving oracle value")
 
 	if err != nil {
 		s.metrics.RecordIntentCreated(symbol, false)
-		return errors.NewOracleError(symbol, "failed to fetch value", err)
+		var contractFunction string
+		if s.config.Oracle.ClientType == config.OracleClientTypeGuarded {
+			contractFunction = "getGuardedValue(string,uint256,uint256,uint256)"
+		} else {
+			contractFunction = "getValue(string)"
+		}
+		logger.WithFields(map[string]interface{}{
+			"symbol":            symbol,
+			"oracle_address":    s.config.Oracle.Address,
+			"client_type":       s.config.Oracle.ClientType.String(),
+			"contract_function": contractFunction,
+			"error":             err.Error(),
+		}).Error("Failed to fetch oracle value - check if symbol exists in oracle contract")
+		return errors.NewOracleError(symbol, fmt.Sprintf("failed to fetch value (called %s)", contractFunction), err)
 	}
 
 	// Default volume
@@ -301,18 +326,30 @@ symbolLoop:
 		s.metrics.RecordOracleFetchDuration(symbol, time.Since(fetchStart))
 
 		if err != nil {
-			logger.WithError(err).WithField("symbol", symbol).Error("Failed to fetch oracle value")
+			var contractFunction string
+			if s.config.Oracle.ClientType == config.OracleClientTypeGuarded {
+				contractFunction = "getGuardedValue(string,uint256,uint256,uint256)"
+			} else {
+				contractFunction = "getValue(string)"
+			}
+			logger.WithError(err).WithFields(map[string]interface{}{
+				"symbol":            symbol,
+				"oracle_address":    s.config.Oracle.Address,
+				"client_type":       s.config.Oracle.ClientType.String(),
+				"contract_function": contractFunction,
+			}).Error("Failed to fetch oracle value - check if symbol exists in oracle contract")
 			s.metrics.RecordIntentCreated(symbol, false)
 			continue
 		}
 
 		volume := big.NewInt(1)
 
-		logger.WithFields(map[string]interface{}{
+		logFields := map[string]interface{}{
 			"symbol":    symbol,
 			"price":     price.String(),
 			"timestamp": timestamp.String(),
-		}).Debug("Retrieved oracle value")
+		}
+		logger.WithFields(logFields).Debug("Retrieved oracle value")
 
 		symbolData = append(symbolData, interfaces.SymbolData{
 			Symbol: symbol,
