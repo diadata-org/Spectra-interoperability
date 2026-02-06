@@ -8,6 +8,7 @@ rpc:
 # Oracle Configuration
 oracle:
   address: "0x0087342f5f4c7AB23a37c045c3EF710749527c88"
+  client_type: "guarded"  # Options: "guarded" (uses getGuardedValue) or "dia_v2" (uses getValue)
 
 # Registry Configuration
 registry:
@@ -39,6 +40,7 @@ api:
 # - ATTESTOR_RPC_URL or ATTESTOR_RPC_URLS (comma-separated for multiple URLs)
 # - ATTESTOR_RPC_REGISTRY_URL or ATTESTOR_RPC_REGISTRY_URLS (comma-separated for multiple URLs)
 # - ATTESTOR_ORACLE_ADDRESS
+# - ATTESTOR_ORACLE_CLIENT_TYPE (guarded or dia_v2)
 # - ATTESTOR_REGISTRY_ADDRESS
 # - ATTESTOR_ATTESTOR_PRIVATE_KEY
 # - ATTESTOR_ATTESTOR_SYMBOLS (comma-separated)
@@ -48,8 +50,17 @@ api:
 # - ATTESTOR_LOGGING_LEVEL
 # - ATTESTOR_METRICS_PORT
 # - ATTESTOR_API_PORT
+# - ATTESTOR_GUARDIAN_ASSETS_CONFIG (JSON format for per-asset guardian config)
 #
 # Environment variables use dot notation converted to underscores:
 # - rpc.url -> ATTESTOR_RPC_URL
 # - attestor.private_key -> ATTESTOR_ATTESTOR_PRIVATE_KEY
 # - etc.
+#
+# Per-Asset Guardian Configuration via Environment Variable:
+# You can also configure guardian parameters per asset using ATTESTOR_GUARDIAN_ASSETS_CONFIG:
+# ATTESTOR_GUARDIAN_ASSETS_CONFIG='{
+#   "BTC/USD": {"max_deviation_bips": 100, "max_timestamp_age": 1800},
+#   "DEX:BTC/USD": {"max_deviation_bips": 150, "min_guardian_matches": 2}
+# }'
+# This JSON config takes precedence over YAML config for specific symbols.
