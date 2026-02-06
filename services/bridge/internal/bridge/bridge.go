@@ -179,6 +179,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	workerPool := worker.NewWorkerPool(
 		cfgService.GetInfrastructure().WorkerPool.MaxWorkers,
 		cfgService.GetInfrastructure().WorkerPool.TaskQueueSize,
+		cfgService.GetInfrastructure().WorkerPool.TaskTimeout.Duration(),
 	)
 	if metricsCollector != nil {
 		workerPool.SetMetricsCollector(metricsCollector)

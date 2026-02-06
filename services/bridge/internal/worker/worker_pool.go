@@ -29,6 +29,7 @@ type WorkerPool struct {
 	running          bool
 	metricsCollector *metrics.Collector
 	activeWorkers    int32 // Track number of currently active workers
+	taskTimeout      time.Duration
 }
 
 // Worker represents a single worker in the pool
@@ -42,19 +43,24 @@ type Worker struct {
 }
 
 // NewWorkerPool creates a new worker pool
-func NewWorkerPool(maxWorkers int, taskQueueSize int) *WorkerPool {
+func NewWorkerPool(maxWorkers int, taskQueueSize int, taskTimeout time.Duration) *WorkerPool {
 	// Use taskQueueSize if provided, otherwise fallback to maxWorkers*2
 	queueSize := taskQueueSize
 	if queueSize <= 0 {
 		queueSize = maxWorkers * 2
 	}
 
-	logger.Infof("Creating worker pool: maxWorkers=%d, taskQueueSize=%d", maxWorkers, queueSize)
+	if taskTimeout <= 0 {
+		taskTimeout = 6 * time.Minute
+	}
+
+	logger.Infof("Creating worker pool: maxWorkers=%d, taskQueueSize=%d, taskTimeout=%v", maxWorkers, queueSize, taskTimeout)
 
 	return &WorkerPool{
 		maxWorkers:   maxWorkers,
 		taskQueue:    make(chan *WorkerTask, queueSize),
 		shutdownChan: make(chan struct{}),
+		taskTimeout:  taskTimeout,
 	}
 }
 
@@ -279,8 +285,7 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 		w.id, task.ID, routerID, symbol, chainID, atomic.LoadInt32(&w.pool.activeWorkers))
 
 	// Create timeout context to prevent workers from blocking forever
-	// 6 minutes = enough time for receipt wait (5 min) + RPC calls
-	taskCtx, cancel := context.WithTimeout(ctx, 6*time.Minute)
+	taskCtx, cancel := context.WithTimeout(ctx, w.pool.taskTimeout)
 	defer cancel()
 
 	// Process the task with retry logic
