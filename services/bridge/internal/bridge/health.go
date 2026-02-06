@@ -62,17 +62,34 @@ func (b *Bridge) healthCheck(ctx context.Context) {
 
 // performHealthCheck performs health checks on all chains
 func (b *Bridge) performHealthCheck(ctx context.Context) {
-	// Log worker pool status for debugging
-	if b.workerPool != nil {
-		workerStats := b.workerPool.GetStats()
+	b.oraclePoolsMu.RLock()
+	totalActive := int32(0)
+	totalMax := 0
+	totalPending := 0
+	totalCapacity := 0
+	poolCount := 0
+
+	for routerID, pool := range b.oraclePools {
+		stats := pool.GetStats()
+		totalActive += stats.ActiveTasks
+		totalMax += stats.MaxWorkers
+		totalPending += stats.PendingTasks
+		totalCapacity += stats.TotalCapacity
+		poolCount++
+
+		logger.Infof("[HEALTH] Oracle pool [%s]: active=%d/%d, pending=%d/%d",
+			routerID, stats.ActiveTasks, stats.MaxWorkers,
+			stats.PendingTasks, stats.TotalCapacity)
+	}
+	b.oraclePoolsMu.RUnlock()
+
+	if poolCount > 0 {
 		queueSize := 0
 		if b.eventSource != nil {
 			queueSize = b.eventSource.GetQueueSize()
 		}
-		logger.Infof("[HEALTH] Worker pool: active=%d/%d, pending=%d/%d, update_queue=%d",
-			workerStats.ActiveTasks, workerStats.MaxWorkers,
-			workerStats.PendingTasks, workerStats.TotalCapacity,
-			queueSize)
+		logger.Infof("[HEALTH] Total worker pools: %d, aggregate active=%d/%d, pending=%d/%d, update_queue=%d",
+			poolCount, totalActive, totalMax, totalPending, totalCapacity, queueSize)
 	}
 
 	// Check source chain
