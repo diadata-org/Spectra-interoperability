@@ -166,7 +166,7 @@ func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transa
 		tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol, txCtx.UpdateRequest.DestinationChain.ChainID)
 
 	confirmStartTime := time.Now()
-	receipt, err := h.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash())
+	receipt, err := h.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash(), txCtx.UpdateRequest.RouterID)
 	if err != nil {
 		h.recordFailure(txCtx, "confirmation", "receipt_timeout")
 		logger.Errorf("[TX-CONFIRM] Failed to get receipt after %v: tx=%s, router=%s, symbol=%s, chain=%d, error=%v",
@@ -404,8 +404,8 @@ func (h *TransactionHandler) getMonitoringInfo(txCtx *TransactionContext) string
 }
 
 // waitForReceipt waits for a transaction receipt
-func (h *TransactionHandler) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash) (*types.Receipt, error) {
-	logger.Infof("Waiting for transaction receipt: %s", txHash.Hex())
+func (h *TransactionHandler) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash, routerID string) (*types.Receipt, error) {
+	logger.Infof("Waiting for transaction receipt: %s, router=%s", txHash.Hex(), routerID)
 
 	timeout := time.After(5 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
@@ -423,12 +423,12 @@ func (h *TransactionHandler) waitForReceipt(ctx context.Context, client rpc.EthC
 			receipt, err := client.TransactionReceipt(ctx, txHash)
 			if err != nil {
 				if attempts%12 == 0 { // Log every minute
-					logger.Debugf("Still waiting for receipt %s (attempt %d): %v", txHash.Hex(), attempts, err)
+					logger.Debugf("Still waiting for receipt %s (attempt %d), router=%s: %v", txHash.Hex(), attempts, routerID, err)
 				}
 				continue
 			}
-			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d",
-				txHash.Hex(), receipt.Status, receipt.GasUsed)
+			logger.Infof("Transaction receipt received: %s, status: %d, gas used: %d, router=%s",
+				txHash.Hex(), receipt.Status, receipt.GasUsed, routerID)
 			return receipt, nil
 		}
 	}
