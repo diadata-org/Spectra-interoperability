@@ -20,6 +20,7 @@ type WorkerTask struct {
 
 // WorkerPool manages a pool of workers for processing update requests
 type WorkerPool struct {
+	routerID         string            // Router/oracle identifier for logging
 	maxWorkers       int
 	taskQueue        chan *WorkerTask
 	workers          []*Worker
@@ -43,7 +44,7 @@ type Worker struct {
 }
 
 // NewWorkerPool creates a new worker pool
-func NewWorkerPool(maxWorkers int, taskQueueSize int, taskTimeout time.Duration) *WorkerPool {
+func NewWorkerPool(routerID string, maxWorkers int, taskQueueSize int, taskTimeout time.Duration) *WorkerPool {
 	// Use taskQueueSize if provided, otherwise fallback to maxWorkers*2
 	queueSize := taskQueueSize
 	if queueSize <= 0 {
@@ -54,9 +55,10 @@ func NewWorkerPool(maxWorkers int, taskQueueSize int, taskTimeout time.Duration)
 		taskTimeout = 6 * time.Minute
 	}
 
-	logger.Infof("Creating worker pool: maxWorkers=%d, taskQueueSize=%d, taskTimeout=%v", maxWorkers, queueSize, taskTimeout)
+	logger.Infof("Creating worker pool for router %s: maxWorkers=%d, taskQueueSize=%d, taskTimeout=%v", routerID, maxWorkers, queueSize, taskTimeout)
 
 	return &WorkerPool{
+		routerID:     routerID,
 		maxWorkers:   maxWorkers,
 		taskQueue:    make(chan *WorkerTask, queueSize),
 		shutdownChan: make(chan struct{}),
@@ -167,14 +169,14 @@ func (wp *WorkerPool) healthMonitor(ctx context.Context) {
 
 			// Log warning if queue is getting full (>80% capacity)
 			if queueCap > 0 && float64(queueSize)/float64(queueCap) > 0.8 {
-				logger.Warnf("Worker pool queue nearing capacity: %d/%d (%.1f%%), active workers: %d/%d",
-					queueSize, queueCap, float64(queueSize)/float64(queueCap)*100, activeCount, wp.maxWorkers)
+				logger.Warnf("Worker pool queue nearing capacity for %s: %d/%d (%.1f%%), active workers: %d/%d",
+					wp.routerID, queueSize, queueCap, float64(queueSize)/float64(queueCap)*100, activeCount, wp.maxWorkers)
 			}
 
 			// Log warning if all workers are busy and queue has items
 			if int(activeCount) >= wp.maxWorkers && queueSize > 0 {
-				logger.Warnf("All %d workers busy with %d tasks queued - consider increasing worker count",
-					wp.maxWorkers, queueSize)
+				logger.Warnf("All %d workers busy for %s with %d tasks queued - consider increasing worker count",
+					wp.maxWorkers, wp.routerID, queueSize)
 			}
 
 			logger.Debugf("Worker pool health: active=%d/%d, queue=%d/%d",

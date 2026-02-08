@@ -382,6 +382,22 @@ func (b *Bridge) Start(ctx context.Context) error {
 
 	logger.Info("Starting bridge service")
 
+	// Load chain state per oracle per symbol
+	if b.routerRegistry != nil {
+		logger.Info("Fetching router state from on-chain...")
+		ethClients := make(map[int64]rpc.EthClient)
+		for chainID, writeClient := range b.writeClients {
+			ethClients[chainID] = writeClient.GetEthClient()
+		}
+		routers := b.routerRegistry.GetActiveRouters()
+		for _, router := range routers {
+			if err := router.FetchOracleStateFromOnChain(ctx, ethClients); err != nil {
+				logger.Warnf("Router state fetch failed for %s: %v", router.ID(), err)
+			}
+		}
+		logger.Info("Router state fetch completed")
+	}
+
 	// Start transaction queue manager
 	b.queueManager.Start()
 
@@ -474,6 +490,7 @@ func (b *Bridge) getOrCreateOraclePool(routerID string) *worker.WorkerPool {
 		b.workerPoolConfig.TaskTimeout.Duration())
 
 	pool = worker.NewWorkerPool(
+		routerID,
 		b.workerPoolConfig.MaxWorkers,
 		b.workerPoolConfig.TaskQueueSize,
 		b.workerPoolConfig.TaskTimeout.Duration(),

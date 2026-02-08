@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
@@ -14,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
+	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/utils"
 )
@@ -776,6 +778,66 @@ func (gr *GenericRouter) GetStats() GenericRouterStats {
 	gr.mu.RLock()
 	defer gr.mu.RUnlock()
 	return gr.stats
+}
+
+// FetchOracleStateFromOnChain fetches the latest state from on-chain contracts
+func (gr *GenericRouter) FetchOracleStateFromOnChain(ctx context.Context, clients map[int64]rpc.EthClient) error {
+	logger.Infof("Fetching oracle state from on-chain for router: %s", gr.config.ID)
+
+	startTime := time.Now()
+	totalDestinations := 0
+	successfulFetches := 0
+
+	// Get symbols from router config
+	symbols := GetSymbolsFromConfig(gr.config)
+	if len(symbols) == 0 {
+		logger.Infof("No symbols configured for router %s, skipping fetch", gr.config.ID)
+		return nil
+	}
+
+	logger.Infof("Found %d symbols in router config for fetch: %v", len(symbols), symbols)
+
+	for _, dest := range gr.config.Destinations {
+		client, exists := clients[dest.ChainID]
+		if !exists {
+			logger.Warnf("No client found for chain %d, skipping fetch", dest.ChainID)
+			continue
+		}
+
+		totalDestinations += len(symbols)
+
+		for _, symbol := range symbols {
+			value, timestamp, err := utils.GetValueFromOracleContract(ctx, client, common.HexToAddress(dest.Contract), symbol)
+			if err != nil {
+				logger.Warnf("Failed to fetch on-chain state for %s on chain %d: %v", symbol, dest.ChainID, err)
+				continue
+			}
+
+			// Update in-memory cache
+			destKey := gr.generateDestinationKey(dest, symbol)
+			state := gr.getOrCreateDestinationState(destKey)
+
+			state.mu.Lock()
+			if timestamp > 0 {
+				state.lastUpdate = time.Unix(int64(timestamp), 0)
+				state.lastTimestamp = timestamp
+			}
+			if value != nil && value.Sign() != 0 {
+				state.lastPrice = value.String()
+			}
+			state.mu.Unlock()
+
+			successfulFetches++
+			logger.Infof("Fetched state for %s on chain %d: timestamp=%d, price=%s",
+				symbol, dest.ChainID, timestamp, value.String())
+		}
+	}
+
+	duration := time.Since(startTime)
+	logger.Infof("Router state fetch completed for %s: %d/%d states fetched in %v",
+		gr.config.ID, successfulFetches, totalDestinations, duration)
+
+	return nil
 }
 
 // ProcessingConfig returns the router's processing configuration
