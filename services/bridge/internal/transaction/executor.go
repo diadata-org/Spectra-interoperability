@@ -47,33 +47,33 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 	auth := e.receiverClient.GetAuth()
 	contractAddress := common.HexToAddress(req.ContractAddr)
 
-	logger.Infof("[PARAM-DEBUG] Method: %s, Contract: %s, ParamCount: %d", req.MethodName, req.ContractAddr, len(req.Params))
+	logger.Debugf("[PARAM-DEBUG] Method: %s, Contract: %s, ParamCount: %d", req.MethodName, req.ContractAddr, len(req.Params))
 
 	for i, param := range req.Params {
 		if param == nil {
-			logger.Infof("[PARAM-DEBUG] params[%d]: NIL", i)
+			logger.Debugf("[PARAM-DEBUG] params[%d]: NIL", i)
 			continue
 		}
 
 		switch v := param.(type) {
 		case []*big.Int:
-			logger.Infof("[PARAM-DEBUG] params[%d]: Type=[]*big.Int, Len=%d", i, len(v))
+			logger.Debugf("[PARAM-DEBUG] params[%d]: Type=[]*big.Int, Len=%d", i, len(v))
 			if len(v) > 0 && len(v) <= 5 {
 				for j, val := range v {
-					logger.Infof("[PARAM-DEBUG]   [%d]=%s", j, val.String())
+					logger.Debugf("[PARAM-DEBUG]   [%d]=%s", j, val.String())
 				}
 			}
 		case []interface{}:
-			logger.Infof("[PARAM-DEBUG] params[%d]: Type=[]interface{}, Len=%d - NOT CONVERTED!", i, len(v))
+			logger.Debugf("[PARAM-DEBUG] params[%d]: Type=[]interface{}, Len=%d - NOT CONVERTED!", i, len(v))
 			if len(v) > 0 && len(v) <= 5 {
 				for j, val := range v {
-					logger.Infof("[PARAM-DEBUG]   [%d]=%T: %v", j, val, val)
+					logger.Debugf("[PARAM-DEBUG]   [%d]=%T: %v", j, val, val)
 				}
 			}
 		case *big.Int:
-			logger.Infof("[PARAM-DEBUG] params[%d]: Type=*big.Int, Value=%s", i, v.String())
+			logger.Debugf("[PARAM-DEBUG] params[%d]: Type=*big.Int, Value=%s", i, v.String())
 		default:
-			logger.Infof("[PARAM-DEBUG] params[%d]: Type=%T, Value=%v", i, param, param)
+			logger.Debugf("[PARAM-DEBUG] params[%d]: Type=%T, Value=%v", i, param, param)
 		}
 	}
 
@@ -84,7 +84,11 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 
 	fromAddress := auth.From
 
-	logger.Infof("Simulating transaction for method %s on contract %s", req.MethodName, req.ContractAddr)
+	routerID := "unknown"
+	if req.UpdateRequest != nil {
+		routerID = req.UpdateRequest.RouterID
+	}
+	logger.Infof("Simulating transaction for method %s on contract %s, router=%s", req.MethodName, req.ContractAddr, routerID)
 	callMsg := ethereum.CallMsg{
 		From:     fromAddress,
 		To:       &contractAddress,
@@ -114,7 +118,10 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 		}
 	}
 
-	logger.Infof("Transaction simulation successful, proceeding to send transaction")
+	if req.UpdateRequest != nil && routerID != "unknown" {
+		routerID = req.UpdateRequest.RouterID
+	}
+	logger.Infof("Transaction simulation successful, proceeding to send transaction, router=%s", routerID)
 
 	// CRITICAL: Allocate nonce immediately before sending to minimize staleness window
 	// This happens AFTER simulation to reduce the time between allocation and sending

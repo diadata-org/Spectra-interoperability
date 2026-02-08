@@ -272,7 +272,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 	routersUsed := 0
 	for _, result := range routingResults {
 		if result.Routed {
-			logger.Infof("Router %s approved event %s: %s", result.RouterID, event.EventName, result.Reason)
+			logger.Infof("Router approved event: router=%s, event=%s, reason=%s", result.RouterID, event.EventName, result.Reason)
 
 			// Get the router to apply time threshold filtering after enrichment
 			router := gep.routerRegistry.GetRouterByID(result.RouterID)
