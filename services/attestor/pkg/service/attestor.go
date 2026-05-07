@@ -21,9 +21,11 @@ type AttestorService struct {
 	signer   interfaces.IntentSigner
 	metrics  interfaces.MetricsCollector
 
-	mu         sync.RWMutex
-	running    bool
-	cancelFunc context.CancelFunc
+	mu                 sync.RWMutex
+	running            bool
+	cancelFunc         context.CancelFunc
+	lastPublishedPrice map[string]*big.Int
+	lastPublishedAt    map[string]time.Time
 }
 
 // NewAttestorService creates a new attestor service
@@ -35,11 +37,13 @@ func NewAttestorService(
 	metrics interfaces.MetricsCollector,
 ) *AttestorService {
 	return &AttestorService{
-		config:   cfg,
-		oracle:   oracle,
-		registry: registry,
-		signer:   signer,
-		metrics:  metrics,
+		config:             cfg,
+		oracle:             oracle,
+		registry:           registry,
+		signer:             signer,
+		metrics:            metrics,
+		lastPublishedPrice: make(map[string]*big.Int),
+		lastPublishedAt:    make(map[string]time.Time),
 	}
 }
 
@@ -141,6 +145,83 @@ func (s *AttestorService) IsRunning() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.running
+}
+
+func (s *AttestorService) publishPolicyEnabled() bool {
+	return s.config.Attestor.DeviationTrigger || s.config.Attestor.ForceUpdateInterval > 0
+}
+
+func (s *AttestorService) shouldPublishPriceUpdate(symbol string, price *big.Int, now time.Time) (bool, string) {
+	if !s.publishPolicyEnabled() {
+		return true, "poll"
+	}
+
+	s.mu.RLock()
+	lastPrice, hasLastPrice := s.lastPublishedPrice[symbol]
+	lastPublishedAt, hasLastPublishedAt := s.lastPublishedAt[symbol]
+	s.mu.RUnlock()
+
+	if !hasLastPrice || lastPrice == nil || lastPrice.Sign() <= 0 || !hasLastPublishedAt || lastPublishedAt.IsZero() {
+		return true, "initial"
+	}
+
+	if s.config.Attestor.DeviationTrigger {
+		deviationBips := priceDeviationBips(lastPrice, price)
+		if deviationBips.Cmp(big.NewInt(int64(s.config.Attestor.DeviationThreshold))) >= 0 {
+			logger.WithFields(map[string]interface{}{
+				"symbol":          symbol,
+				"last_price":      lastPrice.String(),
+				"new_price":       price.String(),
+				"deviation_bips":  deviationBips.String(),
+				"threshold_bips":  s.config.Attestor.DeviationThreshold,
+				"publish_trigger": "deviation",
+			}).Info("Publishing due to price deviation")
+			return true, "deviation"
+		}
+	}
+
+	if s.config.Attestor.ForceUpdateInterval > 0 && !now.Before(lastPublishedAt.Add(s.config.Attestor.ForceUpdateInterval)) {
+		logger.WithFields(map[string]interface{}{
+			"symbol":                symbol,
+			"time_since_publish":    now.Sub(lastPublishedAt).String(),
+			"force_update_interval": s.config.Attestor.ForceUpdateInterval.String(),
+			"publish_trigger":       "force_interval",
+		}).Info("Publishing due to force update interval")
+		return true, "force_interval"
+	}
+
+	logger.WithFields(map[string]interface{}{
+		"symbol":                symbol,
+		"price":                 price.String(),
+		"last_price":            lastPrice.String(),
+		"time_since_publish":    now.Sub(lastPublishedAt).String(),
+		"deviation_trigger":     s.config.Attestor.DeviationTrigger,
+		"force_update_interval": s.config.Attestor.ForceUpdateInterval.String(),
+	}).Debug("Skipping publish after polling price")
+	return false, "skip"
+}
+
+func priceDeviationBips(oldPrice, newPrice *big.Int) *big.Int {
+	if oldPrice == nil || oldPrice.Sign() <= 0 {
+		return big.NewInt(0)
+	}
+
+	deviation := new(big.Int).Sub(newPrice, oldPrice)
+	if deviation.Sign() < 0 {
+		deviation.Neg(deviation)
+	}
+
+	deviation.Mul(deviation, big.NewInt(10000))
+	deviation.Div(deviation, oldPrice)
+	return deviation
+}
+
+func (s *AttestorService) recordPublishedPrice(symbol string, price *big.Int, publishedAt time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.lastPublishedPrice[symbol] = new(big.Int).Set(price)
+	s.lastPublishedAt[symbol] = publishedAt
 }
 
 func (s *AttestorService) shouldPublishInReplicaMode(ctx context.Context, symbol string) bool {
@@ -250,6 +331,11 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 		return errors.NewOracleError(symbol, fmt.Sprintf("failed to fetch value (called %s)", contractFunction), err)
 	}
 
+	shouldPublish, publishReason := s.shouldPublishPriceUpdate(symbol, price, time.Now())
+	if !shouldPublish {
+		return nil
+	}
+
 	// Default volume
 	volume := big.NewInt(1)
 
@@ -277,11 +363,13 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 		return errors.NewRegistryError("publish", "", err)
 	}
 	s.metrics.RecordIntentPublished(symbol, true)
+	s.recordPublishedPrice(symbol, price, time.Now())
 
 	logger.WithFields(map[string]interface{}{
-		"symbol":   symbol,
-		"tx_hash":  txHash,
-		"duration": time.Since(start).String(),
+		"symbol":          symbol,
+		"tx_hash":         txHash,
+		"publish_trigger": publishReason,
+		"duration":        time.Since(start).String(),
 	}).Info("Successfully published intent")
 
 	return nil
@@ -298,6 +386,8 @@ func (s *AttestorService) processBatchAttestation(ctx context.Context) error {
 
 	// Collect symbol data
 	symbolData := make([]interfaces.SymbolData, 0, len(s.config.Attestor.Symbols))
+	publishReasons := make(map[string]string)
+	shouldPublishBatch := !s.publishPolicyEnabled()
 
 symbolLoop:
 	for _, symbol := range s.config.Attestor.Symbols {
@@ -342,6 +432,12 @@ symbolLoop:
 			continue
 		}
 
+		shouldPublish, publishReason := s.shouldPublishPriceUpdate(symbol, price, time.Now())
+		if shouldPublish {
+			shouldPublishBatch = true
+			publishReasons[symbol] = publishReason
+		}
+
 		volume := big.NewInt(1)
 
 		logFields := map[string]interface{}{
@@ -356,11 +452,19 @@ symbolLoop:
 			Price:  price,
 			Volume: volume,
 		})
-		s.metrics.RecordIntentCreated(symbol, true)
 	}
 
 	if len(symbolData) == 0 {
 		return fmt.Errorf("no valid symbol data collected")
+	}
+
+	if !shouldPublishBatch {
+		logger.WithField("symbol_count", len(symbolData)).Debug("Skipping batch publish after polling prices")
+		return nil
+	}
+
+	for _, data := range symbolData {
+		s.metrics.RecordIntentCreated(data.Symbol, true)
 	}
 
 	// Sign batch intent
@@ -383,12 +487,14 @@ symbolLoop:
 
 	for _, data := range symbolData {
 		s.metrics.RecordIntentPublished(data.Symbol, true)
+		s.recordPublishedPrice(data.Symbol, data.Price, time.Now())
 	}
 
 	logger.WithFields(map[string]interface{}{
-		"symbol_count": len(symbolData),
-		"tx_hash":      txHash,
-		"duration":     time.Since(start).String(),
+		"symbol_count":     len(symbolData),
+		"tx_hash":          txHash,
+		"publish_triggers": publishReasons,
+		"duration":         time.Since(start).String(),
 	}).Info("Successfully published batch intent")
 
 	return nil
@@ -405,6 +511,11 @@ func (s *AttestorService) Health() map[string]interface{} {
 			"symbols":      s.config.Attestor.Symbols,
 			"batch_mode":   s.config.Attestor.BatchMode,
 			"polling_time": s.config.Attestor.PollingTime.String(),
+			"publish_policy": map[string]interface{}{
+				"deviation_trigger":     s.config.Attestor.DeviationTrigger,
+				"deviation_threshold":   s.config.Attestor.DeviationThreshold,
+				"force_update_interval": s.config.Attestor.ForceUpdateInterval.String(),
+			},
 		},
 	}
 }

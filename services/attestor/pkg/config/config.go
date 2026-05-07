@@ -99,15 +99,18 @@ type Config struct {
 	} `mapstructure:"registry"`
 
 	Attestor struct {
-		PrivateKey         string         `mapstructure:"private_key"`
-		Symbols            []string       `mapstructure:"symbols"`
-		PollingTime        time.Duration  `mapstructure:"polling_time"`
-		BatchMode          bool           `mapstructure:"batch_mode"`
-		Mode               AttestorMode   `mapstructure:"mode"`
-		ReplicaBackupDelay int            `mapstructure:"replica_backup_delay"`
-		IntentType         string         `mapstructure:"intent_type"`
-		IntentVersion      string         `mapstructure:"intent_version"`
-		Guardian           GuardianConfig `mapstructure:"guardian"`
+		PrivateKey          string         `mapstructure:"private_key"`
+		Symbols             []string       `mapstructure:"symbols"`
+		PollingTime         time.Duration  `mapstructure:"polling_time"`
+		BatchMode           bool           `mapstructure:"batch_mode"`
+		Mode                AttestorMode   `mapstructure:"mode"`
+		ReplicaBackupDelay  int            `mapstructure:"replica_backup_delay"`
+		IntentType          string         `mapstructure:"intent_type"`
+		IntentVersion       string         `mapstructure:"intent_version"`
+		DeviationTrigger    bool           `mapstructure:"deviation_trigger"`
+		DeviationThreshold  int            `mapstructure:"deviation_threshold"`
+		ForceUpdateInterval time.Duration  `mapstructure:"force_update_interval"`
+		Guardian            GuardianConfig `mapstructure:"guardian"`
 	} `mapstructure:"attestor"`
 
 	Logging struct {
@@ -181,6 +184,9 @@ func Init(configPath string) (*Config, error) {
 	v.BindEnv("attestor.replica_backup_delay", "ATTESTOR_ATTESTOR_REPLICA_BACKUP_DELAY")
 	v.BindEnv("attestor.intent_type", "ATTESTOR_ATTESTOR_INTENT_TYPE")
 	v.BindEnv("attestor.intent_version", "ATTESTOR_ATTESTOR_INTENT_VERSION")
+	v.BindEnv("attestor.deviation_trigger", "ATTESTOR_ATTESTOR_DEVIATION_TRIGGER")
+	v.BindEnv("attestor.deviation_threshold", "ATTESTOR_ATTESTOR_DEVIATION_THRESHOLD")
+	v.BindEnv("attestor.force_update_interval", "ATTESTOR_ATTESTOR_FORCE_UPDATE_INTERVAL")
 	v.BindEnv("oracle.client_type", "ATTESTOR_ORACLE_CLIENT_TYPE")
 	v.BindEnv("attestor.guardian.default.max_deviation_bips", "ATTESTOR_GUARDIAN_MAX_DEVIATION_BIPS")
 	v.BindEnv("attestor.guardian.default.max_timestamp_age", "ATTESTOR_GUARDIAN_MAX_TIMESTAMP_AGE")
@@ -199,6 +205,9 @@ func Init(configPath string) (*Config, error) {
 	v.SetDefault("attestor.replica_backup_delay", 300)
 	v.SetDefault("attestor.intent_type", "OracleUpdate")
 	v.SetDefault("attestor.intent_version", "1.0")
+	v.SetDefault("attestor.deviation_trigger", false)
+	v.SetDefault("attestor.deviation_threshold", 50)
+	v.SetDefault("attestor.force_update_interval", "0s")
 	v.SetDefault("attestor.guardian.default.max_deviation_bips", 500)
 	v.SetDefault("attestor.guardian.default.max_timestamp_age", 3600)
 	v.SetDefault("attestor.guardian.default.min_guardian_matches", 1)
@@ -315,6 +324,14 @@ func validateConfig(cfg *Config) error {
 
 	if cfg.Attestor.PollingTime <= 0 {
 		return fmt.Errorf("invalid polling time: %v", cfg.Attestor.PollingTime)
+	}
+
+	if cfg.Attestor.DeviationThreshold < 0 || cfg.Attestor.DeviationThreshold > 10000 {
+		return fmt.Errorf("invalid deviation_threshold: %d (must be between 0 and 10000)", cfg.Attestor.DeviationThreshold)
+	}
+
+	if cfg.Attestor.ForceUpdateInterval < 0 {
+		return fmt.Errorf("invalid force_update_interval: %v (must be zero or positive)", cfg.Attestor.ForceUpdateInterval)
 	}
 
 	// Validate guardian params
