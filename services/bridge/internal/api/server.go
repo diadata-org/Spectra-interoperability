@@ -27,6 +27,7 @@ type Server struct {
 	db             *database.DB
 	metrics        *metrics.Collector
 	routerRegistry interface{} // Will be *router.Registry when available
+	priceCache     interface{} // Will be *processor.PriceCache when available
 
 	router          *mux.Router
 	httpServer      *http.Server
@@ -39,6 +40,7 @@ func NewServer(
 	db *database.DB,
 	metricsCollector *metrics.Collector,
 	routerRegistry interface{}, // Pass as interface{} to avoid import cycle
+	priceCache interface{}, // Pass as interface{} to avoid import cycle
 ) *Server {
 	s := &Server{
 		config:         &cfgService.GetInfrastructure().API,
@@ -46,6 +48,7 @@ func NewServer(
 		db:             db,
 		metrics:        metricsCollector,
 		routerRegistry: routerRegistry,
+		priceCache:     priceCache,
 		router:         mux.NewRouter(),
 	}
 
@@ -154,6 +157,10 @@ func (s *Server) setupRoutes() {
 	// Symbol endpoints
 	v1.HandleFunc("/symbols", s.handleGetSymbols).Methods("GET")
 	v1.HandleFunc("/symbols/{symbol}/updates", s.handleGetSymbolUpdates).Methods("GET")
+
+	// Price cache endpoints
+	v1.HandleFunc("/prices", s.handleGetPrices).Methods("GET")
+	v1.HandleFunc("/prices/{symbol}", s.handleGetPrice).Methods("GET")
 
 	// Failover endpoints (if available)
 	if s.failoverHandler != nil {

@@ -44,6 +44,7 @@ type GenericEventProcessor struct {
 	updateChan chan<- *types.UpdateRequest
 
 	dedupCache       *DedupCache
+	priceCache       *PriceCache
 	metricsCollector *metrics.Collector
 	reportQueueSize  func() // Callback to report queue size after enqueue
 
@@ -107,6 +108,7 @@ func NewGenericEventProcessor(
 		errorChan:        errorChan,
 		updateChan:       updateChan,
 		dedupCache:       NewDedupCache(cfg.DedupCacheSize, cfg.DedupCacheTTL.Duration()),
+		priceCache:       NewPriceCache(),
 		metricsCollector: metricsCollector,
 		reportQueueSize:  reportQueueSize,
 		stopChan:         make(chan struct{}),
@@ -457,16 +459,79 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 			ProcessedAt:     time.Now(),
 		}
 
-		if symbol, ok := extractedData.Event["symbol"].(string); ok {
-			processedEvent.Symbol = symbol
+		// Try to extract symbol, price, and timestamp from enrichment (fullIntent) first
+		var oracleIntent *types.OracleIntent
+		if fullIntent, ok := extractedData.Enrichment["fullIntent"]; ok {
+			// Try to convert to *types.OracleIntent
+			if intent, ok := fullIntent.(*types.OracleIntent); ok {
+				oracleIntent = intent
+				if intent.Symbol != "" {
+					processedEvent.Symbol = intent.Symbol
+				}
+				if intent.Price != nil {
+					processedEvent.Price = intent.Price.String()
+				}
+				if intent.Timestamp != nil {
+					processedEvent.Timestamp = intent.Timestamp.Uint64()
+				}
+			}
 		}
 
-		if priceValue, ok := extractedData.Event["price"]; ok {
-			processedEvent.Price = parsePrice(priceValue)
+		// Fallback to extracting from raw event if not found in enrichment
+		if processedEvent.Symbol == "" {
+			if symbol, ok := extractedData.Event["symbol"].(string); ok {
+				processedEvent.Symbol = symbol
+			}
 		}
 
-		if timestampValue, ok := extractedData.Event["timestamp"]; ok {
-			processedEvent.Timestamp = parseTimestamp(timestampValue)
+		if processedEvent.Price == "" {
+			if priceValue, ok := extractedData.Event["price"]; ok {
+				processedEvent.Price = parsePrice(priceValue)
+			}
+		}
+
+		if processedEvent.Timestamp == 0 {
+			if timestampValue, ok := extractedData.Event["timestamp"]; ok {
+				processedEvent.Timestamp = parseTimestamp(timestampValue)
+			}
+		}
+
+		// Update in-memory price cache if we have both symbol and price
+		if processedEvent.Symbol != "" && processedEvent.Price != "" && processedEvent.Timestamp > 0 {
+			var nonce, expiry, chainID *big.Int
+			var signer common.Address
+			var signature []byte
+			var source string
+			var intentType, version string
+
+			// Extract additional fields from oracleIntent if available
+			if oracleIntent != nil {
+				nonce = oracleIntent.Nonce
+				expiry = oracleIntent.Expiry
+				signer = oracleIntent.Signer
+				signature = oracleIntent.Signature
+				source = oracleIntent.Source
+				chainID = oracleIntent.ChainID
+				intentType = oracleIntent.IntentType
+				version = oracleIntent.Version
+			}
+
+			gep.priceCache.UpdatePriceWithMetadata(
+				processedEvent.Symbol,
+				processedEvent.Price,
+				compositeIntentHash,
+				processedEvent.Timestamp,
+				intentType,
+				version,
+				nonce,
+				expiry,
+				chainID,
+				signer,
+				signature,
+				source,
+			)
+			logger.Debugf("Updated price cache: symbol=%s, price=%s, timestamp=%d, signer=%s",
+				processedEvent.Symbol, processedEvent.Price, processedEvent.Timestamp, signer.Hex())
 		}
 
 		logger.Infof("Saving ProcessedEvent with composite IntentHash: %s (len=%d) for destination: %s", compositeIntentHash, len(compositeIntentHash), destID)
@@ -682,4 +747,9 @@ func parseTimestamp(timestampValue interface{}) uint64 {
 			}
 		}
 	}
+}
+
+// GetPriceCache returns the price cache instance
+func (gep *GenericEventProcessor) GetPriceCache() *PriceCache {
+	return gep.priceCache
 }

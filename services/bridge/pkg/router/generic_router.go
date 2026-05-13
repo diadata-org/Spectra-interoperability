@@ -179,7 +179,7 @@ func (gr *GenericRouter) ShouldRoute(eventName string, data *config.ExtractedDat
 func (gr *GenericRouter) evaluateCondition(condition config.TriggerCondition, data *config.ExtractedData) bool {
 	value, err := gr.getFieldValue(condition.Field, data)
 	if err != nil {
-		logger.Debugf("Failed to get field value for condition: %v", err)
+		logger.Debugf("Failed to get field value for condition: %s  Operator: %s  Value: %v, error: %v", condition.Field, condition.Operator, condition.Value, err)
 		return false
 	}
 

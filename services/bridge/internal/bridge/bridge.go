@@ -13,6 +13,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/cron"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/leader"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
@@ -54,8 +55,13 @@ type Bridge struct {
 	// On-chain monitor for replica failover
 	onChainMonitor *leader.OnChainMonitor
 
+	// Cron service for periodic updates
+	cronService *cron.Service
 	// Event source
 	eventSource *EventSource
+
+	// Event processor
+	eventProcessor *processor.GenericEventProcessor
 
 	// Metrics tracking
 	metricsManager *MetricsManager
@@ -254,6 +260,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
 	}
 	eventProcessor = ep
+	bridge.eventProcessor = eventProcessor
 
 	// Wrap scanner and processor in EventSource
 	bridge.eventSource = NewEventSource(scanner, eventProcessor, eventChan, bridge.updateChan, errorChan)
@@ -286,6 +293,16 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 
 	bridge.onChainMonitor = leader.NewOnChainMonitor(routerRegistry, ethClients, monitorConfig)
+
+	// Initialize cron service for periodic updates
+	cronConfig := cfgService.GetInfrastructure().CronService
+	bridge.cronService = cron.NewService(
+		eventProcessor.GetPriceCache(),
+		routerRegistry,
+		ethClients,
+		bridge.updateChan,
+		cronConfig,
+	)
 
 	logger.Infof("Bridge initialized with %d routers", routerRegistry.Count())
 
@@ -372,6 +389,13 @@ func (b *Bridge) Start(ctx context.Context) error {
 	if b.onChainMonitor != nil {
 		b.onChainMonitor.Start()
 		time.Sleep(2 * time.Second) // Wait for initial check
+	}
+
+	// Start cron service
+	if b.cronService != nil {
+		if err := b.cronService.Start(); err != nil {
+			return fmt.Errorf("failed to start cron service: %w", err)
+		}
 	}
 
 	// Start worker pool
@@ -464,6 +488,11 @@ func (b *Bridge) Stop(ctx context.Context) error {
 		if err := b.eventSource.Stop(ctx); err != nil {
 			logger.Errorf("Error stopping event source: %v", err)
 		}
+	}
+
+	// Stop cron service
+	if b.cronService != nil {
+		b.cronService.Stop()
 	}
 
 	// Stop worker pool
@@ -574,7 +603,9 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 				}
 			}
 
-			if b.onChainMonitor != nil {
+			if b.onChainMonitor != nil && !updateReq.IsCronTriggered {
+				logger.Infof("Exceptional Updates")
+				// Skip ShouldProcess check for cron-triggered updates
 				symbol := "unknown"
 				if updateReq.Intent != nil && updateReq.Intent.Symbol != "" {
 					symbol = updateReq.Intent.Symbol
@@ -605,15 +636,20 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 					continue
 				}
 
-				// Only set TriggeredByMonitoring if replica failover is actually enabled
+				// Only set IsMonitoringTriggered if replica failover is actually enabled
 				// (not just monitoring-only mode)
 				if b.onChainMonitor.IsEnabled() {
-					updateReq.TriggeredByMonitoring = true
+					updateReq.IsMonitoringTriggered = true
 					logger.Infof("Processing update: monitoring check passed for chain=%d contract=%s symbol=%s",
 						updateReq.DestinationChain.ChainID,
 						updateReq.Contract.Address,
 						symbol)
 				}
+			} else if updateReq.IsCronTriggered {
+				logger.Infof("Processing cron-triggered update for chain=%d contract=%s symbol=%s (bypassing monitoring checks)",
+					updateReq.DestinationChain.ChainID,
+					updateReq.Contract.Address,
+					updateReq.Intent.Symbol)
 			}
 
 			// Create task ID based on available data

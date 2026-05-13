@@ -23,6 +23,7 @@ type Config struct {
 	API              APIConfig                    `json:"api"`
 	Metrics          MetricsConfig                `json:"metrics"`
 	DryRun           bool                         `json:"dry_run"`
+	CronService      CronServiceConfig            `json:"cron_service"`
 }
 
 // DatabaseConfig represents database configuration
@@ -196,4 +197,11 @@ func (d *Duration) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // MarshalYAML implements yaml.Marshaler
 func (d Duration) MarshalYAML() (interface{}, error) {
 	return time.Duration(d).String(), nil
+}
+
+// CronServiceConfig represents cron-based update service configuration
+type CronServiceConfig struct {
+	Enabled        bool     `yaml:"enabled" json:"enabled"`
+	Schedule       string   `yaml:"schedule" json:"schedule"` // Default cron expression, used if router doesn't have time_threshold
+	PriceDeviation float64  `yaml:"price_deviation" json:"price_deviation"` // Default minimum price deviation to trigger update (as percentage)
 }

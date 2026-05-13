@@ -36,6 +36,7 @@ type InfrastructureConfig struct {
 	Metrics        MetricsConfig        `yaml:"metrics" json:"metrics"`
 	Replica        *ReplicaConfig       `yaml:"replica,omitempty" json:"replica,omitempty"`
 	DryRun         bool                 `yaml:"dry_run,omitempty" json:"dry_run,omitempty"`
+	CronService    CronServiceConfig    `yaml:"cron_service" json:"cron_service"`
 }
 
 type ChainConfig struct {
@@ -91,6 +92,7 @@ type RouterDestination struct {
 	Condition      string                  `yaml:"condition,omitempty" json:"condition,omitempty"`
 	TimeThreshold  Duration                `yaml:"time_threshold,omitempty" json:"time_threshold,omitempty"`
 	PriceDeviation string                  `yaml:"price_deviation,omitempty" json:"price_deviation,omitempty"` // e.g., "0.5%" or "1.0%"
+	Cron bool `yaml:"cron,omitempty" json:"cron,omitempty"` // Enable cron-based updates for this destination
 
 	// Gas configuration (from modular version)
 	GasLimit      uint64  `yaml:"gas_limit,omitempty" json:"gas_limit,omitempty"`

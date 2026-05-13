@@ -62,7 +62,7 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 		return err
 	}
 
-	logger.Infof("Processing update for %s on chain %d (elapsed=%v)", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, time.Since(startTime))
+	logger.Infof("[TX-HANDLER] Processing update for %s on chain %d (elapsed=%v)", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, time.Since(startTime))
 
 	if err := h.validate(txCtx); err != nil {
 		return err
@@ -75,11 +75,11 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 	}
 
 	triggeredByMonitoring := ""
-	if txCtx.UpdateRequest.TriggeredByMonitoring && h.onChainMonitor != nil {
+	if txCtx.UpdateRequest.IsMonitoringTriggered && h.onChainMonitor != nil {
 		monitoringInfo := h.getMonitoringInfo(txCtx)
 		triggeredByMonitoring = monitoringInfo
 	}
-	logger.Infof("Transaction sent: %s for %s on chain %d, router=%s, symbol=%s%s",
+	logger.Infof("[TX-HANDLER] Transaction sent: %s for %s on chain %d, router=%s, symbol=%s%s",
 		tx.Hash().Hex(), txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID,
 		txCtx.UpdateRequest.RouterID, txCtx.Symbol, triggeredByMonitoring)
 

@@ -63,6 +63,7 @@ type LegacyRouterDestination struct {
 	Method        DestinationMethodConfig `json:"method"`
 	Condition     string                  `json:"condition"`
 	TimeThreshold Duration                `json:"time_threshold,omitempty"` // Minimum time between updates for this destination
+	Cron          bool                    `json:"cron,omitempty"`           // Enable cron-based updates for this destination
 }
 
 // DestinationMethodConfig defines a contract method call for generic routing
