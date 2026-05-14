@@ -13,6 +13,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/cron"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/leader"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
@@ -41,12 +42,15 @@ type Bridge struct {
 	running            bool
 	stats              *bridgetypes.BridgeStats
 	lastProcessedBlock uint64
+	ctx                context.Context // Context for managing pool lifecycles
 
 	// Goroutine coordination
 	wg sync.WaitGroup
 
-	// Worker management
-	workerPool *worker.WorkerPool
+	// Worker management - per-oracle worker pools for isolation
+	oraclePools      map[string]*worker.WorkerPool // Per-oracle pools (routerID -> pool)
+	oraclePoolsMu    sync.RWMutex                  // Protects oraclePools map
+	workerPoolConfig config.WorkerPoolConfig       // Base config for all pools
 
 	// Router system
 	routerRegistry *router.GenericRegistry
@@ -54,8 +58,13 @@ type Bridge struct {
 	// On-chain monitor for replica failover
 	onChainMonitor *leader.OnChainMonitor
 
+	// Cron service for periodic updates
+	cronService *cron.Service
 	// Event source
 	eventSource *EventSource
+
+	// Event processor
+	eventProcessor *processor.GenericEventProcessor
 
 	// Metrics tracking
 	metricsManager *MetricsManager
@@ -176,13 +185,8 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		return nil, fmt.Errorf(errorMsg)
 	}
 
-	workerPool := worker.NewWorkerPool(
-		cfgService.GetInfrastructure().WorkerPool.MaxWorkers,
-		cfgService.GetInfrastructure().WorkerPool.TaskQueueSize,
-	)
-	if metricsCollector != nil {
-		workerPool.SetMetricsCollector(metricsCollector)
-	}
+	// Store worker pool config for dynamic pool creation
+	workerPoolConfig := cfgService.GetInfrastructure().WorkerPool
 
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
@@ -210,7 +214,8 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 			StartTime:  time.Now(),
 		},
 		lastProcessedBlock: cfgService.GetInfrastructure().Source.StartBlock,
-		workerPool:         workerPool,
+		oraclePools:        make(map[string]*worker.WorkerPool),
+		workerPoolConfig:   workerPoolConfig,
 		routerRegistry:     routerRegistry,
 		metricsManager:     metricsManager,
 		queueManager:       queueManager,
@@ -254,6 +259,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		return nil, fmt.Errorf("failed to create event processor: %w", err)
 	}
 	eventProcessor = ep
+	bridge.eventProcessor = eventProcessor
 
 	// Wrap scanner and processor in EventSource
 	bridge.eventSource = NewEventSource(scanner, eventProcessor, eventChan, bridge.updateChan, errorChan)
@@ -286,6 +292,16 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	}
 
 	bridge.onChainMonitor = leader.NewOnChainMonitor(routerRegistry, ethClients, monitorConfig)
+
+	// Initialize cron service for periodic updates
+	cronConfig := cfgService.GetInfrastructure().CronService
+	bridge.cronService = cron.NewService(
+		eventProcessor.GetPriceCache(),
+		routerRegistry,
+		ethClients,
+		bridge.updateChan,
+		cronConfig,
+	)
 
 	logger.Infof("Bridge initialized with %d routers", routerRegistry.Count())
 
@@ -361,9 +377,26 @@ func (b *Bridge) Start(ctx context.Context) error {
 		return fmt.Errorf("bridge is already running")
 	}
 	b.running = true
+	b.ctx = ctx // Store context for pool management
 	b.mu.Unlock()
 
 	logger.Info("Starting bridge service")
+
+	// Load chain state per oracle per symbol
+	if b.routerRegistry != nil {
+		logger.Info("Fetching router state from on-chain...")
+		ethClients := make(map[int64]rpc.EthClient)
+		for chainID, writeClient := range b.writeClients {
+			ethClients[chainID] = writeClient.GetEthClient()
+		}
+		routers := b.routerRegistry.GetActiveRouters()
+		for _, router := range routers {
+			if err := router.FetchOracleStateFromOnChain(ctx, ethClients); err != nil {
+				logger.Warnf("Router state fetch failed for %s: %v", router.ID(), err)
+			}
+		}
+		logger.Info("Router state fetch completed")
+	}
 
 	// Start transaction queue manager
 	b.queueManager.Start()
@@ -374,8 +407,12 @@ func (b *Bridge) Start(ctx context.Context) error {
 		time.Sleep(2 * time.Second) // Wait for initial check
 	}
 
-	// Start worker pool
-	b.workerPool.Start(ctx)
+	// Start cron service
+	if b.cronService != nil {
+		if err := b.cronService.Start(); err != nil {
+			return fmt.Errorf("failed to start cron service: %w", err)
+		}
+	}
 
 	// Start event source (scanner + processor)
 	if b.eventSource != nil {
@@ -428,6 +465,51 @@ func (b *Bridge) Start(ctx context.Context) error {
 	return nil
 }
 
+// getOrCreateOraclePool dynamically creates a worker pool for an oracle if it doesn't exist
+func (b *Bridge) getOrCreateOraclePool(routerID string) *worker.WorkerPool {
+	b.oraclePoolsMu.RLock()
+	pool, exists := b.oraclePools[routerID]
+	b.oraclePoolsMu.RUnlock()
+
+	if exists {
+		return pool
+	}
+
+	// Create new pool for this oracle/router
+	b.oraclePoolsMu.Lock()
+	defer b.oraclePoolsMu.Unlock()
+
+	if pool, exists := b.oraclePools[routerID]; exists {
+		return pool
+	}
+
+	logger.Infof("Creating new worker pool for oracle/router: %s (workers=%d, queue=%d, timeout=%v)",
+		routerID,
+		b.workerPoolConfig.MaxWorkers,
+		b.workerPoolConfig.TaskQueueSize,
+		b.workerPoolConfig.TaskTimeout.Duration())
+
+	pool = worker.NewWorkerPool(
+		routerID,
+		b.workerPoolConfig.MaxWorkers,
+		b.workerPoolConfig.TaskQueueSize,
+		b.workerPoolConfig.TaskTimeout.Duration(),
+	)
+
+	// Set metrics collector if available
+	if b.metricsManager != nil && b.metricsManager.GetCollector() != nil {
+		pool.SetMetricsCollector(b.metricsManager.GetCollector())
+	}
+
+	// Start the pool
+	pool.Start(b.ctx)
+
+	b.oraclePools[routerID] = pool
+
+	logger.Infof("Worker pool created and started for oracle: %s", routerID)
+	return pool
+}
+
 // Stop stops the bridge service
 func (b *Bridge) Stop(ctx context.Context) error {
 	b.mu.Lock()
@@ -466,8 +548,20 @@ func (b *Bridge) Stop(ctx context.Context) error {
 		}
 	}
 
-	// Stop worker pool
-	b.workerPool.Stop(ctx)
+	// Stop cron service
+	if b.cronService != nil {
+		b.cronService.Stop()
+	}
+
+	// Stop all oracle worker pools
+	b.oraclePoolsMu.Lock()
+	logger.Infof("Stopping %d oracle worker pools", len(b.oraclePools))
+	for routerID, pool := range b.oraclePools {
+		logger.Infof("Stopping worker pool for oracle: %s", routerID)
+		pool.Stop(ctx)
+	}
+	b.oraclePools = make(map[string]*worker.WorkerPool) // Clear the map
+	b.oraclePoolsMu.Unlock()
 
 	// Stop transaction queue manager
 	b.queueManager.Stop()
@@ -574,7 +668,9 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 				}
 			}
 
-			if b.onChainMonitor != nil {
+			if b.onChainMonitor != nil && !updateReq.IsCronTriggered {
+				logger.Infof("Exceptional Updates")
+				// Skip ShouldProcess check for cron-triggered updates
 				symbol := "unknown"
 				if updateReq.Intent != nil && updateReq.Intent.Symbol != "" {
 					symbol = updateReq.Intent.Symbol
@@ -605,15 +701,20 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 					continue
 				}
 
-				// Only set TriggeredByMonitoring if replica failover is actually enabled
+				// Only set IsMonitoringTriggered if replica failover is actually enabled
 				// (not just monitoring-only mode)
 				if b.onChainMonitor.IsEnabled() {
-					updateReq.TriggeredByMonitoring = true
+					updateReq.IsMonitoringTriggered = true
 					logger.Infof("Processing update: monitoring check passed for chain=%d contract=%s symbol=%s",
 						updateReq.DestinationChain.ChainID,
 						updateReq.Contract.Address,
 						symbol)
 				}
+			} else if updateReq.IsCronTriggered {
+				logger.Infof("Processing cron-triggered update for chain=%d contract=%s symbol=%s (bypassing monitoring checks)",
+					updateReq.DestinationChain.ChainID,
+					updateReq.Contract.Address,
+					updateReq.Intent.Symbol)
 			}
 
 			// Create task ID based on available data
@@ -627,8 +728,12 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 				taskID = fmt.Sprintf("Process Updates unknown-%d-%d", updateReq.DestinationChain.ChainID, time.Now().Unix())
 			}
 
-			logger.Infof("[UPDATE-SUBMIT] Submitting to worker pool: task=%s, router=%s", taskID, updateReq.RouterID)
-			b.workerPool.Submit(&worker.WorkerTask{
+			logger.Infof("[UPDATE-SUBMIT] Submitting to oracle pool: task=%s, router=%s", taskID, updateReq.RouterID)
+
+			pool := b.getOrCreateOraclePool(updateReq.RouterID)
+
+			// Submit to the oracle pool
+			pool.Submit(&worker.WorkerTask{
 				ID:      taskID,
 				Request: updateReq,
 				Handler: b.handleUpdateRequest,

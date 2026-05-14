@@ -22,3 +22,5 @@ ignition/deployments/chain-31337
 broadcast
 contracts/coverage_report
 coverage_report
+config-local
+

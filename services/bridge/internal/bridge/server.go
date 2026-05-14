@@ -26,7 +26,13 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 			metricsCollector.FailoverMetrics = b.metricsManager.GetFailoverMetrics()
 		}
 
-		apiServer := api.NewServer(b.configService, b.db, metricsCollector, b.routerRegistry)
+		// Get price cache from event processor if available
+		var priceCache interface{}
+		if b.eventProcessor != nil {
+			priceCache = b.eventProcessor.GetPriceCache()
+		}
+
+		apiServer := api.NewServer(b.configService, b.db, metricsCollector, b.routerRegistry, priceCache)
 
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
