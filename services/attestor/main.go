@@ -95,13 +95,16 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	logFields := map[string]interface{}{
-		"symbols":            cfg.Attestor.Symbols,
-		"oracle":             cfg.Oracle.Address,
-		"oracle_client_type": cfg.Oracle.ClientType.String(),
-		"registry":           cfg.Registry.Address,
-		"polling_time":       cfg.Attestor.PollingTime.String(),
-		"batch_mode":         cfg.Attestor.BatchMode,
-		"mode":               cfg.Attestor.Mode.String(),
+		"symbols":                  cfg.Attestor.Symbols,
+		"oracle":                   cfg.Oracle.Address,
+		"oracle_client_type":       cfg.Oracle.ClientType.String(),
+		"registry":                 cfg.Registry.Address,
+		"polling_time":             cfg.Attestor.PollingTime.String(),
+		"batch_mode":               cfg.Attestor.BatchMode,
+		"mode":                     cfg.Attestor.Mode.String(),
+		"deviation_trigger":        cfg.Attestor.DeviationTrigger,
+		"deviation_threshold_bips": cfg.Attestor.DeviationThreshold,
+		"force_update_interval":    cfg.Attestor.ForceUpdateInterval.String(),
 	}
 
 	if cfg.Attestor.Mode == config.ModeReplica {

@@ -59,12 +59,15 @@ func ParseOracleClientType(s string) (OracleClientType, error) {
 
 // AttestorConfig holds attestor-specific configuration
 type AttestorConfig struct {
-	PrivateKey    string        `mapstructure:"private_key"`
-	Symbols       []string      `mapstructure:"symbols"`
-	PollingTime   time.Duration `mapstructure:"polling_time"`
-	BatchMode     bool          `mapstructure:"batch_mode"`
-	IntentType    string        `mapstructure:"intent_type"`
-	IntentVersion string        `mapstructure:"intent_version"`
+	PrivateKey          string        `mapstructure:"private_key"`
+	Symbols             []string      `mapstructure:"symbols"`
+	PollingTime         time.Duration `mapstructure:"polling_time"`
+	BatchMode           bool          `mapstructure:"batch_mode"`
+	IntentType          string        `mapstructure:"intent_type"`
+	IntentVersion       string        `mapstructure:"intent_version"`
+	DeviationTrigger    bool          `mapstructure:"deviation_trigger"`
+	DeviationThreshold  int           `mapstructure:"deviation_threshold"`
+	ForceUpdateInterval time.Duration `mapstructure:"force_update_interval"`
 }
 
 // OracleConfig holds oracle configuration
