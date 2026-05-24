@@ -118,7 +118,7 @@ func (wp *WorkerPool) Start(ctx context.Context) {
 	// Start health monitor goroutine
 	go wp.healthMonitor(ctx)
 
-	logger.Infof("Started worker pool with %d workers", wp.maxWorkers)
+	logger.Infof("[router=%s] Started worker pool with %d workers", wp.routerID, wp.maxWorkers)
 }
 
 // Stop stops the worker pool
@@ -130,7 +130,7 @@ func (wp *WorkerPool) Stop(ctx context.Context) {
 		return
 	}
 
-	logger.Info("Stopping worker pool")
+	logger.Infof("[router=%s] Stopping worker pool", wp.routerID)
 
 	// Signal shutdown
 	close(wp.shutdownChan)
@@ -149,9 +149,9 @@ func (wp *WorkerPool) Stop(ctx context.Context) {
 
 	select {
 	case <-done:
-		logger.Info("All workers stopped")
+		logger.Infof("[router=%s] All workers stopped", wp.routerID)
 	case <-ctx.Done():
-		logger.Warn("Worker pool shutdown timed out")
+		logger.Warnf("[router=%s] Worker pool shutdown timed out", wp.routerID)
 	}
 
 	wp.running = false
@@ -191,8 +191,8 @@ func (wp *WorkerPool) healthMonitor(ctx context.Context) {
 					wp.maxWorkers, wp.routerID, queueSize, activeCount)
 			}
 
-			logger.Debugf("Worker pool health: active=%d/%d, queue=%d/%d",
-				activeCount, wp.maxWorkers, queueSize, queueCap)
+			logger.Debugf("[router=%s] Worker pool health: active=%d/%d, queue=%d/%d",
+				wp.routerID, activeCount, wp.maxWorkers, queueSize, queueCap)
 		}
 	}
 }
@@ -200,7 +200,7 @@ func (wp *WorkerPool) healthMonitor(ctx context.Context) {
 // Submit submits a task to the worker pool
 func (wp *WorkerPool) Submit(task *WorkerTask) {
 	if task == nil {
-		logger.Error("Cannot submit nil task to worker pool")
+		logger.Errorf("[router=%s] Cannot submit nil task to worker pool", wp.routerID)
 		return
 	}
 
@@ -208,7 +208,7 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 	defer wp.mu.RUnlock()
 
 	if !wp.running {
-		logger.Warn("Worker pool not running, dropping task")
+		logger.Warnf("[router=%s] Worker pool not running, dropping task", wp.routerID)
 		return
 	}
 
@@ -218,7 +218,7 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 		wp.pendingTasks = append(wp.pendingTasks, task)
 		wp.pendingMu.Unlock()
 		queueSize := len(wp.taskQueue)
-		logger.Debugf("Task %s queued (queue: %d/%d)", task.ID, queueSize, cap(wp.taskQueue))
+		logger.Debugf("[router=%s] Task %s queued (queue: %d/%d)", wp.routerID, task.ID, queueSize, cap(wp.taskQueue))
 		// Update queue size metric
 		if wp.metricsCollector != nil {
 			wp.metricsCollector.SetTaskQueueSize(int32(queueSize))
@@ -230,8 +230,8 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 		if task.Request != nil && task.Request.Intent != nil {
 			symbol = task.Request.Intent.Symbol
 		}
-		logger.Errorf("CRITICAL: Task queue full (%d/%d), DROPPING task %s for symbol %s - consider increasing queue size or worker count",
-			queueLen, queueCap, task.ID, symbol)
+		logger.Errorf("[router=%s] CRITICAL: Task queue full (%d/%d), DROPPING task %s for symbol %s - consider increasing queue size or worker count",
+			wp.routerID, queueLen, queueCap, task.ID, symbol)
 		// Record dropped task metric
 		if wp.metricsCollector != nil {
 			wp.metricsCollector.IncWorkerTasksDropped()
@@ -243,17 +243,18 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 func (w *Worker) start(ctx context.Context) {
 	defer w.wg.Done()
 
-	logger.Debugf("Worker %d started", w.id)
+	logger.Debugf("[router=%s][WORKER-%d] started", w.pool.routerID, w.id)
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Debugf("Worker %d stopped due to context cancellation", w.id)
+			logger.Debugf("[router=%s][WORKER-%d] stopped due to context cancellation", w.pool.routerID, w.id)
 			return
 		case <-w.quit:
-			logger.Debugf("Worker %d stopped due to quit signal", w.id)
+			logger.Debugf("[router=%s][WORKER-%d] stopped due to quit signal", w.pool.routerID, w.id)
 			return
 		case task := <-w.taskQueue:
+			logger.Debugf("[router=%s][WORKER-%d] picked up task %s", w.pool.routerID, w.id, task.ID)
 			w.pool.removePending(task.ID)
 			w.processTask(ctx, task)
 		}
@@ -282,21 +283,23 @@ func (wp *WorkerPool) GetStats() WorkerPoolStats {
 func (wp *WorkerPool) removePending(taskID string) {
 	wp.pendingMu.Lock()
 	defer wp.pendingMu.Unlock()
+
 	for i, t := range wp.pendingTasks {
 		if t.ID == taskID {
 			wp.pendingTasks = append(wp.pendingTasks[:i], wp.pendingTasks[i+1:]...)
+			logger.Debugf("[router=%s] Removed task %s from pending list (remaining: %d)", wp.routerID, taskID, len(wp.pendingTasks))
 			return
 		}
 	}
+	logger.Warnf("[router=%s] Task %s not found in pending list when trying to remove", wp.routerID, taskID)
 }
 
-// ListPendingTasks returns a snapshot of all tasks currently waiting in the queue
 func (wp *WorkerPool) ListPendingTasks() []TaskInfo {
 	wp.pendingMu.RLock()
 	defer wp.pendingMu.RUnlock()
 
-	result := make([]TaskInfo, len(wp.pendingTasks))
-	for i, task := range wp.pendingTasks {
+	result := make([]TaskInfo, 0, len(wp.pendingTasks))
+	for _, task := range wp.pendingTasks {
 		info := TaskInfo{ID: task.ID}
 		if task.Request != nil {
 			info.RouterID = task.Request.RouterID
@@ -311,8 +314,14 @@ func (wp *WorkerPool) ListPendingTasks() []TaskInfo {
 				info.ChainID = task.Request.DestinationChain.ChainID
 			}
 		}
-		result[i] = info
+		result = append(result, info)
 	}
+
+	queueLen := len(wp.taskQueue)
+	if len(result) != queueLen {
+		logger.Warnf("[router=%s] Pending tasks list out of sync: pendingTasks=%d, taskQueue=%d", wp.routerID, len(result), queueLen)
+	}
+
 	return result
 }
 
@@ -337,8 +346,8 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 			chainID = task.Request.DestinationChain.ChainID
 		}
 	}
-	logger.Infof("[WORKER-%d] Starting task: %s, router=%s, symbol=%s, chain=%d, active_workers=%d",
-		w.id, task.ID, routerID, symbol, chainID, atomic.LoadInt32(&w.pool.activeWorkers))
+	logger.Infof("[router=%s][WORKER-%d] Starting task: %s, symbol=%s, chain=%d, active_workers=%d",
+		w.pool.routerID, w.id, task.ID, symbol, chainID, atomic.LoadInt32(&w.pool.activeWorkers))
 
 	// Create timeout context to prevent workers from blocking forever
 	taskCtx, cancel := context.WithTimeout(ctx, w.pool.taskTimeout)
@@ -351,7 +360,7 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	for retry := 0; retry < maxRetries; retry++ {
 		if retry > 0 {
 			retryCount++
-			logger.Debugf("Worker %d retrying task %s (attempt %d/%d)", w.id, task.ID, retry+1, maxRetries)
+			logger.Debugf("[router=%s][WORKER-%d] retrying task %s (attempt %d/%d)", w.pool.routerID, w.id, task.ID, retry+1, maxRetries)
 			time.Sleep(time.Second * time.Duration(retry))
 		}
 
@@ -362,26 +371,26 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 
 		// Don't retry on context timeout/cancellation
 		if taskCtx.Err() != nil {
-			logger.Warnf("[WORKER-%d] Task %s context expired, not retrying: %v", w.id, task.ID, taskCtx.Err())
+			logger.Warnf("[router=%s][WORKER-%d] Task %s context expired, not retrying: %v", w.pool.routerID, w.id, task.ID, taskCtx.Err())
 			err = taskCtx.Err()
 			break
 		}
 
-		logger.Errorf("Worker %d task %s failed (attempt %d/%d): %v", w.id, task.ID, retry+1, maxRetries, err)
+		logger.Errorf("[router=%s][WORKER-%d] Task %s failed (attempt %d/%d): %v", w.pool.routerID, w.id, task.ID, retry+1, maxRetries, err)
 	}
 
 	duration := time.Since(startTime)
 
 	if err != nil {
-		logger.Errorf("[WORKER-%d] Task FAILED after %d retries: %s, router=%s, symbol=%s, chain=%d, duration=%v, error=%v",
-			w.id, maxRetries, task.ID, routerID, symbol, chainID, duration, err)
+		logger.Errorf("[router=%s][WORKER-%d] Task FAILED after %d retries: %s, symbol=%s, chain=%d, duration=%v, error=%v",
+			w.pool.routerID, w.id, maxRetries, task.ID, symbol, chainID, duration, err)
 		if w.metricsCollector != nil {
 			w.metricsCollector.IncWorkerTasksFailed()
 			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())
 		}
 	} else {
-		logger.Infof("[WORKER-%d] Task COMPLETED: %s, router=%s, symbol=%s, chain=%d, duration=%v, retries=%d",
-			w.id, task.ID, routerID, symbol, chainID, duration, retryCount)
+		logger.Infof("[router=%s][WORKER-%d] Task COMPLETED: %s, symbol=%s, chain=%d, duration=%v, retries=%d",
+			w.pool.routerID, w.id, task.ID, symbol, chainID, duration, retryCount)
 		if w.metricsCollector != nil {
 			w.metricsCollector.IncWorkerTasksCompleted()
 			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())
