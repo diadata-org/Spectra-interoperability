@@ -754,3 +754,37 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker(), b.onChainMonitor)
 	return handler.Process(ctx, task.Request)
 }
+
+// ListPools implements api.PoolLister — returns snapshot of all oracle worker pools
+func (b *Bridge) ListPools() []api.PoolInfo {
+	b.oraclePoolsMu.RLock()
+	defer b.oraclePoolsMu.RUnlock()
+
+	pools := make([]api.PoolInfo, 0, len(b.oraclePools))
+	for routerID, pool := range b.oraclePools {
+		stats := pool.GetStats()
+		pending := pool.ListPendingTasks()
+
+		tasks := make([]api.PoolTaskInfo, len(pending))
+		for i, t := range pending {
+			tasks[i] = api.PoolTaskInfo{
+				ID:         t.ID,
+				Symbol:     t.Symbol,
+				ChainID:    t.ChainID,
+				RouterID:   t.RouterID,
+				IntentHash: t.IntentHash,
+				Timestamp:  t.Timestamp,
+			}
+		}
+
+		pools = append(pools, api.PoolInfo{
+			RouterID:      routerID,
+			ActiveWorkers: stats.ActiveTasks,
+			MaxWorkers:    stats.MaxWorkers,
+			PendingCount:  stats.PendingTasks,
+			QueueCapacity: stats.TotalCapacity,
+			Tasks:         tasks,
+		})
+	}
+	return pools
+}

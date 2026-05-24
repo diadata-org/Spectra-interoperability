@@ -18,9 +18,19 @@ type WorkerTask struct {
 	Handler func(context.Context, *WorkerTask) error
 }
 
+// TaskInfo contains summary information about a pending or active task
+type TaskInfo struct {
+	ID         string
+	Symbol     string
+	ChainID    int64
+	RouterID   string
+	IntentHash string
+	Timestamp  string // unix timestamp from OracleIntent
+}
+
 // WorkerPool manages a pool of workers for processing update requests
 type WorkerPool struct {
-	routerID         string            // Router/oracle identifier for logging
+	routerID         string // Router/oracle identifier for logging
 	maxWorkers       int
 	taskQueue        chan *WorkerTask
 	workers          []*Worker
@@ -31,6 +41,8 @@ type WorkerPool struct {
 	metricsCollector *metrics.Collector
 	activeWorkers    int32 // Track number of currently active workers
 	taskTimeout      time.Duration
+	pendingMu        sync.RWMutex
+	pendingTasks     []*WorkerTask
 }
 
 // Worker represents a single worker in the pool
@@ -175,8 +187,8 @@ func (wp *WorkerPool) healthMonitor(ctx context.Context) {
 
 			// Log warning if all workers are busy and queue has items
 			if int(activeCount) >= wp.maxWorkers && queueSize > 0 {
-				logger.Warnf("All %d workers busy for %s with %d tasks queued - consider increasing worker count",
-					wp.maxWorkers, wp.routerID, queueSize)
+				logger.Warnf("All %d workers busy for %s with %d tasks queued  and %d active workers - consider increasing worker count",
+					wp.maxWorkers, wp.routerID, queueSize, activeCount)
 			}
 
 			logger.Debugf("Worker pool health: active=%d/%d, queue=%d/%d",
@@ -202,6 +214,9 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 
 	select {
 	case wp.taskQueue <- task:
+		wp.pendingMu.Lock()
+		wp.pendingTasks = append(wp.pendingTasks, task)
+		wp.pendingMu.Unlock()
 		queueSize := len(wp.taskQueue)
 		logger.Debugf("Task %s queued (queue: %d/%d)", task.ID, queueSize, cap(wp.taskQueue))
 		// Update queue size metric
@@ -239,6 +254,7 @@ func (w *Worker) start(ctx context.Context) {
 			logger.Debugf("Worker %d stopped due to quit signal", w.id)
 			return
 		case task := <-w.taskQueue:
+			w.pool.removePending(task.ID)
 			w.processTask(ctx, task)
 		}
 	}
@@ -260,6 +276,44 @@ func (wp *WorkerPool) GetStats() WorkerPoolStats {
 		MaxWorkers:    wp.maxWorkers,
 		TotalCapacity: cap(wp.taskQueue),
 	}
+}
+
+// removePending removes a task from the pending tracking list by ID
+func (wp *WorkerPool) removePending(taskID string) {
+	wp.pendingMu.Lock()
+	defer wp.pendingMu.Unlock()
+	for i, t := range wp.pendingTasks {
+		if t.ID == taskID {
+			wp.pendingTasks = append(wp.pendingTasks[:i], wp.pendingTasks[i+1:]...)
+			return
+		}
+	}
+}
+
+// ListPendingTasks returns a snapshot of all tasks currently waiting in the queue
+func (wp *WorkerPool) ListPendingTasks() []TaskInfo {
+	wp.pendingMu.RLock()
+	defer wp.pendingMu.RUnlock()
+
+	result := make([]TaskInfo, len(wp.pendingTasks))
+	for i, task := range wp.pendingTasks {
+		info := TaskInfo{ID: task.ID}
+		if task.Request != nil {
+			info.RouterID = task.Request.RouterID
+			info.IntentHash = task.Request.IntentHash.Hex()
+			if task.Request.Intent != nil {
+				info.Symbol = task.Request.Intent.Symbol
+				if task.Request.Intent.Timestamp != nil {
+					info.Timestamp = task.Request.Intent.Timestamp.String()
+				}
+			}
+			if task.Request.DestinationChain != nil {
+				info.ChainID = task.Request.DestinationChain.ChainID
+			}
+		}
+		result[i] = info
+	}
+	return result
 }
 
 // processTask processes a single task

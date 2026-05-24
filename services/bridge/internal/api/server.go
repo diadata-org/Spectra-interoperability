@@ -20,6 +20,31 @@ const (
 	Version = "1.0.0"
 )
 
+// PoolTaskInfo contains summary info about a pending task in a worker pool
+type PoolTaskInfo struct {
+	ID         string `json:"id"`
+	Symbol     string `json:"symbol"`
+	ChainID    int64  `json:"chain_id"`
+	RouterID   string `json:"router_id"`
+	IntentHash string `json:"intent_hash"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// PoolInfo contains stats and pending tasks for a single worker pool
+type PoolInfo struct {
+	RouterID      string         `json:"router_id"`
+	ActiveWorkers int32          `json:"active_workers"`
+	MaxWorkers    int            `json:"max_workers"`
+	PendingCount  int            `json:"pending_count"`
+	QueueCapacity int            `json:"queue_capacity"`
+	Tasks         []PoolTaskInfo `json:"tasks"`
+}
+
+// PoolLister provides read-only access to worker pool state
+type PoolLister interface {
+	ListPools() []PoolInfo
+}
+
 // Server represents the API server
 type Server struct {
 	config         *config.APIConfig
@@ -32,6 +57,7 @@ type Server struct {
 	router          *mux.Router
 	httpServer      *http.Server
 	failoverHandler *FailoverHandler
+	poolLister      PoolLister
 }
 
 // NewServer creates a new API server
@@ -116,6 +142,11 @@ func (s *Server) GetFailoverHandler() *FailoverHandler {
 	return s.failoverHandler
 }
 
+// SetPoolLister sets the pool lister for worker pool inspection
+func (s *Server) SetPoolLister(lister PoolLister) {
+	s.poolLister = lister
+}
+
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")
@@ -161,6 +192,10 @@ func (s *Server) setupRoutes() {
 	// Price cache endpoints
 	v1.HandleFunc("/prices", s.handleGetPrices).Methods("GET")
 	v1.HandleFunc("/prices/{symbol}", s.handleGetPrice).Methods("GET")
+
+	// Worker pool endpoints
+	v1.HandleFunc("/pools", s.handleGetPools).Methods("GET")
+	v1.HandleFunc("/pools/{router_id}/tasks", s.handleGetPoolTasks).Methods("GET")
 
 	// Failover endpoints (if available)
 	if s.failoverHandler != nil {
@@ -403,6 +438,48 @@ func (s *Server) handleGetSymbolUpdates(w http.ResponseWriter, r *http.Request) 
 		"updates": updates,
 		"count":   len(updates),
 	})
+}
+
+// Worker pool handlers
+
+func (s *Server) handleGetPools(w http.ResponseWriter, r *http.Request) {
+	if s.poolLister == nil {
+		s.writeJSON(w, map[string]interface{}{
+			"pools": []interface{}{},
+			"count": 0,
+		})
+		return
+	}
+
+	pools := s.poolLister.ListPools()
+	s.writeJSON(w, map[string]interface{}{
+		"pools": pools,
+		"count": len(pools),
+	})
+}
+
+func (s *Server) handleGetPoolTasks(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	routerID := vars["router_id"]
+
+	if s.poolLister == nil {
+		s.writeError(w, http.StatusNotFound, "Pool lister not available", nil)
+		return
+	}
+
+	pools := s.poolLister.ListPools()
+	for _, pool := range pools {
+		if pool.RouterID == routerID {
+			s.writeJSON(w, map[string]interface{}{
+				"router_id": routerID,
+				"tasks":     pool.Tasks,
+				"count":     len(pool.Tasks),
+			})
+			return
+		}
+	}
+
+	s.writeError(w, http.StatusNotFound, "Pool not found for router: "+routerID, nil)
 }
 
 // Middleware

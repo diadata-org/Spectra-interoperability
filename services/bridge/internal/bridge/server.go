@@ -33,6 +33,7 @@ func (b *Bridge) startMetricsServer(ctx context.Context) {
 		}
 
 		apiServer := api.NewServer(b.configService, b.db, metricsCollector, b.routerRegistry, priceCache)
+		apiServer.SetPoolLister(b)
 
 		go func() {
 			if err := apiServer.Start(ctx); err != nil {
