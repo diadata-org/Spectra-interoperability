@@ -346,8 +346,8 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 			chainID = task.Request.DestinationChain.ChainID
 		}
 	}
-	logger.Infof("[router=%s][WORKER-%d] Starting task: %s, symbol=%s, chain=%d, active_workers=%d",
-		w.pool.routerID, w.id, task.ID, symbol, chainID, atomic.LoadInt32(&w.pool.activeWorkers))
+	logger.Infof("[router=%s][WORKER-%d] Starting task: %s, symbol=%s, chain=%d, task_router=%s, active_workers=%d",
+		w.pool.routerID, w.id, task.ID, symbol, chainID, routerID, atomic.LoadInt32(&w.pool.activeWorkers))
 
 	// Create timeout context to prevent workers from blocking forever
 	taskCtx, cancel := context.WithTimeout(ctx, w.pool.taskTimeout)
@@ -382,15 +382,15 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	duration := time.Since(startTime)
 
 	if err != nil {
-		logger.Errorf("[router=%s][WORKER-%d] Task FAILED after %d retries: %s, symbol=%s, chain=%d, duration=%v, error=%v",
-			w.pool.routerID, w.id, maxRetries, task.ID, symbol, chainID, duration, err)
+		logger.Errorf("[router=%s][WORKER-%d] Task FAILED after %d retries: %s, symbol=%s, chain=%d, task_router=%s, duration=%v, error=%v",
+			w.pool.routerID, w.id, maxRetries, task.ID, symbol, chainID, routerID, duration, err)
 		if w.metricsCollector != nil {
 			w.metricsCollector.IncWorkerTasksFailed()
 			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())
 		}
 	} else {
-		logger.Infof("[router=%s][WORKER-%d] Task COMPLETED: %s, symbol=%s, chain=%d, duration=%v, retries=%d",
-			w.pool.routerID, w.id, task.ID, symbol, chainID, duration, retryCount)
+		logger.Infof("[router=%s][WORKER-%d] Task COMPLETED: %s, symbol=%s, chain=%d, task_router=%s, duration=%v, retries=%d",
+			w.pool.routerID, w.id, task.ID, symbol, chainID, routerID, duration, retryCount)
 		if w.metricsCollector != nil {
 			w.metricsCollector.IncWorkerTasksCompleted()
 			w.metricsCollector.ObserveTaskProcessingDuration(duration.Seconds())

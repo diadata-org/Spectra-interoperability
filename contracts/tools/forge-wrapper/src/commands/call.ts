@@ -56,6 +56,11 @@ export function registerCallCommand(program: Command): void {
             );
           }
           castArgs.push("send", ...baseArgs, "--rpc-url", rpcUrl, "--private-key", privateKey);
+          
+          // Add legacy flag if network requires it
+          if (networkConfig.legacy) {
+            castArgs.push("--legacy");
+          }
         } else {
           castArgs.push("call", ...baseArgs, "--rpc-url", rpcUrl);
         }

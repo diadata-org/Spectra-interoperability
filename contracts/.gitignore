@@ -23,4 +23,5 @@ broadcast
 contracts/coverage_report
 coverage_report
 config-local
+/tools/forge-wrapper/dist
 

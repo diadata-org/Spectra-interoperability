@@ -58,6 +58,7 @@ export const networkConfigSchema = z.object({
     .transform((value) => value ?? {}),
   gas: gasConfigSchema.optional(),
   verification: verificationConfigSchema.optional(),
+  legacy: z.boolean().optional(),
 });
 
 export type NetworkConfig = z.infer<typeof networkConfigSchema>;
@@ -102,6 +103,7 @@ export interface DeployOptions {
   salt?: string;
   privateKeyOverride?: string;
   deployerAddress?: string;
+  legacy?: boolean;
 }
 
 export interface CallOptions {

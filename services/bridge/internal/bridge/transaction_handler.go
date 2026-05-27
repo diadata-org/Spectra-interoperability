@@ -407,7 +407,6 @@ func (h *TransactionHandler) getMonitoringInfo(txCtx *TransactionContext) string
 func (h *TransactionHandler) waitForReceipt(ctx context.Context, client rpc.EthClient, txHash common.Hash, routerID string) (*types.Receipt, error) {
 	logger.Infof("Waiting for transaction receipt: %s, router=%s", txHash.Hex(), routerID)
 
-	timeout := time.After(5 * time.Minute)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -415,9 +414,8 @@ func (h *TransactionHandler) waitForReceipt(ctx context.Context, client rpc.EthC
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Warnf("Context canceled while waiting for receipt %s, router=%s: %v", txHash.Hex(), routerID, ctx.Err())
 			return nil, ctx.Err()
-		case <-timeout:
-			return nil, fmt.Errorf("timeout waiting for transaction receipt after 5 minutes")
 		case <-ticker.C:
 			attempts++
 			receipt, err := client.TransactionReceipt(ctx, txHash)

@@ -67,7 +67,8 @@ function buildCastArgs(
   to: string,
   signature: string,
   params: string[],
-  value?: string
+  value?: string,
+  useLegacy?: boolean
 ): string[] {
   const args = ["send", to, signature, ...params];
   const trimmedValue = value?.trim();
@@ -75,6 +76,9 @@ function buildCastArgs(
     args.push("--value", trimmedValue);
   }
   args.push("--rpc-url", rpcUrl, "--private-key", privateKey);
+  if (useLegacy) {
+    args.push("--legacy");
+  }
   return args;
 }
 
@@ -115,7 +119,8 @@ export async function executeContractSend(
     record.address,
     options.signature,
     options.params,
-    options.value
+    options.value,
+    networkConfig.legacy
   );
   const printable = formatCommand("cast", maskCastArgs(castArgs));
   // eslint-disable-next-line no-console

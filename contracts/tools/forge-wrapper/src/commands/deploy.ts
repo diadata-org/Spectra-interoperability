@@ -105,6 +105,11 @@ export async function executeDeploy(options: DeployOptions): Promise<DeploymentR
     String(networkConfig.chain_id),
   ];
 
+  // Add legacy flag early if needed
+  if (options.legacy || networkConfig.legacy) {
+    displayArgs.push("--legacy");
+  }
+
   let constructorArgs = options.constructorArgs;
   if (constructorArgs.length === 0) {
     const template = getTemplate(options.alias);
@@ -121,10 +126,6 @@ export async function executeDeploy(options: DeployOptions): Promise<DeploymentR
 
   if (constructorArgs.length > 0) {
     displayArgs.push("--constructor-args", ...constructorArgs);
-  }
-
-  if (options.salt) {
-    displayArgs.push("--salt", options.salt);
   }
 
   const actualForgeArgs = [...displayArgs, "--json"];
@@ -233,7 +234,9 @@ export function registerDeployCommand(program: Command): void {
     .option("--constructor-arg <value>", "Constructor argument", collectArgs, [])
     .option("--salt <salt>", "Deterministic deployment salt")
     .option("--dry-run", "Print command without executing")
-    .action(async (alias: string, cmdOptions) => {
+    .option("--legacy", "Use legacy transactions instead of EIP1559")
+  
+  .action(async (alias: string, cmdOptions) => {
       const network = cmdOptions.network ?? getDefaultNetwork();
       if (!network) {
         throw new Error("Network is required (pass --network or set FORGE_WRAPPER_NETWORK)");
@@ -253,6 +256,7 @@ export function registerDeployCommand(program: Command): void {
           rpcUrl: cmdOptions.rpcUrl,
           dryRun: Boolean(cmdOptions.dryRun),
           salt: cmdOptions.salt,
+          legacy: Boolean(cmdOptions.legacy),
         });
 
         if (!cmdOptions.dryRun) {
