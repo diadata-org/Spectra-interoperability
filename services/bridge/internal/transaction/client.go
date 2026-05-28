@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
@@ -57,7 +58,25 @@ func (c *Client) CallMethod(ctx context.Context, contractAddr, methodName, abiJS
 		return c.executor.Execute(execCtx, req)
 	}
 
-	return queue.Submit(ctx, executorFunc)
+	// Extract metadata for queue visibility
+	meta := SubmitMeta{
+		ChainID:  c.chainID,
+	}
+	if updateReq != nil {
+		meta.RouterID = updateReq.RouterID
+		meta.Contract = contractAddr
+		if updateReq.Intent != nil {
+			meta.Symbol = updateReq.Intent.Symbol
+			if updateReq.Intent.Timestamp != nil {
+				meta.OnchainTS = updateReq.Intent.Timestamp.Int64()
+			}
+		}
+	}
+
+	t0 := time.Now()
+	tx, err := queue.Submit(ctx, executorFunc, meta)
+	logger.Infof("[QUEUE-SUBMIT] CallMethod %s on %s: took=%v", methodName, contractAddr, time.Since(t0))
+	return tx, err
 }
 
 func (c *Client) BuildParams(methodConfig *config.DestinationMethodConfig, updateReq *bridgetypes.UpdateRequest) ([]interface{}, error) {
