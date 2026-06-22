@@ -348,8 +348,14 @@ func (s *AttestorService) processSingleAttestation(ctx context.Context, symbol s
 		"MinGuardianMatches": guardianParams.MinGuardianMatches,
 	}).Debug("Retrieved oracle value")
 
+	// Determine timestamp to embed in the intent
+	var intentTimestamp *big.Int
+	if s.config.Attestor.UseOracleTimestamp && timestamp != nil && timestamp.Sign() > 0 {
+		intentTimestamp = timestamp
+	}
+
 	// Sign intent
-	signedIntent, err := s.signer.SignIntent(ctx, price, volume, symbol)
+	signedIntent, err := s.signer.SignIntent(ctx, price, volume, intentTimestamp, symbol)
 	if err != nil {
 		s.metrics.RecordIntentCreated(symbol, false)
 		return errors.NewSignerError("sign intent", symbol, err)
@@ -447,10 +453,17 @@ symbolLoop:
 		}
 		logger.WithFields(logFields).Debug("Retrieved oracle value")
 
+		// Set oracle timestamp if configured
+		var ts *big.Int
+		if s.config.Attestor.UseOracleTimestamp && timestamp != nil && timestamp.Sign() > 0 {
+			ts = timestamp
+		}
+
 		symbolData = append(symbolData, interfaces.SymbolData{
-			Symbol: symbol,
-			Price:  price,
-			Volume: volume,
+			Symbol:    symbol,
+			Price:     price,
+			Volume:    volume,
+			Timestamp: ts,
 		})
 	}
 

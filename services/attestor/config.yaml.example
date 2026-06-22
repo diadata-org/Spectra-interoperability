@@ -22,6 +22,7 @@ attestor:
     - ETH/USD
   polling_time: 300ms
   batch_mode: true
+  use_oracle_timestamp: false  # When true, embed the oracle contract's timestamp in the intent instead of time.Now()
 
 # Logging Configuration
 logging:
@@ -46,6 +47,7 @@ api:
 # - ATTESTOR_ATTESTOR_SYMBOLS (comma-separated)
 # - ATTESTOR_ATTESTOR_POLLING_TIME (e.g., "5s", "300ms")
 # - ATTESTOR_ATTESTOR_BATCH_MODE (true/false)
+# - ATTESTOR_ATTESTOR_USE_ORACLE_TIMESTAMP (true/false) — use oracle contract timestamp instead of time.Now()
 # - ATTESTOR_ATTESTOR_MODE (prime/replica)
 # - ATTESTOR_LOGGING_LEVEL
 # - ATTESTOR_METRICS_PORT
