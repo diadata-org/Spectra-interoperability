@@ -38,7 +38,8 @@ type TransactionContext struct {
 
 // TransactionHandler handles the complete lifecycle of a transaction
 type TransactionHandler struct {
-	writeClients   map[int64]*WriteClient
+	chainClients   map[int64]*WriteClient   // Chain-based clients (infrastructure key)
+	routerClients  map[string]*WriteClient  // Router-specific clients (router key)
 	routerRegistry *router.GenericRegistry
 	metricsTracker *MetricsTracker
 	onChainMonitor *leader.OnChainMonitor // Optional: for replica monitoring info
@@ -46,9 +47,10 @@ type TransactionHandler struct {
 }
 
 // NewTransactionHandler creates a new transaction handler
-func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker, monitor *leader.OnChainMonitor) *TransactionHandler {
+func NewTransactionHandler(chainClients map[int64]*WriteClient, routerClients map[string]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker, monitor *leader.OnChainMonitor) *TransactionHandler {
 	return &TransactionHandler{
-		writeClients:   writeClients,
+		chainClients:   chainClients,
+		routerClients:  routerClients,
 		routerRegistry: registry,
 		metricsTracker: tracker,
 		onChainMonitor: monitor,
@@ -125,9 +127,20 @@ func (h *TransactionHandler) buildContext(ctx context.Context, updateReq *bridge
 		return nil, fmt.Errorf("destination chain is nil")
 	}
 
-	destClient := h.writeClients[updateReq.DestinationChain.ChainID]
-	if destClient == nil {
-		return nil, fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
+	chainID := updateReq.DestinationChain.ChainID
+	routerID := updateReq.RouterID
+
+	// Try router-specific client first
+	destClient, exists := h.routerClients[routerID]
+	if !exists {
+		// Fall back to chain-based client
+		destClient, exists = h.chainClients[chainID]
+		if !exists {
+			return nil, fmt.Errorf("no write client for router %s (router client not found) and no chain client for chain %d", routerID, chainID)
+		}
+		logger.Debugf("[TX-HANDLER] Using chain client for router %s on chain %d (no router-specific client)", routerID, chainID)
+	} else {
+		logger.Debugf("[TX-HANDLER] Using router-specific client for router %s on chain %d", routerID, chainID)
 	}
 
 	gasPrice, err := destClient.getGasPrice(ctx)

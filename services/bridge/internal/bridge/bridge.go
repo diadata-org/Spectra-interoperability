@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,7 +31,8 @@ type Bridge struct {
 	configService *config.ConfigService
 	db            *database.DB
 	readClient    rpc.EthClient
-	writeClients  map[int64]*WriteClient
+	chainClients  map[int64]*WriteClient
+	routerClients map[string]*WriteClient
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -124,14 +126,18 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
-	destClients := make(map[int64]*WriteClient)
+	chainClients := make(map[int64]*WriteClient)
 	enabledChains := cfgService.GetEnabledChains()
+	chainConfigMap := make(map[int64]*config.ChainConfig)
+	for _, chainCfg := range enabledChains {
+		chainConfigMap[chainCfg.ChainID] = chainCfg
+	}
 
 	if len(enabledChains) == 0 {
 		return nil, fmt.Errorf("no enabled chains found in configuration - check that chains have 'enabled: true'")
 	}
 
-	logger.Infof("Found %d enabled chain(s), attempting to create destination clients...", len(enabledChains))
+	logger.Infof("Found %d enabled chain(s), attempting to create chain destination clients...", len(enabledChains))
 
 	var failedChains []string
 	for _, chainConfig := range enabledChains {
@@ -142,7 +148,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 			continue
 		}
 
-		// Check if there's at least one enabled
+		// Check if there's at least one enabled receiver/pushoracle
 		hasReceiverContract := false
 		for _, contract := range contracts {
 			if (contract.Type == "receiver" || contract.Type == "pushoracle") && contract.Enabled {
@@ -165,16 +171,16 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 
 		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
 		if err != nil {
-			logger.Errorf("Failed to create destination client for chain %d (%s): %v", chainConfig.ChainID, chainConfig.Name, err)
+			logger.Errorf("Failed to create chain client for chain %d (%s): %v", chainConfig.ChainID, chainConfig.Name, err)
 			failedChains = append(failedChains, fmt.Sprintf("%d (%s): %v", chainConfig.ChainID, chainConfig.Name, err))
 			continue
 		}
-		destClients[chainConfig.ChainID] = destClient
-		logger.Infof("Successfully created destination client for chain %d (%s)", chainConfig.ChainID, chainConfig.Name)
+		chainClients[chainConfig.ChainID] = destClient
+		logger.Infof("Successfully created chain client for chain %d (%s)", chainConfig.ChainID, chainConfig.Name)
 	}
 
-	if len(destClients) == 0 {
-		errorMsg := "no destination clients available. Reasons:\n"
+	if len(chainClients) == 0 {
+		errorMsg := "no chain clients available. Reasons:\n"
 		if len(failedChains) > 0 {
 			for _, reason := range failedChains {
 				errorMsg += fmt.Sprintf("  - Chain %s\n", reason)
@@ -183,6 +189,61 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 			errorMsg += "  - No enabled chains found in configuration\n"
 		}
 		return nil, fmt.Errorf(errorMsg)
+	}
+
+	routerClients := make(map[string]*WriteClient)
+	chainToRouterCount := make(map[int64]int)
+
+	for _, router := range enabledRouters {
+		if len(router.Destinations) == 0 {
+			continue
+		}
+		chainID := router.Destinations[0].ChainID
+		chainToRouterCount[chainID]++
+	}
+
+	logger.Infof("Found %d enabled router(s), checking for router-specific private keys...", len(enabledRouters))
+
+	for _, router := range enabledRouters {
+		if router.PrivateKey == "" {
+			logger.Debugf("Router %s: will use chain client (no private key configured)", router.ID)
+			continue
+		}
+
+		if len(router.Destinations) == 0 {
+			logger.Warnf("Router %s: has private key but no destinations - skipping client creation", router.ID)
+			continue
+		}
+
+		dest := router.Destinations[0]
+		chainID := dest.ChainID
+
+		chainConfig := chainConfigMap[chainID]
+		if chainConfig == nil {
+			logger.Errorf("Router %s: chain %d not found in enabled chains configuration", router.ID, chainID)
+			continue
+		}
+
+		contracts := cfgService.GetContractsForChain(chainID)
+		if len(contracts) == 0 {
+			logger.Warnf("Router %s: chain %d has no enabled contracts - skipping client creation", router.ID, chainID)
+			continue
+		}
+
+		maxSafeGap := calculateMaxSafeGap(chainToRouterCount[chainID])
+
+		routerClient, err := NewWriteClient(chainConfig, contracts, router.PrivateKey, queueManager, maxSafeGap)
+		if err != nil {
+			logger.Errorf("Failed to create router client for router %s: %v", router.ID, err)
+			continue
+		}
+
+		routerClients[router.ID] = routerClient
+		logger.Infof("Successfully created router client for router %s on chain %d (using router private key)", router.ID, chainID)
+	}
+
+	if len(routerClients) > 0 {
+		logger.Infof("Created %d router-specific client(s)", len(routerClients))
 	}
 
 	// Store worker pool config for dynamic pool creation
@@ -195,7 +256,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	metricsManager := NewMetricsManager(metricsCollector)
 
 	ethClients := make(map[int64]rpc.EthClient)
-	for chainID, writeClient := range destClients {
+	for chainID, writeClient := range chainClients {
 		ethClients[chainID] = writeClient.GetEthClient()
 	}
 
@@ -205,7 +266,8 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		configService: cfgService,
 		db:            db,
 		readClient:    readClient,
-		writeClients:  destClients,
+		chainClients:  chainClients,  // chain-based clients (infrastructure key)
+		routerClients: routerClients, // router-specific clients (router key)
 		updateChan:    make(chan *bridgetypes.UpdateRequest, 1000),
 		errorChan:     errorChan,
 		shutdownChan:  make(chan struct{}),
@@ -386,7 +448,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 	if b.routerRegistry != nil {
 		logger.Info("Fetching router state from on-chain...")
 		ethClients := make(map[int64]rpc.EthClient)
-		for chainID, writeClient := range b.writeClients {
+		for chainID, writeClient := range b.chainClients {
 			ethClients[chainID] = writeClient.GetEthClient()
 		}
 		routers := b.routerRegistry.GetActiveRouters()
@@ -568,7 +630,10 @@ func (b *Bridge) Stop(ctx context.Context) error {
 
 	// Close connections
 	b.readClient.Close()
-	for _, destClient := range b.writeClients {
+	for _, destClient := range b.chainClients {
+		destClient.client.Close()
+	}
+	for _, destClient := range b.routerClients {
 		destClient.client.Close()
 	}
 
@@ -656,7 +721,10 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 
 			// Check if update is stale based on last update in cache
 			if updateReq.Intent != nil && !updateReq.CreatedAt.IsZero() && updateReq.Contract != nil {
-				destClient := b.writeClients[updateReq.DestinationChain.ChainID]
+				destClient := b.routerClients[updateReq.RouterID]
+				if destClient == nil {
+					destClient = b.chainClients[updateReq.DestinationChain.ChainID]
+				}
 				if destClient != nil {
 					lastUpdateTime := destClient.getLastUpdate(updateReq.Intent.Symbol, updateReq.Contract.Address)
 					if !lastUpdateTime.IsZero() && updateReq.CreatedAt.Before(lastUpdateTime) {
@@ -751,7 +819,7 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 		}
 	}()
 
-	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker(), b.onChainMonitor)
+	handler := NewTransactionHandler(b.chainClients, b.routerClients, b.routerRegistry, b.metricsManager.GetTracker(), b.onChainMonitor)
 	return handler.Process(ctx, task.Request)
 }
 
@@ -787,4 +855,82 @@ func (b *Bridge) ListPools() []api.PoolInfo {
 		})
 	}
 	return pools
+}
+
+// resolveParameterValue resolves a template parameter source to its actual value
+func (b *Bridge) resolveParameterValue(source string, updateReq *bridgetypes.UpdateRequest) (interface{}, error) {
+	if strings.HasPrefix(source, "${") && strings.HasSuffix(source, "}") {
+		templateVar := strings.TrimSuffix(strings.TrimPrefix(source, "${"), "}")
+
+		switch {
+		case strings.HasPrefix(templateVar, "enrichment."):
+			enrichmentKey := strings.TrimPrefix(templateVar, "enrichment.")
+			if updateReq.ExtractedData != nil && updateReq.ExtractedData.Enrichment != nil {
+				if value, exists := updateReq.ExtractedData.Enrichment[enrichmentKey]; exists {
+					if enrichmentKey == "fullIntent" {
+						if intent, ok := value.(*bridgetypes.OracleIntent); ok {
+							logger.Debugf("Retrieved fullIntent from enrichment: symbol=%s price=%s timestamp=%s nonce=%s expiry=%s signer=%s source=%s",
+								intent.Symbol,
+								intent.Price.String(),
+								intent.Timestamp.String(),
+								intent.Nonce.String(),
+								intent.Expiry.String(),
+								intent.Signer.Hex(),
+								intent.Source)
+							return intent, nil
+						}
+						return nil, fmt.Errorf("fullIntent has unexpected type %T", value)
+					}
+					return value, nil
+				}
+				return nil, fmt.Errorf("enrichment key %s not found", enrichmentKey)
+			}
+			return nil, fmt.Errorf("enrichment data not available")
+
+		case strings.HasPrefix(templateVar, "event."):
+			eventField := strings.TrimPrefix(templateVar, "event.")
+			if updateReq.Event == nil {
+				return nil, fmt.Errorf("event data not available")
+			}
+
+			switch eventField {
+			case "requestId":
+				if updateReq.Event.RequestId != nil {
+					return updateReq.Event.RequestId, nil
+				}
+				return nil, fmt.Errorf("event requestId not found")
+			default:
+				return nil, fmt.Errorf("unsupported event field: %s", eventField)
+			}
+
+		case strings.HasPrefix(templateVar, "intent."):
+			if updateReq.Intent == nil {
+				return nil, fmt.Errorf("intent data not available")
+			}
+			return updateReq.Intent, nil
+
+		default:
+			return nil, fmt.Errorf("unsupported template variable: %s", templateVar)
+		}
+	}
+
+	return source, nil
+}
+
+// buildMethodParams builds the method parameters for a destination method call
+func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig, updateReq *bridgetypes.UpdateRequest) ([]interface{}, error) {
+	if methodConfig == nil || methodConfig.Params == nil {
+		return nil, nil
+	}
+
+	params := make([]interface{}, 0, len(methodConfig.Params))
+	for paramName, paramValue := range methodConfig.Params {
+		value, err := b.resolveParameterValue(paramValue, updateReq)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve parameter %s: %w", paramName, err)
+		}
+		params = append(params, value)
+	}
+
+	return params, nil
 }
