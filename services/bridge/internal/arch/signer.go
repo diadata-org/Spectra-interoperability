@@ -5,14 +5,14 @@ import (
 	"errors"
 	"fmt"
 
-	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4/schnorr"
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 )
 
 // Signer holds a secp256k1 secret key and produces BIP-340 Schnorr signatures
 // suitable for Arch's Taproot key-path tx signing.
 type Signer struct {
-	secret *secp256k1.PrivateKey
+	secret *btcec.PrivateKey
 }
 
 // NewSignerFromHex loads a 32-byte secret key from a 64-char hex string.
@@ -27,7 +27,7 @@ func NewSignerFromHex(secretHex string) (*Signer, error) {
 	if len(raw) != 32 {
 		return nil, errors.New("secret must be 32 bytes")
 	}
-	priv := secp256k1.PrivKeyFromBytes(raw)
+	priv, _ := btcec.PrivKeyFromBytes(raw)
 	return &Signer{secret: priv}, nil
 }
 
