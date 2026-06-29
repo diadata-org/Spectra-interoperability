@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"time"
 
@@ -132,10 +133,21 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 
 		var destClient Destination
 		if chainConfig.Kind == "arch" {
-			// Arch Network: use the first enabled contract as the receiver program.
+			// Arch Network: exactly one contract must be configured per chain.
+			if len(contracts) > 1 {
+				return nil, fmt.Errorf("chain %d (arch): expected exactly 1 contract, got %d", chainConfig.ChainID, len(contracts))
+			}
 			archContract := contracts[0]
+
+			// Resolve signer key with per-router precedence:
+			//   1. router-level private_key literal
+			//   2. router-level private_key_env (env var name)
+			//   3. fall back to global infrastructure private_key
+			signerSecretHex, signerSource := resolveArchSignerKey(chainConfig.ChainID, routerRegistry, cfgService.GetInfrastructure().PrivateKey)
+			logger.Infof("Arch chain %d: signer key source = %s", chainConfig.ChainID, signerSource)
+
 			var buildErr error
-			destClient, buildErr = buildDestination(*chainConfig, *archContract, cfgService.GetInfrastructure().PrivateKey)
+			destClient, buildErr = buildDestination(*chainConfig, *archContract, signerSecretHex)
 			if buildErr != nil {
 				logger.Errorf("Failed to create Arch destination client for chain %d: %v", chainConfig.ChainID, buildErr)
 				continue
@@ -287,6 +299,39 @@ func logMonitorConfig(config leader.MonitorConfig, status string) {
 	}
 	logger.Infof("Replica monitoring config %s: enabled=%v, time_threshold_offset=%v, price_deviation_offset=%s, check_interval=%v",
 		status, config.Enabled, config.TimeThresholdOffset, priceDevPercent, config.CheckInterval)
+}
+
+// resolveArchSignerKey returns the signer secret hex and a description of the
+// source used, following this precedence per Arch destination:
+//  1. router-level private_key literal
+//  2. router-level private_key_env (environment variable name)
+//  3. global infrastructure private_key (fallback)
+//
+// The first active router whose destination targets archChainID wins.
+func resolveArchSignerKey(archChainID int64, reg *router.GenericRegistry, globalKey string) (signerHex, source string) {
+	if reg != nil {
+		for _, r := range reg.GetActiveRouters() {
+			for _, dest := range r.GetConfigDestinations() {
+				if dest.ChainID != archChainID {
+					continue
+				}
+				// Matched a router targeting this Arch chain — inspect its key config.
+				rc := r.GetConfig()
+				if rc == nil {
+					continue
+				}
+				if rc.PrivateKey != "" {
+					return rc.PrivateKey, "router-literal"
+				}
+				if rc.PrivateKeyEnv != "" {
+					if val := os.Getenv(rc.PrivateKeyEnv); val != "" {
+						return val, fmt.Sprintf("router-env $%s", rc.PrivateKeyEnv)
+					}
+				}
+			}
+		}
+	}
+	return globalKey, "infrastructure-default"
 }
 
 // countDestinationsForChain counts all destinations (oracles) configured for a specific chain

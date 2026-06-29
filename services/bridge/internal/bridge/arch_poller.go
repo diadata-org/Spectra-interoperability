@@ -2,10 +2,10 @@ package bridge
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"time"
 
+	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/arch"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 )
@@ -42,12 +42,14 @@ func pollOnce(ctx context.Context, routerID string, c *ArchWriteClient) {
 	if info, err := rpc.ReadAccountInfo(ctx, vaultPDA); err == nil && info != nil {
 		metrics.ArchFeeVaultLamports.WithLabelValues(routerID, chainStr).Set(float64(info.Lamports))
 	} else if err != nil {
-		log.Printf("arch poller: read fee vault: %v", err)
+		logger.Warnf("arch poller: read fee vault: %v", err)
 	}
 
 	payer := c.signer.Pubkey()
 	if info, err := rpc.ReadAccountInfo(ctx, payer); err == nil && info != nil {
 		// routerID is empty at gauge level; per-update counters carry RouterID label.
 		metrics.ArchPayerBalanceLamports.WithLabelValues(routerID, chainStr).Set(float64(info.Lamports))
+	} else if err != nil {
+		logger.Warnf("arch poller: read payer balance: %v", err)
 	}
 }

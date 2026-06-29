@@ -157,8 +157,13 @@ func (c *ArchWriteClient) Send(ctx context.Context, req *types.UpdateRequest) (T
 	if err != nil {
 		return TxResult{}, fmt.Errorf("arch send: build/sign: %w", err)
 	}
+	chainIDStr := strconv.FormatInt(c.chainID, 10)
+	routerID := req.RouterID
+
+	start := time.Now()
 	txID, err := c.rpc.SendTransaction(ctx, signed)
 	if err != nil {
+		metrics.ArchTxConfirmationSeconds.WithLabelValues(routerID, chainIDStr, "failed").Observe(time.Since(start).Seconds())
 		return TxResult{}, fmt.Errorf("arch send: rpc send: %w", err)
 	}
 
@@ -166,6 +171,7 @@ func (c *ArchWriteClient) Send(ctx context.Context, req *types.UpdateRequest) (T
 	for {
 		processed, err := c.rpc.GetProcessedTransaction(ctx, txID)
 		if err != nil {
+			metrics.ArchTxConfirmationSeconds.WithLabelValues(routerID, chainIDStr, "failed").Observe(time.Since(start).Seconds())
 			return TxResult{}, fmt.Errorf("arch send: confirm %s: %w", txID, err)
 		}
 		if processed != nil {
@@ -182,8 +188,6 @@ func (c *ArchWriteClient) Send(ctx context.Context, req *types.UpdateRequest) (T
 				}
 			}
 			// Emit metrics from parsed events.
-			chainIDStr := strconv.FormatInt(c.chainID, 10)
-			routerID := req.RouterID
 			for _, e := range events {
 				switch e.Kind {
 				case "update":
@@ -194,6 +198,13 @@ func (c *ArchWriteClient) Send(ctx context.Context, req *types.UpdateRequest) (T
 					metrics.ArchIntentRejected.WithLabelValues(routerID, chainIDStr, e.Reason).Inc()
 				}
 			}
+			// Observe confirmation latency. Use "processed" for the normal success
+			// path; any non-Processed status (e.g. "Failed") is "failed".
+			outcome := "processed"
+			if processed.Status != "Processed" {
+				outcome = "failed"
+			}
+			metrics.ArchTxConfirmationSeconds.WithLabelValues(routerID, chainIDStr, outcome).Observe(time.Since(start).Seconds())
 			return TxResult{
 				TxID:       txID,
 				Status:     processed.Status,
@@ -202,6 +213,7 @@ func (c *ArchWriteClient) Send(ctx context.Context, req *types.UpdateRequest) (T
 			}, nil
 		}
 		if time.Now().After(deadline) {
+			metrics.ArchTxConfirmationSeconds.WithLabelValues(routerID, chainIDStr, "timeout").Observe(time.Since(start).Seconds())
 			return TxResult{}, fmt.Errorf("arch send: confirm %s: timeout after %s", txID, c.confirmTimeout)
 		}
 		select {
