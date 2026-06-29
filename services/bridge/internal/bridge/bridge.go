@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -620,7 +621,11 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 		}
 	}()
 
-	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker())
+	var rawDB *sql.DB
+	if b.db != nil {
+		rawDB = b.db.DB
+	}
+	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker(), rawDB)
 	return handler.Process(ctx, task.Request)
 }
 

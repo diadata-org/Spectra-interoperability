@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math/big"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	bridgetypes "github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/pkg/router"
 )
@@ -36,14 +38,16 @@ type TransactionHandler struct {
 	writeClients   map[int64]Destination
 	routerRegistry *router.GenericRegistry
 	metricsTracker *MetricsTracker
+	db             *sql.DB
 }
 
 // NewTransactionHandler creates a new transaction handler
-func NewTransactionHandler(writeClients map[int64]Destination, registry *router.GenericRegistry, tracker *MetricsTracker) *TransactionHandler {
+func NewTransactionHandler(writeClients map[int64]Destination, registry *router.GenericRegistry, tracker *MetricsTracker, db *sql.DB) *TransactionHandler {
 	return &TransactionHandler{
 		writeClients:   writeClients,
 		routerRegistry: registry,
 		metricsTracker: tracker,
+		db:             db,
 	}
 }
 
@@ -59,9 +63,47 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 			if err != nil {
 				return fmt.Errorf("arch send (chain %d): %w", updateReq.DestinationChain.ChainID, err)
 			}
-			// TODO(task-13): persist TxResult to DB and record metrics here.
-			logger.Infof("Arch transaction sent: txID=%s status=%s chain=%d",
-				res.TxID, res.Status, updateReq.DestinationChain.ChainID)
+
+			chainID := updateReq.DestinationChain.ChainID
+			rejCount := len(res.Rejections)
+
+			// Determine outcome status label.
+			outcomeStatus := "delivered"
+			if res.Status == "Failed" {
+				outcomeStatus = "failed"
+			} else if rejCount > 0 {
+				outcomeStatus = "partially_delivered"
+			}
+
+			// Persist per-intent rejections into dia_arch_rejections.
+			// eventID=0 maps to NULL FK because we cannot reconstruct the
+			// composite processed_events.id without the upstream sha256 key —
+			// that key is built in generic_event_processor.go with data not
+			// available here.
+			// TODO(follow-up): wire eventID once processed_events gains a
+			// stable lookup path accessible from TransactionHandler.
+			//
+			// TODO(follow-up): write arch_logs JSONB column to processed_events
+			// once the schema adds that column (schema gap — no arch_logs field
+			// exists in processed_events as of this task).
+			if h.db != nil {
+				for _, rej := range res.Rejections {
+					if insErr := database.InsertArchRejection(ctx, h.db, 0, rej.IntentHash, rej.Symbol, rej.Signer, rej.Reason, res.TxID); insErr != nil {
+						logger.Warnf("arch: persist rejection (txID=%s intentHash=%x): %v", res.TxID, rej.IntentHash, insErr)
+					}
+				}
+			}
+
+			// Structured outcome log.
+			switch outcomeStatus {
+			case "failed":
+				logger.Warnf("Arch transaction outcome: txID=%s status=%s chain=%d rejections=%d partialDelivery=%v",
+					res.TxID, outcomeStatus, chainID, rejCount, false)
+			default:
+				logger.Infof("Arch transaction outcome: txID=%s status=%s chain=%d rejections=%d partialDelivery=%v",
+					res.TxID, outcomeStatus, chainID, rejCount, outcomeStatus == "partially_delivered")
+			}
+
 			return nil
 		}
 	}
