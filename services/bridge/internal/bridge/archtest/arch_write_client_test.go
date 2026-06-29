@@ -44,6 +44,10 @@ func (m *mockArchRPC) GetProcessedTransaction(_ context.Context, _ string) (*arc
 	return m.processedTx, nil
 }
 
+func (m *mockArchRPC) ReadAccountInfo(_ context.Context, _ arch.Pubkey) (*arch.AccountInfo, error) {
+	return nil, nil
+}
+
 func sampleIntent(_ *testing.T) types.OracleIntent {
 	return types.OracleIntent{
 		IntentType: "PriceUpdate",

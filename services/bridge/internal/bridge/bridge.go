@@ -363,6 +363,14 @@ func (b *Bridge) Start(ctx context.Context) error {
 	// Start worker pool
 	b.workerPool.Start(ctx)
 
+	// Start background fee-vault + payer-balance pollers for each Arch destination.
+	// routerID is empty at gauge level; per-update counters carry RouterID label.
+	for _, dest := range b.writeClients {
+		if archClient, ok := dest.(*ArchWriteClient); ok {
+			StartArchPoller(ctx, "", archClient, 30*time.Second)
+		}
+	}
+
 	// Start block scanner if enabled
 	if b.blockScanner != nil {
 		if err := b.blockScanner.Start(ctx); err != nil {

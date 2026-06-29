@@ -18,6 +18,7 @@ type archRPCInterface interface {
 	GetBestBlockHash(ctx context.Context) ([32]byte, error)
 	SendTransaction(ctx context.Context, signed []byte) (string, error)
 	GetProcessedTransaction(ctx context.Context, txID string) (*arch.ProcessedTx, error)
+	ReadAccountInfo(ctx context.Context, pubkey arch.Pubkey) (*arch.AccountInfo, error)
 }
 
 // ArchWriteClient is the Arch-Network implementation of the Destination
