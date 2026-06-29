@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
@@ -171,6 +172,9 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
+
+	// Register Arch-specific Prometheus collectors once at startup.
+	metrics.RegisterArchMetrics(prometheus.DefaultRegisterer)
 
 	// Create metrics manager
 	metricsManager := NewMetricsManager(metricsCollector)

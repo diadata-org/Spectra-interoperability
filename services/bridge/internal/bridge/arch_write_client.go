@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/arch"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/types"
 )
 
@@ -176,6 +178,19 @@ func (c *ArchWriteClient) Send(ctx context.Context, req *types.UpdateRequest) (T
 						Signer:     [20]byte(e.Signer),
 						Reason:     e.Reason,
 					})
+				}
+			}
+			// Emit metrics from parsed events.
+			chainIDStr := strconv.FormatInt(c.chainID, 10)
+			routerID := req.RouterID
+			for _, e := range events {
+				switch e.Kind {
+				case "update":
+					metrics.ArchIntentUpdates.WithLabelValues(routerID, chainIDStr, e.Symbol).Inc()
+				case "stale":
+					metrics.ArchIntentStale.WithLabelValues(routerID, chainIDStr, e.Symbol).Inc()
+				case "rejected":
+					metrics.ArchIntentRejected.WithLabelValues(routerID, chainIDStr, e.Reason).Inc()
 				}
 			}
 			return TxResult{
