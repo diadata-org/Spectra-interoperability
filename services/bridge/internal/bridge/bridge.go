@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/arch"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/leader"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
@@ -126,16 +128,30 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 			continue
 		}
 
-		// For NonceManager
-		oracleCount := countDestinationsForChain(routerRegistry, chainConfig.ChainID)
-		maxSafeGap := calculateMaxSafeGap(oracleCount)
-		logger.Infof("Chain %d (%s): %d oracles configured, maxSafeGap=%d",
-			chainConfig.ChainID, chainConfig.Name, oracleCount, maxSafeGap)
+		var destClient Destination
+		if chainConfig.Kind == "arch" {
+			// Arch Network: use the first enabled contract as the receiver program.
+			archContract := contracts[0]
+			var buildErr error
+			destClient, buildErr = buildDestination(*chainConfig, *archContract, cfgService.GetInfrastructure().PrivateKey)
+			if buildErr != nil {
+				logger.Errorf("Failed to create Arch destination client for chain %d: %v", chainConfig.ChainID, buildErr)
+				continue
+			}
+		} else {
+			// EVM path: pass all contracts (existing behaviour).
+			// For NonceManager
+			oracleCount := countDestinationsForChain(routerRegistry, chainConfig.ChainID)
+			maxSafeGap := calculateMaxSafeGap(oracleCount)
+			logger.Infof("Chain %d (%s): %d oracles configured, maxSafeGap=%d",
+				chainConfig.ChainID, chainConfig.Name, oracleCount, maxSafeGap)
 
-		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
-		if err != nil {
-			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
-			continue
+			var evmErr error
+			destClient, evmErr = NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
+			if evmErr != nil {
+				logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, evmErr)
+				continue
+			}
 		}
 		destClients[chainConfig.ChainID] = destClient
 	}
@@ -606,6 +622,73 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 
 	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker())
 	return handler.Process(ctx, task.Request)
+}
+
+// buildDestination is the factory that picks the right backend based on
+// chain.Kind. An empty Kind (or "evm") selects the existing EVM WriteClient.
+// "arch" selects ArchWriteClient. For EVM chains the caller must use
+// NewWriteClient directly (passing the full contract slice); this function
+// handles the single-contract Arch path.
+func buildDestination(chain config.ChainConfig, contract config.ContractConfig, signerSecretHex string) (Destination, error) {
+	switch chain.Kind {
+	case "arch":
+		return newArchDestinationFromConfig(chain, contract, signerSecretHex)
+	default: // "evm" or ""
+		// Single-contract shim: wrap in a slice for NewWriteClient.
+		// In production, NewBridge calls NewWriteClient directly with the full
+		// contract slice; this path is used by tests and tooling that construct
+		// an EVM destination from a single ContractConfig.
+		return NewWriteClient(&chain, []*config.ContractConfig{&contract}, signerSecretHex, nil, 5)
+	}
+}
+
+// newArchDestinationFromConfig validates config fields and constructs an
+// ArchWriteClient from a chain/contract config pair.
+func newArchDestinationFromConfig(chain config.ChainConfig, contract config.ContractConfig, signerSecretHex string) (Destination, error) {
+	if signerSecretHex == "" {
+		return nil, fmt.Errorf("arch destination %d: missing signer key", chain.ChainID)
+	}
+	signer, err := arch.NewSignerFromHex(signerSecretHex)
+	if err != nil {
+		return nil, fmt.Errorf("arch destination %d: %w", chain.ChainID, err)
+	}
+	receiverPK, err := decodePubkeyHex(contract.Address)
+	if err != nil {
+		return nil, fmt.Errorf("arch destination %d: receiver address: %w", chain.ChainID, err)
+	}
+	if contract.FeeHookProgramID == "" {
+		return nil, fmt.Errorf("arch destination %d: missing fee_hook_program_id", chain.ChainID)
+	}
+	feeHookPK, err := decodePubkeyHex(contract.FeeHookProgramID)
+	if err != nil {
+		return nil, fmt.Errorf("arch destination %d: fee hook id: %w", chain.ChainID, err)
+	}
+	if len(chain.RPCURLs) == 0 {
+		return nil, fmt.Errorf("arch destination %d: no rpc_urls", chain.ChainID)
+	}
+	rpc := arch.NewRPC(chain.RPCURLs[0])
+	return NewArchWriteClient(chain.ChainID, receiverPK, feeHookPK, rpc, signer, 30*time.Second), nil
+}
+
+// decodePubkeyHex decodes a 64-character hex string into an arch.Pubkey.
+func decodePubkeyHex(s string) (arch.Pubkey, error) {
+	if len(s) != 64 {
+		return arch.Pubkey{}, fmt.Errorf("pubkey hex must be 64 chars, got %d", len(s))
+	}
+	raw, err := hex.DecodeString(s)
+	if err != nil {
+		return arch.Pubkey{}, err
+	}
+	var out arch.Pubkey
+	copy(out[:], raw)
+	return out, nil
+}
+
+// BuildDestinationForTest is an exported thin wrapper around buildDestination
+// that allows external test packages (e.g. archtest) to exercise the factory
+// without exposing it as part of the public production API.
+func BuildDestinationForTest(chain config.ChainConfig, contract config.ContractConfig, signerSecretHex string) (Destination, error) {
+	return buildDestination(chain, contract, signerSecretHex)
 }
 
 // callRouterMethod calls a contract method using router configuration

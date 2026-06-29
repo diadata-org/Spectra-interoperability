@@ -49,6 +49,23 @@ func NewTransactionHandler(writeClients map[int64]Destination, registry *router.
 
 // Process handles the complete transaction lifecycle
 func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes.UpdateRequest) error {
+	// Fast path for non-EVM destinations: bypass the EVM-specific buildContext
+	// (which errors on type-assertion to *WriteClient) and call Destination.Send
+	// directly. Full DB persistence and metrics for the Arch path land in Task 13.
+	if updateReq != nil && updateReq.DestinationChain != nil {
+		dest := h.writeClients[updateReq.DestinationChain.ChainID]
+		if dest != nil && dest.Kind() == "arch" {
+			res, err := dest.Send(ctx, updateReq)
+			if err != nil {
+				return fmt.Errorf("arch send (chain %d): %w", updateReq.DestinationChain.ChainID, err)
+			}
+			// TODO(task-13): persist TxResult to DB and record metrics here.
+			logger.Infof("Arch transaction sent: txID=%s status=%s chain=%d",
+				res.TxID, res.Status, updateReq.DestinationChain.ChainID)
+			return nil
+		}
+	}
+
 	txCtx, err := h.buildContext(ctx, updateReq)
 	if err != nil {
 		return err

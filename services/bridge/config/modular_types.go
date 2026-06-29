@@ -46,6 +46,9 @@ type ChainConfig struct {
 	DefaultGasLimit uint64   `yaml:"default_gas_limit,omitempty" json:"default_gas_limit,omitempty"`
 	GasMultiplier   float64  `yaml:"gas_multiplier,omitempty" json:"gas_multiplier,omitempty"`
 	MaxGasPrice     string   `yaml:"max_gas_price,omitempty" json:"max_gas_price,omitempty"`
+	// Kind discriminates the chain backend. Empty string or "evm" selects the
+	// default EVM path. "arch" selects the Arch Network path.
+	Kind string `yaml:"kind,omitempty" json:"kind,omitempty"`
 }
 
 type ContractConfig struct {
@@ -64,6 +67,10 @@ type ContractConfig struct {
 
 	// Method configuration
 	Methods map[string]MethodConfig `yaml:"methods,omitempty" json:"methods,omitempty"`
+
+	// FeeHookProgramID is the hex-encoded 32-byte program ID of the fee-hook
+	// program on Arch Network. Required when the chain Kind is "arch".
+	FeeHookProgramID string `yaml:"fee_hook_program_id,omitempty" json:"fee_hook_program_id,omitempty"`
 }
 
 type RouterConfig struct {
