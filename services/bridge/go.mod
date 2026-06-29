@@ -9,6 +9,8 @@ replace github.com/diadata.org/Spectra-interoperability/proto => ../../proto
 replace github.com/diadata.org/Spectra-interoperability => ../../
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/diadata.org/Spectra-interoperability v0.0.0-00010101000000-000000000000
 	github.com/diadata.org/Spectra-interoperability/proto v0.0.0-00010101000000-000000000000
@@ -25,12 +27,10 @@ require (
 )
 
 require (
-	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
-	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect

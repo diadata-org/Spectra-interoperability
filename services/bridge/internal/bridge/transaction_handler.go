@@ -94,6 +94,11 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 				}
 			}
 
+			// TODO(follow-up): mutate processed_events.status based on outcomeStatus
+			// (deferred to Task 13 step 2). processed_events table has no status
+			// column (would require schema migration with broad impact), and
+			// composite intent-hash lookup back to the row is not trivially available.
+
 			// Structured outcome log.
 			switch outcomeStatus {
 			case "failed":
