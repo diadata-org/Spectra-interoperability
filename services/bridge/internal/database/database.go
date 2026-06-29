@@ -122,6 +122,7 @@ func (db *DB) Migrate() error {
 		createContractSymbolUpdateTable,
 		createPerformanceMetricsTable,
 		createAlertLogTable,
+		createDIAArchRejectionsTable,
 		createIndices,
 	}
 
@@ -134,6 +135,11 @@ func (db *DB) Migrate() error {
 	// Run generic events migration
 	if err := db.MigrateForGenericEvents(); err != nil {
 		return fmt.Errorf("generic events migration failed: %w", err)
+	}
+
+	// Run arch logs migration
+	if err := db.MigrateForArchLogs(); err != nil {
+		return fmt.Errorf("arch logs migration failed: %w", err)
 	}
 
 	return nil

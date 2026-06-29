@@ -137,6 +137,20 @@ CREATE TABLE IF NOT EXISTS alert_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`
 
+	createDIAArchRejectionsTable = `
+CREATE TABLE IF NOT EXISTS dia_arch_rejections (
+    id           BIGSERIAL PRIMARY KEY,
+    event_id     BIGINT REFERENCES processed_events(id) ON DELETE CASCADE,
+    intent_hash  BYTEA NOT NULL,
+    symbol       VARCHAR NOT NULL,
+    signer       BYTEA NOT NULL,
+    reason       VARCHAR NOT NULL,
+    tx_hash      VARCHAR NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS dia_arch_rejections_reason_idx ON dia_arch_rejections(reason, created_at);
+CREATE INDEX IF NOT EXISTS dia_arch_rejections_signer_idx ON dia_arch_rejections(signer, created_at);`
+
 	createIndices = `
 -- Processed events indices
 CREATE INDEX IF NOT EXISTS idx_processed_events_block_number ON processed_events(block_number);
