@@ -29,7 +29,7 @@ type Bridge struct {
 	configService *config.ConfigService
 	db            *database.DB
 	readClient    rpc.EthClient
-	writeClients  map[int64]*WriteClient
+	writeClients  map[int64]Destination
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -119,7 +119,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
-	destClients := make(map[int64]*WriteClient)
+	destClients := make(map[int64]Destination)
 	for _, chainConfig := range cfgService.GetEnabledChains() {
 		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
 		if len(contracts) == 0 {
@@ -159,8 +159,10 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	metricsManager := NewMetricsManager(metricsCollector)
 
 	ethClients := make(map[int64]rpc.EthClient)
-	for chainID, writeClient := range destClients {
-		ethClients[chainID] = writeClient.GetEthClient()
+	for chainID, dest := range destClients {
+		if wc, ok := dest.(*WriteClient); ok {
+			ethClients[chainID] = wc.GetEthClient()
+		}
 	}
 
 	// Create bridge instance now that we have all dependencies
@@ -448,7 +450,9 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	// Close connections
 	b.readClient.Close()
 	for _, destClient := range b.writeClients {
-		destClient.client.Close()
+		if wc, ok := destClient.(*WriteClient); ok {
+			wc.client.Close()
+		}
 	}
 
 	b.mu.Lock()
@@ -522,8 +526,8 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 			// Check if update is stale based on last update in cache
 			if updateReq.Intent != nil && !updateReq.CreatedAt.IsZero() && updateReq.Contract != nil {
 				destClient := b.writeClients[updateReq.DestinationChain.ChainID]
-				if destClient != nil {
-					lastUpdateTime := destClient.getLastUpdate(updateReq.Intent.Symbol, updateReq.Contract.Address)
+				if wc, ok := destClient.(*WriteClient); ok {
+					lastUpdateTime := wc.getLastUpdate(updateReq.Intent.Symbol, updateReq.Contract.Address)
 					if !lastUpdateTime.IsZero() && updateReq.CreatedAt.Before(lastUpdateTime) {
 						logger.Debugf("Skipping stale update: symbol=%s, chain=%d, contract=%s, updateTime=%v, lastUpdateTime=%v, age=%v",
 							updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID, updateReq.Contract.Address,

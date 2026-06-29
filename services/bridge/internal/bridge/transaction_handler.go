@@ -33,13 +33,13 @@ type TransactionContext struct {
 
 // TransactionHandler handles the complete lifecycle of a transaction
 type TransactionHandler struct {
-	writeClients   map[int64]*WriteClient
+	writeClients   map[int64]Destination
 	routerRegistry *router.GenericRegistry
 	metricsTracker *MetricsTracker
 }
 
 // NewTransactionHandler creates a new transaction handler
-func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker) *TransactionHandler {
+func NewTransactionHandler(writeClients map[int64]Destination, registry *router.GenericRegistry, tracker *MetricsTracker) *TransactionHandler {
 	return &TransactionHandler{
 		writeClients:   writeClients,
 		routerRegistry: registry,
@@ -87,9 +87,13 @@ func (h *TransactionHandler) buildContext(ctx context.Context, updateReq *bridge
 		return nil, fmt.Errorf("destination chain is nil")
 	}
 
-	destClient := h.writeClients[updateReq.DestinationChain.ChainID]
-	if destClient == nil {
+	dest := h.writeClients[updateReq.DestinationChain.ChainID]
+	if dest == nil {
 		return nil, fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
+	}
+	destClient, ok := dest.(*WriteClient)
+	if !ok {
+		return nil, fmt.Errorf("destination for chain %d is not an EVM WriteClient", updateReq.DestinationChain.ChainID)
 	}
 
 	gasPrice, err := destClient.getGasPrice(ctx)
