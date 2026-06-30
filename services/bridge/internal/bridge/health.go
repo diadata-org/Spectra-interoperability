@@ -33,11 +33,13 @@ func (b *Bridge) initializeChainStats() {
 	}
 
 	// Destination chain stats
-	for _, destClient := range b.writeClients {
-		b.stats.ChainStats[destClient.chainConfig.ChainID] = &bridgetypes.ChainStatus{
-			ChainID:   destClient.chainConfig.ChainID,
-			Name:      destClient.chainConfig.Name,
-			Connected: true,
+	for _, dest := range b.writeClients {
+		if wc, ok := dest.(*WriteClient); ok {
+			b.stats.ChainStats[wc.chainConfig.ChainID] = &bridgetypes.ChainStatus{
+				ChainID:   wc.chainConfig.ChainID,
+				Name:      wc.chainConfig.Name,
+				Connected: true,
+			}
 		}
 	}
 }
@@ -69,9 +71,11 @@ func (b *Bridge) performHealthCheck(ctx context.Context) {
 	}
 
 	// Check destination chains
-	for _, destClient := range b.writeClients {
-		if err := b.checkChainHealth(ctx, destClient.client, destClient.chainConfig.ChainID); err != nil {
-			logger.Errorf("Destination chain %d health check failed: %v", destClient.chainConfig.ChainID, err)
+	for _, dest := range b.writeClients {
+		if wc, ok := dest.(*WriteClient); ok {
+			if err := b.checkChainHealth(ctx, wc.client, wc.chainConfig.ChainID); err != nil {
+				logger.Errorf("Destination chain %d health check failed: %v", wc.chainConfig.ChainID, err)
+			}
 		}
 	}
 }

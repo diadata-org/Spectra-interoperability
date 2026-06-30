@@ -19,12 +19,13 @@ import (
 
 // WriteClient represents a client for write operations to a destination chain
 type WriteClient struct {
-	chainConfig *config.ChainConfig
-	contracts   []*config.ContractConfig
-	client      rpc.EthClient
-	txClient    *transaction.Client
-	lastUpdate  map[string]time.Time
-	mu          sync.RWMutex
+	chainConfig     *config.ChainConfig
+	contracts       []*config.ContractConfig
+	client          rpc.EthClient
+	txClient        *transaction.Client
+	lastUpdate      map[string]time.Time
+	mu              sync.RWMutex
+	receiverAddress string // hex address of the receiver contract, stored at construction
 }
 
 // NewWriteClient creates a new write client for destination operations
@@ -70,11 +71,12 @@ func NewWriteClient(chainConfig *config.ChainConfig, contractConfigs []*config.C
 	txClient := transaction.NewClient(receiverClient, client, queueManager, chainConfig.ChainID)
 
 	return &WriteClient{
-		chainConfig: chainConfig,
-		contracts:   contractConfigs,
-		client:      client,
-		txClient:    txClient,
-		lastUpdate:  make(map[string]time.Time),
+		chainConfig:     chainConfig,
+		contracts:       contractConfigs,
+		client:          client,
+		txClient:        txClient,
+		lastUpdate:      make(map[string]time.Time),
+		receiverAddress: receiverAddress,
 	}, nil
 }
 
@@ -144,4 +146,47 @@ func (wc *WriteClient) callRouterMethod(ctx context.Context, updateReq *bridgety
 
 func (wc *WriteClient) GetEthClient() rpc.EthClient {
 	return wc.client
+}
+
+// ---- Destination interface implementation ----
+//
+// These four methods make *WriteClient satisfy the Destination interface so
+// dispatch sites can hold a Destination instead of a concrete *WriteClient.
+// The methods delegate to the existing fields without changing the EVM path.
+
+// Kind returns the chain backend kind.
+func (wc *WriteClient) Kind() string { return "evm" }
+
+// ReceiverAddress returns the destination contract address (hex with 0x prefix).
+func (wc *WriteClient) ReceiverAddress() string {
+	return wc.receiverAddress
+}
+
+// ChainID returns the EVM chain ID.
+func (wc *WriteClient) ChainID() int64 {
+	if wc.chainConfig == nil {
+		return 0
+	}
+	return wc.chainConfig.ChainID
+}
+
+// Send wraps callRouterMethod and adapts its return shape to TxResult.
+// It fetches the gas price internally and uses DefaultGasLimit when the
+// UpdateRequest carries no DestinationMethodConfig gas limit.
+func (wc *WriteClient) Send(ctx context.Context, req *bridgetypes.UpdateRequest) (TxResult, error) {
+	gasPrice, err := wc.getGasPrice(ctx)
+	if err != nil {
+		return TxResult{}, err
+	}
+
+	gasLimit := DefaultGasLimit
+	if req.DestinationMethodConfig != nil && req.DestinationMethodConfig.GasLimit > 0 {
+		gasLimit = req.DestinationMethodConfig.GasLimit
+	}
+
+	tx, err := wc.callRouterMethod(ctx, req, gasPrice, gasLimit)
+	if err != nil {
+		return TxResult{}, err
+	}
+	return TxResult{TxID: tx.Hash().Hex(), Status: "Processed"}, nil
 }

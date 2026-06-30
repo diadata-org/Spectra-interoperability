@@ -9,6 +9,9 @@ replace github.com/diadata.org/Spectra-interoperability/proto => ../../proto
 replace github.com/diadata.org/Spectra-interoperability => ../../
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
+	github.com/btcsuite/btcd/btcec/v2 v2.3.4
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/diadata.org/Spectra-interoperability v0.0.0-00010101000000-000000000000
 	github.com/diadata.org/Spectra-interoperability/proto v0.0.0-00010101000000-000000000000
 	github.com/ethereum/go-ethereum v1.16.4
@@ -28,13 +31,14 @@ require (
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
+	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/consensys/gnark-crypto v0.18.0 // indirect
 	github.com/crate-crypto/go-eth-kzg v1.4.0 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.0.1 // indirect
+	github.com/decred/dcrd/crypto/blake256 v1.1.0 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.3 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect

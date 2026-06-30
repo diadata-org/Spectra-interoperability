@@ -67,12 +67,15 @@ type LegacyRouterDestination struct {
 
 // DestinationMethodConfig defines a contract method call for generic routing
 type DestinationMethodConfig struct {
-	Name          string            `json:"name"`
-	ABI           string            `json:"abi"`
-	Params        map[string]string `json:"params"`
-	Value         string            `json:"value"`
-	GasLimit      uint64            `json:"gas_limit"`
-	GasMultiplier float64           `json:"gas_multiplier"`
+	Name          string            `json:"name" yaml:"name"`
+	ABI           string            `json:"abi" yaml:"abi"`
+	Params        map[string]string `json:"params" yaml:"params"`
+	Value         string            `json:"value" yaml:"value"`
+	GasLimit      uint64            `json:"gas_limit" yaml:"gas_limit"`
+	GasMultiplier float64           `json:"gas_multiplier" yaml:"gas_multiplier"`
+	// Kind optionally tags this method as belonging to a specific chain backend.
+	// Defaults to empty/"evm". Set to "arch" for Arch Network destinations.
+	Kind string `json:"kind,omitempty" yaml:"kind,omitempty"`
 }
 
 // ExtractedData represents data extracted from an event

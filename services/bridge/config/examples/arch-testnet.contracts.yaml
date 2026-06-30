@@ -1,0 +1,9 @@
+arch-testnet-receiver:
+  chain_id: -1
+  type: "arch-oracle-receiver"
+  # Replace with the program ID printed by:
+  #   arch-oracle deploy ../arch-oracle-program/target/deploy/dia_arch_oracle_receiver.so --profile testnet
+  address: "0000000000000000000000000000000000000000000000000000000000000000"
+  # Replace with the fee-hook program ID printed by:
+  #   arch-oracle deploy ../arch-oracle-program/target/deploy/dia_arch_fee_hook.so --profile testnet
+  fee_hook_program_id: "0000000000000000000000000000000000000000000000000000000000000000"

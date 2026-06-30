@@ -2,17 +2,22 @@ package bridge
 
 import (
 	"context"
+	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/api"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/arch"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/database"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/leader"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/metrics"
@@ -29,7 +34,7 @@ type Bridge struct {
 	configService *config.ConfigService
 	db            *database.DB
 	readClient    rpc.EthClient
-	writeClients  map[int64]*WriteClient
+	writeClients  map[int64]Destination
 
 	// Channels for communication
 	updateChan   chan *bridgetypes.UpdateRequest
@@ -119,23 +124,48 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logger.Errorf("Failed to load routers: %v", err)
 	}
 
-	destClients := make(map[int64]*WriteClient)
+	destClients := make(map[int64]Destination)
 	for _, chainConfig := range cfgService.GetEnabledChains() {
 		contracts := cfgService.GetContractsForChain(chainConfig.ChainID)
 		if len(contracts) == 0 {
 			continue
 		}
 
-		// For NonceManager
-		oracleCount := countDestinationsForChain(routerRegistry, chainConfig.ChainID)
-		maxSafeGap := calculateMaxSafeGap(oracleCount)
-		logger.Infof("Chain %d (%s): %d oracles configured, maxSafeGap=%d",
-			chainConfig.ChainID, chainConfig.Name, oracleCount, maxSafeGap)
+		var destClient Destination
+		if chainConfig.Kind == "arch" {
+			// Arch Network: exactly one contract must be configured per chain.
+			if len(contracts) > 1 {
+				return nil, fmt.Errorf("chain %d (arch): expected exactly 1 contract, got %d", chainConfig.ChainID, len(contracts))
+			}
+			archContract := contracts[0]
 
-		destClient, err := NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
-		if err != nil {
-			logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, err)
-			continue
+			// Resolve signer key with per-router precedence:
+			//   1. router-level private_key literal
+			//   2. router-level private_key_env (env var name)
+			//   3. fall back to global infrastructure private_key
+			signerSecretHex, signerSource := resolveArchSignerKey(chainConfig.ChainID, routerRegistry, cfgService.GetInfrastructure().PrivateKey)
+			logger.Infof("Arch chain %d: signer key source = %s", chainConfig.ChainID, signerSource)
+
+			var buildErr error
+			destClient, buildErr = buildDestination(*chainConfig, *archContract, signerSecretHex)
+			if buildErr != nil {
+				logger.Errorf("Failed to create Arch destination client for chain %d: %v", chainConfig.ChainID, buildErr)
+				continue
+			}
+		} else {
+			// EVM path: pass all contracts (existing behaviour).
+			// For NonceManager
+			oracleCount := countDestinationsForChain(routerRegistry, chainConfig.ChainID)
+			maxSafeGap := calculateMaxSafeGap(oracleCount)
+			logger.Infof("Chain %d (%s): %d oracles configured, maxSafeGap=%d",
+				chainConfig.ChainID, chainConfig.Name, oracleCount, maxSafeGap)
+
+			var evmErr error
+			destClient, evmErr = NewWriteClient(chainConfig, contracts, cfgService.GetInfrastructure().PrivateKey, queueManager, maxSafeGap)
+			if evmErr != nil {
+				logger.Errorf("Failed to create destination client for chain %d: %v", chainConfig.ChainID, evmErr)
+				continue
+			}
 		}
 		destClients[chainConfig.ChainID] = destClient
 	}
@@ -155,12 +185,17 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 	eventChan := make(chan *bridgetypes.EventData, 100)
 	errorChan := make(chan error, 10)
 
+	// Register Arch-specific Prometheus collectors once at startup.
+	metrics.RegisterArchMetrics(prometheus.DefaultRegisterer)
+
 	// Create metrics manager
 	metricsManager := NewMetricsManager(metricsCollector)
 
 	ethClients := make(map[int64]rpc.EthClient)
-	for chainID, writeClient := range destClients {
-		ethClients[chainID] = writeClient.GetEthClient()
+	for chainID, dest := range destClients {
+		if wc, ok := dest.(*WriteClient); ok {
+			ethClients[chainID] = wc.GetEthClient()
+		}
 	}
 
 	// Create bridge instance now that we have all dependencies
@@ -266,6 +301,39 @@ func logMonitorConfig(config leader.MonitorConfig, status string) {
 		status, config.Enabled, config.TimeThresholdOffset, priceDevPercent, config.CheckInterval)
 }
 
+// resolveArchSignerKey returns the signer secret hex and a description of the
+// source used, following this precedence per Arch destination:
+//  1. router-level private_key literal
+//  2. router-level private_key_env (environment variable name)
+//  3. global infrastructure private_key (fallback)
+//
+// The first active router whose destination targets archChainID wins.
+func resolveArchSignerKey(archChainID int64, reg *router.GenericRegistry, globalKey string) (signerHex, source string) {
+	if reg != nil {
+		for _, r := range reg.GetActiveRouters() {
+			for _, dest := range r.GetConfigDestinations() {
+				if dest.ChainID != archChainID {
+					continue
+				}
+				// Matched a router targeting this Arch chain — inspect its key config.
+				rc := r.GetConfig()
+				if rc == nil {
+					continue
+				}
+				if rc.PrivateKey != "" {
+					return rc.PrivateKey, "router-literal"
+				}
+				if rc.PrivateKeyEnv != "" {
+					if val := os.Getenv(rc.PrivateKeyEnv); val != "" {
+						return val, fmt.Sprintf("router-env $%s", rc.PrivateKeyEnv)
+					}
+				}
+			}
+		}
+	}
+	return globalKey, "infrastructure-default"
+}
+
 // countDestinationsForChain counts all destinations (oracles) configured for a specific chain
 func countDestinationsForChain(routerRegistry *router.GenericRegistry, chainID int64) int {
 	if routerRegistry == nil {
@@ -339,6 +407,14 @@ func (b *Bridge) Start(ctx context.Context) error {
 
 	// Start worker pool
 	b.workerPool.Start(ctx)
+
+	// Start background fee-vault + payer-balance pollers for each Arch destination.
+	// routerID is empty at gauge level; per-update counters carry RouterID label.
+	for _, dest := range b.writeClients {
+		if archClient, ok := dest.(*ArchWriteClient); ok {
+			StartArchPoller(ctx, "", archClient, 30*time.Second)
+		}
+	}
 
 	// Start block scanner if enabled
 	if b.blockScanner != nil {
@@ -448,7 +524,9 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	// Close connections
 	b.readClient.Close()
 	for _, destClient := range b.writeClients {
-		destClient.client.Close()
+		if wc, ok := destClient.(*WriteClient); ok {
+			wc.client.Close()
+		}
 	}
 
 	b.mu.Lock()
@@ -522,8 +600,8 @@ func (b *Bridge) processUpdates(ctx context.Context) {
 			// Check if update is stale based on last update in cache
 			if updateReq.Intent != nil && !updateReq.CreatedAt.IsZero() && updateReq.Contract != nil {
 				destClient := b.writeClients[updateReq.DestinationChain.ChainID]
-				if destClient != nil {
-					lastUpdateTime := destClient.getLastUpdate(updateReq.Intent.Symbol, updateReq.Contract.Address)
+				if wc, ok := destClient.(*WriteClient); ok {
+					lastUpdateTime := wc.getLastUpdate(updateReq.Intent.Symbol, updateReq.Contract.Address)
 					if !lastUpdateTime.IsZero() && updateReq.CreatedAt.Before(lastUpdateTime) {
 						logger.Debugf("Skipping stale update: symbol=%s, chain=%d, contract=%s, updateTime=%v, lastUpdateTime=%v, age=%v",
 							updateReq.Intent.Symbol, updateReq.DestinationChain.ChainID, updateReq.Contract.Address,
@@ -600,8 +678,79 @@ func (b *Bridge) handleUpdateRequest(ctx context.Context, task *worker.WorkerTas
 		}
 	}()
 
-	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker())
+	var rawDB *sql.DB
+	if b.db != nil {
+		rawDB = b.db.DB
+	}
+	handler := NewTransactionHandler(b.writeClients, b.routerRegistry, b.metricsManager.GetTracker(), rawDB)
 	return handler.Process(ctx, task.Request)
+}
+
+// buildDestination is the factory that picks the right backend based on
+// chain.Kind. An empty Kind (or "evm") selects the existing EVM WriteClient.
+// "arch" selects ArchWriteClient. For EVM chains the caller must use
+// NewWriteClient directly (passing the full contract slice); this function
+// handles the single-contract Arch path.
+func buildDestination(chain config.ChainConfig, contract config.ContractConfig, signerSecretHex string) (Destination, error) {
+	switch chain.Kind {
+	case "arch":
+		return newArchDestinationFromConfig(chain, contract, signerSecretHex)
+	default: // "evm" or ""
+		// Single-contract shim: wrap in a slice for NewWriteClient.
+		// In production, NewBridge calls NewWriteClient directly with the full
+		// contract slice; this path is used by tests and tooling that construct
+		// an EVM destination from a single ContractConfig.
+		return NewWriteClient(&chain, []*config.ContractConfig{&contract}, signerSecretHex, nil, 5)
+	}
+}
+
+// newArchDestinationFromConfig validates config fields and constructs an
+// ArchWriteClient from a chain/contract config pair.
+func newArchDestinationFromConfig(chain config.ChainConfig, contract config.ContractConfig, signerSecretHex string) (Destination, error) {
+	if signerSecretHex == "" {
+		return nil, fmt.Errorf("arch destination %d: missing signer key", chain.ChainID)
+	}
+	signer, err := arch.NewSignerFromHex(signerSecretHex)
+	if err != nil {
+		return nil, fmt.Errorf("arch destination %d: %w", chain.ChainID, err)
+	}
+	receiverPK, err := decodePubkeyHex(contract.Address)
+	if err != nil {
+		return nil, fmt.Errorf("arch destination %d: receiver address: %w", chain.ChainID, err)
+	}
+	if contract.FeeHookProgramID == "" {
+		return nil, fmt.Errorf("arch destination %d: missing fee_hook_program_id", chain.ChainID)
+	}
+	feeHookPK, err := decodePubkeyHex(contract.FeeHookProgramID)
+	if err != nil {
+		return nil, fmt.Errorf("arch destination %d: fee hook id: %w", chain.ChainID, err)
+	}
+	if len(chain.RPCURLs) == 0 {
+		return nil, fmt.Errorf("arch destination %d: no rpc_urls", chain.ChainID)
+	}
+	rpc := arch.NewRPC(chain.RPCURLs[0])
+	return NewArchWriteClient(chain.ChainID, receiverPK, feeHookPK, rpc, signer, 30*time.Second), nil
+}
+
+// decodePubkeyHex decodes a 64-character hex string into an arch.Pubkey.
+func decodePubkeyHex(s string) (arch.Pubkey, error) {
+	if len(s) != 64 {
+		return arch.Pubkey{}, fmt.Errorf("pubkey hex must be 64 chars, got %d", len(s))
+	}
+	raw, err := hex.DecodeString(s)
+	if err != nil {
+		return arch.Pubkey{}, err
+	}
+	var out arch.Pubkey
+	copy(out[:], raw)
+	return out, nil
+}
+
+// BuildDestinationForTest is an exported thin wrapper around buildDestination
+// that allows external test packages (e.g. archtest) to exercise the factory
+// without exposing it as part of the public production API.
+func BuildDestinationForTest(chain config.ChainConfig, contract config.ContractConfig, signerSecretHex string) (Destination, error) {
+	return buildDestination(chain, contract, signerSecretHex)
 }
 
 // callRouterMethod calls a contract method using router configuration

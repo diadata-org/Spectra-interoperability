@@ -1,0 +1,22 @@
+{
+  "636f6e666967": {
+    "bump": 255,
+    "pubkey": "e8353dd1a510292b55a937281182ba0e487dff58f787dfbab990e423a0a6314b"
+  },
+  "6465647570": {
+    "bump": 255,
+    "pubkey": "e8332ce876932197a1f84e2ed6177444d6d552bcf4352a9f80ce9357a1f48395"
+  },
+  "6665655f636f6e666967": {
+    "bump": 255,
+    "pubkey": "165cd916dafa742e26b7f64e080f2365e24c86de74d32830b9d26713c496ae80"
+  },
+  "6665655f7661756c74": {
+    "bump": 255,
+    "pubkey": "32b4de6caf4568a355aa5c5b1c41b91e70a0e35eb314f90119a7a775c2cfd9a3"
+  },
+  "7072696365|sha256:BTC/USD": {
+    "bump": 255,
+    "pubkey": "41b3d044976c1e96652ee39a69f9dfc40d21c1b2bb90a9e7ad4b4107437b2224"
+  }
+}

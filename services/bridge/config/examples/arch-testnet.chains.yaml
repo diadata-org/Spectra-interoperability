@@ -1,0 +1,15 @@
+arch-testnet:
+  chain_id: -1
+  name: "Arch Network (Testnet)"
+  kind: "arch"
+  rpc_urls:
+    - "https://explorer.arch.network/api/v1/testnet/rpc"
+  enabled: true
+
+arch-mainnet:
+  chain_id: -2
+  name: "Arch Network (Mainnet)"
+  kind: "arch"
+  rpc_urls:
+    - "https://explorer.arch.network/api/v1/mainnet/rpc"
+  enabled: false

@@ -1,0 +1,16 @@
+id: "dia-arch-testnet"
+type: "intent-relayer"
+enabled: true
+# The env var holding the 64-char hex secp256k1 secret key of the relayer.
+# Generate via:
+#   arch-oracle wallet create --name arch-relayer
+# and read out the secretKeyHex field from the resulting JSON.
+private_key_env: "ARCH_RELAYER_PRIVATE_KEY"
+triggers:
+  events: ["IntentRegistered"]
+destinations:
+  - chain_id: -1
+    contract: "arch-testnet-receiver"
+    method:
+      kind: "arch-handle-intent-update"
+      gas_limit: 200000  # repurposed as an Arch compute-budget hint (optional)
