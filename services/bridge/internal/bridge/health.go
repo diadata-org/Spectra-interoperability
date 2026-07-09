@@ -33,13 +33,14 @@ func (b *Bridge) initializeChainStats() {
 	}
 
 	// Destination chain stats
-	for _, destClient := range b.writeClients {
+	for _, destClient := range b.chainClients {
 		b.stats.ChainStats[destClient.chainConfig.ChainID] = &bridgetypes.ChainStatus{
 			ChainID:   destClient.chainConfig.ChainID,
 			Name:      destClient.chainConfig.Name,
 			Connected: true,
 		}
 	}
+	// Router-specific clients use same chains as chain clients, so no need to duplicate stats
 }
 
 // healthCheck performs periodic health checks
@@ -98,12 +99,13 @@ func (b *Bridge) performHealthCheck(ctx context.Context) {
 		logger.Errorf("Source chain health check failed: %v", err)
 	}
 
-	// Check destination chains
-	for _, destClient := range b.writeClients {
+	// Check destination chains (chain-based clients)
+	for _, destClient := range b.chainClients {
 		if err := b.checkChainHealth(ctx, destClient.client, destClient.chainConfig.ChainID); err != nil {
 			logger.Errorf("Destination chain %d health check failed: %v", destClient.chainConfig.ChainID, err)
 		}
 	}
+	// Note: router-specific clients use same chains as chain clients, so no need to check again
 }
 
 // checkChainHealth checks the health of a single chain

@@ -45,6 +45,11 @@ type PoolLister interface {
 	ListPools() []PoolInfo
 }
 
+// QueueStatter provides read-only access to transaction queue stats
+type QueueStatter interface {
+	GetAllQueueStats() []map[string]interface{}
+}
+
 // Server represents the API server
 type Server struct {
 	config         *config.APIConfig
@@ -58,6 +63,7 @@ type Server struct {
 	httpServer      *http.Server
 	failoverHandler *FailoverHandler
 	poolLister      PoolLister
+	queueStatter    QueueStatter
 }
 
 // NewServer creates a new API server
@@ -147,6 +153,11 @@ func (s *Server) SetPoolLister(lister PoolLister) {
 	s.poolLister = lister
 }
 
+// SetQueueStatter sets the queue stats provider for transaction queue inspection
+func (s *Server) SetQueueStatter(statter QueueStatter) {
+	s.queueStatter = statter
+}
+
 // setupRoutes configures all API routes
 func (s *Server) setupRoutes() {
 	s.router.HandleFunc("/health", s.handleHealth).Methods("GET")
@@ -196,6 +207,7 @@ func (s *Server) setupRoutes() {
 	// Worker pool endpoints
 	v1.HandleFunc("/pools", s.handleGetPools).Methods("GET")
 	v1.HandleFunc("/pools/{router_id}/tasks", s.handleGetPoolTasks).Methods("GET")
+	v1.HandleFunc("/queue", s.handleGetQueue).Methods("GET")
 
 	// Failover endpoints (if available)
 	if s.failoverHandler != nil {
@@ -480,6 +492,19 @@ func (s *Server) handleGetPoolTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeError(w, http.StatusNotFound, "Pool not found for router: "+routerID, nil)
+}
+
+func (s *Server) handleGetQueue(w http.ResponseWriter, r *http.Request) {
+	if s.queueStatter == nil {
+		s.writeError(w, http.StatusNotFound, "Queue stats not available", nil)
+		return
+	}
+
+	stats := s.queueStatter.GetAllQueueStats()
+	s.writeJSON(w, map[string]interface{}{
+		"queues": stats,
+		"count":  len(stats),
+	})
 }
 
 // Middleware

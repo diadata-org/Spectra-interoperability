@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -98,7 +99,9 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 		Data:     callData,
 	}
 
+	t0 := time.Now()
 	if _, err := e.ethClient.CallContract(ctx, callMsg, nil); err != nil {
+		logger.Errorf("[RPC] CallContract (simulate) failed: took=%v, error=%v", time.Since(t0), err)
 		// Log raw error for debugging - MUST be Error level to see in production
 		logger.Errorf("Raw simulation error for chain %d: %v (Type: %T)", e.chainID, err, err)
 
@@ -122,12 +125,16 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 		routerID = req.UpdateRequest.RouterID
 	}
 	logger.Infof("Transaction simulation successful, proceeding to send transaction, router=%s", routerID)
+	logger.Infof("[RPC] CallContract (simulate) done: took=%v", time.Since(t0))
 
 	// CRITICAL: Allocate nonce immediately before sending to minimize staleness window
 	// This happens AFTER simulation to reduce the time between allocation and sending
+	t1 := time.Now()
 	if err := e.receiverClient.UpdateAuth(ctx, req.GasPrice); err != nil {
+		logger.Errorf("[RPC] UpdateAuth (nonce) failed: took=%v, error=%v", time.Since(t1), err)
 		return nil, fmt.Errorf("failed to update auth: %w", err)
 	}
+	logger.Infof("[RPC] UpdateAuth (nonce) done: took=%v", time.Since(t1))
 
 	// Refresh auth to get the newly allocated nonce
 	auth = e.receiverClient.GetAuth()
@@ -139,8 +146,10 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 	usedNonce := auth.Nonce.Uint64()
 
 	// Send transaction immediately (within ~1ms of nonce allocation)
+	t2 := time.Now()
 	tx, err := bind.NewBoundContract(contractAddress, parsedABI, e.ethClient, e.ethClient, e.ethClient).Transact(auth, req.MethodName, req.Params...)
 	if err != nil {
+		logger.Errorf("[RPC] Transact (send) failed: took=%v, nonce=%d, error=%v", time.Since(t2), usedNonce, err)
 		logger.Errorf("Transaction failed: %v", err)
 		// CRITICAL: Notify NonceManager about the error so it can resync if needed
 		e.receiverClient.HandleTransactionError(ctx, err, usedNonce)
@@ -149,6 +158,7 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 
 	// Mark nonce as successfully sent to mempool
 	e.receiverClient.MarkNonceSent(usedNonce, tx.Hash().Hex())
+	logger.Infof("[RPC] Transact (send) done: took=%v, tx_hash=%s, nonce=%d", time.Since(t2), tx.Hash().Hex(), usedNonce)
 
 	symbol := "unknown"
 	if req.UpdateRequest.Intent != nil {

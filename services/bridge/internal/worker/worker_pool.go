@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,6 +44,8 @@ type WorkerPool struct {
 	taskTimeout      time.Duration
 	pendingMu        sync.RWMutex
 	pendingTasks     []*WorkerTask
+	inflightMu       sync.Mutex
+	inflightSymbols  map[string]string // "SYMBOL/CHAINID" -> taskID, tracks active+queued tasks
 }
 
 // Worker represents a single worker in the pool
@@ -70,11 +73,12 @@ func NewWorkerPool(routerID string, maxWorkers int, taskQueueSize int, taskTimeo
 	logger.Infof("Creating worker pool for router %s: maxWorkers=%d, taskQueueSize=%d, taskTimeout=%v", routerID, maxWorkers, queueSize, taskTimeout)
 
 	return &WorkerPool{
-		routerID:     routerID,
-		maxWorkers:   maxWorkers,
-		taskQueue:    make(chan *WorkerTask, queueSize),
-		shutdownChan: make(chan struct{}),
-		taskTimeout:  taskTimeout,
+		routerID:        routerID,
+		maxWorkers:      maxWorkers,
+		taskQueue:       make(chan *WorkerTask, queueSize),
+		shutdownChan:    make(chan struct{}),
+		taskTimeout:     taskTimeout,
+		inflightSymbols: make(map[string]string),
 	}
 }
 
@@ -191,7 +195,7 @@ func (wp *WorkerPool) healthMonitor(ctx context.Context) {
 					wp.maxWorkers, wp.routerID, queueSize, activeCount)
 			}
 
-			logger.Debugf("[router=%s] Worker pool health: active=%d/%d, queue=%d/%d",
+			logger.Infof("[router=%s] Worker pool health: active=%d/%d, queue=%d/%d",
 				wp.routerID, activeCount, wp.maxWorkers, queueSize, queueCap)
 		}
 	}
@@ -212,13 +216,35 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 		return
 	}
 
+	// Dedup: skip if this symbol is already in-flight (active worker or queued)
+	symbol := "unknown"
+	chainID := int64(0)
+	if task.Request != nil {
+		if task.Request.Intent != nil {
+			symbol = task.Request.Intent.Symbol
+		}
+		if task.Request.DestinationChain != nil {
+			chainID = task.Request.DestinationChain.ChainID
+		}
+	}
+	dedupeKey := fmt.Sprintf("%s-%d", symbol, chainID)
+
+	wp.inflightMu.Lock()
+	if existingID, exists := wp.inflightSymbols[dedupeKey]; exists {
+		wp.inflightMu.Unlock()
+		logger.Debugf("[router=%s] Skipping duplicate task %s for %s (already in-flight as %s)", wp.routerID, task.ID, dedupeKey, existingID)
+		return
+	}
+	wp.inflightSymbols[dedupeKey] = task.ID
+	wp.inflightMu.Unlock()
+
 	select {
 	case wp.taskQueue <- task:
 		wp.pendingMu.Lock()
 		wp.pendingTasks = append(wp.pendingTasks, task)
 		wp.pendingMu.Unlock()
 		queueSize := len(wp.taskQueue)
-		logger.Debugf("[router=%s] Task %s queued (queue: %d/%d)", wp.routerID, task.ID, queueSize, cap(wp.taskQueue))
+		logger.Infof("[router=%s] Task %s queued (queue: %d/%d)", wp.routerID, task.ID, queueSize, cap(wp.taskQueue))
 		// Update queue size metric
 		if wp.metricsCollector != nil {
 			wp.metricsCollector.SetTaskQueueSize(int32(queueSize))
@@ -226,12 +252,12 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 	default:
 		queueLen := len(wp.taskQueue)
 		queueCap := cap(wp.taskQueue)
-		symbol := "unknown"
-		if task.Request != nil && task.Request.Intent != nil {
-			symbol = task.Request.Intent.Symbol
-		}
 		logger.Errorf("[router=%s] CRITICAL: Task queue full (%d/%d), DROPPING task %s for symbol %s - consider increasing queue size or worker count",
 			wp.routerID, queueLen, queueCap, task.ID, symbol)
+		// Remove from inflight since we dropped it
+		wp.inflightMu.Lock()
+		delete(wp.inflightSymbols, dedupeKey)
+		wp.inflightMu.Unlock()
 		// Record dropped task metric
 		if wp.metricsCollector != nil {
 			wp.metricsCollector.IncWorkerTasksDropped()
@@ -243,18 +269,18 @@ func (wp *WorkerPool) Submit(task *WorkerTask) {
 func (w *Worker) start(ctx context.Context) {
 	defer w.wg.Done()
 
-	logger.Debugf("[router=%s][WORKER-%d] started", w.pool.routerID, w.id)
+	logger.Infof("[router=%s][WORKER-%d] started", w.pool.routerID, w.id)
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Debugf("[router=%s][WORKER-%d] stopped due to context cancellation", w.pool.routerID, w.id)
+			logger.Infof("[router=%s][WORKER-%d] stopped due to context cancellation", w.pool.routerID, w.id)
 			return
 		case <-w.quit:
-			logger.Debugf("[router=%s][WORKER-%d] stopped due to quit signal", w.pool.routerID, w.id)
+			logger.Infof("[router=%s][WORKER-%d] stopped due to quit signal", w.pool.routerID, w.id)
 			return
 		case task := <-w.taskQueue:
-			logger.Debugf("[router=%s][WORKER-%d] picked up task %s", w.pool.routerID, w.id, task.ID)
+			logger.Infof("[router=%s][WORKER-%d] picked up task %s", w.pool.routerID, w.id, task.ID)
 			w.pool.removePending(task.ID)
 			w.processTask(ctx, task)
 		}
@@ -287,7 +313,7 @@ func (wp *WorkerPool) removePending(taskID string) {
 	for i, t := range wp.pendingTasks {
 		if t.ID == taskID {
 			wp.pendingTasks = append(wp.pendingTasks[:i], wp.pendingTasks[i+1:]...)
-			logger.Debugf("[router=%s] Removed task %s from pending list (remaining: %d)", wp.routerID, taskID, len(wp.pendingTasks))
+			logger.Infof("[router=%s] Removed task %s from pending list (remaining: %d)", wp.routerID, taskID, len(wp.pendingTasks))
 			return
 		}
 	}
@@ -348,23 +374,48 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 	}
 	logger.Infof("[router=%s][WORKER-%d] Starting task: %s, symbol=%s, chain=%d, task_router=%s, active_workers=%d",
 		w.pool.routerID, w.id, task.ID, symbol, chainID, routerID, atomic.LoadInt32(&w.pool.activeWorkers))
-
 	// Create timeout context to prevent workers from blocking forever
 	taskCtx, cancel := context.WithTimeout(ctx, w.pool.taskTimeout)
 	defer cancel()
+	deadline, _ := taskCtx.Deadline()
 
-	// Process the task with retry logic
+	// Process the task with retry logic.
+	// Handler runs in a goroutine so that taskCtx timeout can enforce a hard
+	// upper bound even if the handler (or RPC calls inside it) ignores context
+	// cancellation. Without this, a stalled TCP connection to the RPC endpoint
+	// can block the worker permanently (go-ethereum's Transact may not respect
+	// context cancellation for stalled connections).
 	var err error
 	maxRetries := 3
 	retryCount := 0
 	for retry := 0; retry < maxRetries; retry++ {
 		if retry > 0 {
 			retryCount++
-			logger.Debugf("[router=%s][WORKER-%d] retrying task %s (attempt %d/%d)", w.pool.routerID, w.id, task.ID, retry+1, maxRetries)
+			logger.Infof("[router=%s][WORKER-%d] retrying task %s (attempt %d/%d)", w.pool.routerID, w.id, task.ID, retry+1, maxRetries)
 			time.Sleep(time.Second * time.Duration(retry))
 		}
 
-		err = task.Handler(taskCtx, task)
+		type handlerResult struct {
+			err error
+		}
+		ch := make(chan handlerResult, 1)
+		handlerStart := time.Now()
+		go func() {
+			ch <- handlerResult{err: task.Handler(taskCtx, task)}
+		}()
+
+		select {
+		case res := <-ch:
+			err = res.err
+			logger.Infof("[router=%s][WORKER-%d] Handler returned: took=%v, err=%v", w.pool.routerID, w.id, time.Since(handlerStart), err)
+		case <-taskCtx.Done():
+			err = taskCtx.Err()
+			logger.Warnf("[router=%s][WORKER-%d] Task %s context expired during handler execution: took=%v, deadline_remaining=%v, err=%v",
+				w.pool.routerID, w.id, task.ID, time.Since(handlerStart), time.Until(deadline).Round(time.Millisecond), taskCtx.Err())
+			// Goroutine may still be running -- buffered channel (cap 1) prevents leak
+			// when it eventually completes
+		}
+
 		if err == nil {
 			break
 		}
@@ -377,6 +428,21 @@ func (w *Worker) processTask(ctx context.Context, task *WorkerTask) {
 		}
 
 		logger.Errorf("[router=%s][WORKER-%d] Task %s failed (attempt %d/%d): %v", w.pool.routerID, w.id, task.ID, retry+1, maxRetries, err)
+	}
+	// Clear inflight tracking so the next update for this symbol can be queued
+	if task.Request != nil {
+		clearSym := "unknown"
+		clearCID := int64(0)
+		if task.Request.Intent != nil {
+			clearSym = task.Request.Intent.Symbol
+		}
+		if task.Request.DestinationChain != nil {
+			clearCID = task.Request.DestinationChain.ChainID
+		}
+		key := fmt.Sprintf("%s-%d", clearSym, clearCID)
+		w.pool.inflightMu.Lock()
+		delete(w.pool.inflightSymbols, key)
+		w.pool.inflightMu.Unlock()
 	}
 
 	duration := time.Since(startTime)

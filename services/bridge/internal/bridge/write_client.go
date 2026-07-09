@@ -88,6 +88,16 @@ func (wc *WriteClient) updateLastUpdate(symbol, contract string) {
 	logger.Debugf("Updated lastUpdate for %s on chain %d", key, wc.chainConfig.ChainID)
 }
 
+// clearLastUpdate removes the lastUpdate entry so the bridge re-queues the symbol.
+// Called when an async confirmation fails (receipt timeout or tx reverted).
+func (wc *WriteClient) clearLastUpdate(symbol, contract string) {
+	wc.mu.Lock()
+	defer wc.mu.Unlock()
+	key := fmt.Sprintf("%d-%s-%s", wc.chainConfig.ChainID, symbol, contract)
+	delete(wc.lastUpdate, key)
+	logger.Debugf("Cleared lastUpdate for %s on chain %d (tx failed, allowing re-queue)", key, wc.chainConfig.ChainID)
+}
+
 // getLastUpdate returns the last update time for a specific symbol and contract, or zero time if not found
 func (wc *WriteClient) getLastUpdate(symbol, contract string) time.Time {
 	wc.mu.RLock()
@@ -99,10 +109,13 @@ func (wc *WriteClient) getLastUpdate(symbol, contract string) time.Time {
 
 // getGasPrice gets the current gas price for a destination chain
 func (wc *WriteClient) getGasPrice(ctx context.Context) (*big.Int, error) {
+	t0 := time.Now()
 	gasPrice, err := wc.client.SuggestGasPrice(ctx)
 	if err != nil {
+		logger.Errorf("[RPC] SuggestGasPrice failed: took=%v, error=%v", time.Since(t0), err)
 		return nil, err
 	}
+	logger.Infof("[RPC] SuggestGasPrice: took=%v, gas_price=%s wei", time.Since(t0), gasPrice.String())
 
 	multiplier := wc.chainConfig.GasMultiplier
 	if multiplier == 0 {

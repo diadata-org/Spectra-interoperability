@@ -137,11 +137,13 @@ func (nm *NonceManager) GetNextNonce(ctx context.Context) (uint64, error) {
 	defer nm.mu.Unlock()
 
 	// Get confirmed nonce
+	t0 := time.Now()
 	chainNonce, err := nm.client.NonceAt(ctx, nm.address, nil)
 	if err != nil {
-		logger.Errorf("NonceManager: Failed to get confirmed nonce, wallet=%s, chain=%d, rpc=%s, error=%v", nm.address.Hex(), nm.chainID, nm.getRPCURL(), err)
+		logger.Errorf("[RPC] NonceAt failed: took=%v, wallet=%s, chain=%d, error=%v", time.Since(t0), nm.address.Hex(), nm.chainID, err)
 		return 0, fmt.Errorf("failed to get confirmed nonce: %w", err)
 	}
+	logger.Infof("[RPC] NonceAt done: took=%v, nonce=%d, wallet=%s", time.Since(t0), chainNonce, nm.address.Hex())
 	if !nm.initialized {
 		logger.Infof("NonceManager: Initializing with confirmed nonce %d for wallet=%s, chain=%d, rpc=%s", chainNonce, nm.address.Hex(), nm.chainID, nm.getRPCURL())
 	} else if chainNonce > nm.localNonce {

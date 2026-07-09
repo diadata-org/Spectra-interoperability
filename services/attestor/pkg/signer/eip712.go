@@ -51,7 +51,7 @@ func NewEIP712Signer(privateKeyHex string, rpcURLs []string) (*EIP712Signer, err
 }
 
 // SignIntent creates an EIP-712 signed intent for a single value
-func (s *EIP712Signer) SignIntent(ctx context.Context, price, volume *big.Int, symbol string) ([]byte, error) {
+func (s *EIP712Signer) SignIntent(ctx context.Context, price, volume, timestamp *big.Int, symbol string) ([]byte, error) {
 	// Validate inputs
 	if price == nil || price.Sign() <= 0 {
 		return nil, errors.NewValidationError("price", price, "must be positive")
@@ -63,7 +63,7 @@ func (s *EIP712Signer) SignIntent(ctx context.Context, price, volume *big.Int, s
 		return nil, errors.NewValidationError("symbol", symbol, "must not be empty")
 	}
 
-	signedIntentJSON, err := intent.AttestValue(ctx, s.signingClient, s.privateKeyHex, s.address.Hex(), price, volume, symbol)
+	signedIntentJSON, err := intent.AttestValue(ctx, s.signingClient, s.privateKeyHex, s.address.Hex(), price, volume, symbol, timestamp)
 	if err != nil {
 		return nil, errors.NewSignerError("sign intent", symbol, err)
 	}
@@ -104,9 +104,10 @@ func (s *EIP712Signer) SignBatchIntent(ctx context.Context, values []interfaces.
 		}
 
 		symbolData = append(symbolData, intent.SymbolData{
-			Symbol: v.Symbol,
-			Price:  v.Price,
-			Volume: v.Volume,
+			Symbol:    v.Symbol,
+			Price:     v.Price,
+			Volume:    v.Volume,
+			Timestamp: v.Timestamp,
 		})
 	}
 

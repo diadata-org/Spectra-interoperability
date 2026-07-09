@@ -42,7 +42,7 @@ func generateNonce() *big.Int {
 	return big.NewInt(nonce)
 }
 
-func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, price *big.Int, volume *big.Int, symbol string) (string, error) {
+func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, price *big.Int, volume *big.Int, symbol string, oracleTimestamp *big.Int) (string, error) {
 	if privateKey == "" {
 		return "", fmt.Errorf("private key not provided")
 	}
@@ -50,12 +50,17 @@ func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, private
 		return "", fmt.Errorf("multiClient is required")
 	}
 
-	now := time.Now().Unix()
-	nowBig := big.NewInt(now)
+	// Use oracle timestamp if provided, otherwise fall back to current time
+	var nowBig *big.Int
+	if oracleTimestamp != nil && oracleTimestamp.Sign() > 0 {
+		nowBig = new(big.Int).Set(oracleTimestamp)
+	} else {
+		nowBig = big.NewInt(time.Now().Unix())
+	}
 
 	// Generate unique nonce using atomic counter to prevent collisions
 	nonce := generateNonce()
-	expiry := big.NewInt(now + 3600)
+	expiry := big.NewInt(time.Now().Unix() + 3600)
 
 	cfg := config.Get()
 	intentType := cfg.Attestor.IntentType
@@ -218,9 +223,10 @@ func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, private
 
 // SymbolData represents price data for a single symbol
 type SymbolData struct {
-	Symbol string
-	Price  *big.Int
-	Volume *big.Int
+	Symbol    string
+	Price     *big.Int
+	Volume    *big.Int
+	Timestamp *big.Int // Oracle timestamp; nil means use time.Now() at signing
 }
 
 func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, symbolsData []SymbolData) (string, error) {
@@ -282,6 +288,12 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 		// Generate unique nonce for each intent in the batch to prevent collisions
 		nonce := generateNonce()
 
+		// Use per-symbol oracle timestamp if provided, otherwise fall back to current time
+		ts := nowBig
+		if data.Timestamp != nil && data.Timestamp.Sign() > 0 {
+			ts = data.Timestamp
+		}
+
 		intent := types.OracleIntent{
 			IntentType: intentType,
 			Version:    intentVersion,
@@ -290,7 +302,7 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 			Expiry:     expiry,
 			Symbol:     data.Symbol,
 			Price:      data.Price,
-			Timestamp:  nowBig,
+			Timestamp:  ts,
 			Source:     "DIA Oracle",
 		}
 

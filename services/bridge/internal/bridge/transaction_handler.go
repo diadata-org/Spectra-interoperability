@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -20,6 +21,9 @@ import (
 // Constants for gas configuration
 const (
 	DefaultGasLimit = uint64(300000)
+
+	// AsyncReceiptTimeout is the max time to wait for a receipt in the background
+	AsyncReceiptTimeout = 5 * time.Minute
 )
 
 // TransactionContext encapsulates all data needed for transaction processing
@@ -34,33 +38,48 @@ type TransactionContext struct {
 
 // TransactionHandler handles the complete lifecycle of a transaction
 type TransactionHandler struct {
-	writeClients   map[int64]*WriteClient
+	chainClients   map[int64]*WriteClient   // Chain-based clients (infrastructure key)
+	routerClients  map[string]*WriteClient  // Router-specific clients (router key)
 	routerRegistry *router.GenericRegistry
 	metricsTracker *MetricsTracker
 	onChainMonitor *leader.OnChainMonitor // Optional: for replica monitoring info
+	wg             sync.WaitGroup         // tracks in-flight async confirmations
 }
 
 // NewTransactionHandler creates a new transaction handler
-func NewTransactionHandler(writeClients map[int64]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker, monitor *leader.OnChainMonitor) *TransactionHandler {
+func NewTransactionHandler(chainClients map[int64]*WriteClient, routerClients map[string]*WriteClient, registry *router.GenericRegistry, tracker *MetricsTracker, monitor *leader.OnChainMonitor) *TransactionHandler {
 	return &TransactionHandler{
-		writeClients:   writeClients,
+		chainClients:   chainClients,
+		routerClients:  routerClients,
 		routerRegistry: registry,
 		metricsTracker: tracker,
 		onChainMonitor: monitor,
 	}
 }
 
-// Process handles the complete transaction lifecycle
+// WaitAsyncConfirmations blocks until all in-flight async confirmations finish.
+// Called during bridge shutdown to avoid orphan goroutines.
+func (h *TransactionHandler) WaitAsyncConfirmations() {
+	h.wg.Wait()
+}
+
+// Process handles the complete transaction lifecycle.
+// After execute() succeeds, confirmation (waitForReceipt + updateState) runs
+// asynchronously in a background goroutine. The worker is freed immediately.
 func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes.UpdateRequest) error {
 	startTime := time.Now()
-	logger.Infof("[TX-HANDLER] Starting transaction processing: router=%s, chain=%d, contract=%s",
-		updateReq.RouterID, updateReq.DestinationChain.ChainID, updateReq.Contract.Address)
+	deadline, _ := ctx.Deadline()
+	logger.Infof("[TX-HANDLER] Starting transaction processing: router=%s, chain=%d, contract=%s, deadline_in=%v",
+		updateReq.RouterID, updateReq.DestinationChain.ChainID, updateReq.Contract.Address,
+		time.Until(deadline).Round(time.Millisecond))
 
+	t0 := time.Now()
 	txCtx, err := h.buildContext(ctx, updateReq)
 	if err != nil {
-		logger.Errorf("[TX-HANDLER] Failed to build context: router=%s, error=%v", updateReq.RouterID, err)
+		logger.Errorf("[TX-HANDLER] Failed to build context: router=%s, error=%v, took=%v", updateReq.RouterID, err, time.Since(t0))
 		return err
 	}
+	logger.Infof("[TX-HANDLER] buildContext done: took=%v, deadline_remaining=%v", time.Since(t0), time.Until(deadline).Round(time.Millisecond))
 
 	logger.Infof("[TX-HANDLER] Processing update for %s on chain %d (elapsed=%v)", txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID, time.Since(startTime))
 
@@ -68,7 +87,9 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 		return err
 	}
 
+	t1 := time.Now()
 	tx, err := h.execute(txCtx)
+	logger.Infof("[TX-HANDLER] execute done: took=%v, deadline_remaining=%v", time.Since(t1), time.Until(deadline).Round(time.Millisecond))
 	if err != nil {
 		h.recordFailure(txCtx, "submission", "transaction_failed")
 		return fmt.Errorf("failed to send transaction: %w", err)
@@ -83,7 +104,17 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 		tx.Hash().Hex(), txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID,
 		txCtx.UpdateRequest.RouterID, txCtx.Symbol, triggeredByMonitoring)
 
-	return h.confirm(txCtx, tx)
+	// Mark update time immediately so the bridge staleness check doesn't re-queue
+	// this symbol while the receipt is pending. updateState() in asyncConfirm will
+	// also call this (idempotent) plus OnRouted.
+	if txCtx.UpdateRequest.Intent != nil && txCtx.UpdateRequest.Contract != nil {
+		txCtx.DestClient.updateLastUpdate(txCtx.UpdateRequest.Intent.Symbol, txCtx.UpdateRequest.Contract.Address)
+	}
+
+	// Launch async confirmation — frees the worker immediately
+	h.asyncConfirm(txCtx, tx)
+
+	return nil
 }
 
 // buildContext creates the transaction context with all necessary data
@@ -96,9 +127,20 @@ func (h *TransactionHandler) buildContext(ctx context.Context, updateReq *bridge
 		return nil, fmt.Errorf("destination chain is nil")
 	}
 
-	destClient := h.writeClients[updateReq.DestinationChain.ChainID]
-	if destClient == nil {
-		return nil, fmt.Errorf("destination client not found for chain %d", updateReq.DestinationChain.ChainID)
+	chainID := updateReq.DestinationChain.ChainID
+	routerID := updateReq.RouterID
+
+	// Try router-specific client first
+	destClient, exists := h.routerClients[routerID]
+	if !exists {
+		// Fall back to chain-based client
+		destClient, exists = h.chainClients[chainID]
+		if !exists {
+			return nil, fmt.Errorf("no write client for router %s (router client not found) and no chain client for chain %d", routerID, chainID)
+		}
+		logger.Debugf("[TX-HANDLER] Using chain client for router %s on chain %d (no router-specific client)", routerID, chainID)
+	} else {
+		logger.Debugf("[TX-HANDLER] Using router-specific client for router %s on chain %d", routerID, chainID)
 	}
 
 	gasPrice, err := destClient.getGasPrice(ctx)
@@ -158,37 +200,66 @@ func (h *TransactionHandler) executeWithMethodConfig(txCtx *TransactionContext) 
 	return tx, nil
 }
 
-// confirm waits for transaction confirmation and updates state
-func (h *TransactionHandler) confirm(txCtx *TransactionContext, tx *types.Transaction) error {
+// asyncConfirm launches waitForReceipt + updateState in a background goroutine.
+// The worker is freed immediately after this returns.
+func (h *TransactionHandler) asyncConfirm(txCtx *TransactionContext, tx *types.Transaction) {
 	h.recordSubmission(txCtx, tx.Hash().Hex())
 
-	logger.Infof("[TX-CONFIRM] Waiting for receipt: tx=%s, router=%s, symbol=%s, chain=%d",
-		tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol, txCtx.UpdateRequest.DestinationChain.ChainID)
-
-	confirmStartTime := time.Now()
-	receipt, err := h.waitForReceipt(txCtx.Ctx, txCtx.DestClient.client, tx.Hash(), txCtx.UpdateRequest.RouterID)
-	if err != nil {
-		h.recordFailure(txCtx, "confirmation", "receipt_timeout")
-		logger.Errorf("[TX-CONFIRM] Failed to get receipt after %v: tx=%s, router=%s, symbol=%s, chain=%d, error=%v",
-			time.Since(confirmStartTime), tx.Hash().Hex(), txCtx.UpdateRequest.RouterID, txCtx.Symbol,
-			txCtx.UpdateRequest.DestinationChain.ChainID, err)
-		return fmt.Errorf("failed to get transaction receipt: %w", err)
+	// Capture values for the goroutine — txCtx may go out of scope
+	symbol := txCtx.Symbol
+	routerID := txCtx.UpdateRequest.RouterID
+	chainID := txCtx.UpdateRequest.DestinationChain.ChainID
+	txHash := tx.Hash().Hex()
+	client := txCtx.DestClient.client
+	destClient := txCtx.DestClient
+	var contractAddr string
+	if txCtx.UpdateRequest.Contract != nil {
+		contractAddr = txCtx.UpdateRequest.Contract.Address
 	}
 
-	if receipt.Status == 0 {
-		h.recordFailure(txCtx, "confirmation", "transaction_reverted")
-		logRevertedTransaction(tx, receipt, txCtx)
-		return fmt.Errorf("transaction reverted (status: 0): hash=%s, symbol=%s, gas=%d",
-			tx.Hash().Hex(), txCtx.Symbol, receipt.GasUsed)
-	}
+	h.wg.Add(1)
+	go func() {
+		defer h.wg.Done()
 
-	h.recordConfirmation(txCtx, tx.Hash().Hex(), receipt.GasUsed)
-	h.updateState(txCtx)
+		// Detached context — worker's context expires with taskTimeout (1m),
+		// but receipt waiting can take longer. Capped at AsyncReceiptTimeout.
+		confirmCtx, cancel := context.WithTimeout(context.Background(), AsyncReceiptTimeout)
+		defer cancel()
 
-	logger.Infof("Transaction confirmed: %s, status: %d, gas used: %d, router=%s, symbol=%s, confirm_time=%v",
-		tx.Hash().Hex(), receipt.Status, receipt.GasUsed, txCtx.UpdateRequest.RouterID, txCtx.Symbol, time.Since(confirmStartTime))
+		logger.Infof("[TX-CONFIRM-ASYNC] Waiting for receipt: tx=%s, router=%s, symbol=%s, chain=%d",
+			txHash, routerID, symbol, chainID)
 
-	return nil
+		confirmStartTime := time.Now()
+		receipt, err := h.waitForReceipt(confirmCtx, client, tx.Hash(), routerID)
+		if err != nil {
+			h.recordFailure(txCtx, "confirmation", "receipt_timeout")
+			logger.Errorf("[TX-CONFIRM-ASYNC] Failed to get receipt after %v: tx=%s, router=%s, symbol=%s, chain=%d, error=%v",
+				time.Since(confirmStartTime), txHash, routerID, symbol, chainID, err)
+			// Roll back lastUpdate so the bridge re-queues this symbol
+			if contractAddr != "" {
+				destClient.clearLastUpdate(symbol, contractAddr)
+			}
+			return
+		}
+
+		if receipt.Status == 0 {
+			h.recordFailure(txCtx, "confirmation", "transaction_reverted")
+			logRevertedTransaction(tx, receipt, txCtx)
+			logger.Errorf("[TX-CONFIRM-ASYNC] Transaction reverted: hash=%s, symbol=%s, gas=%d",
+				txHash, symbol, receipt.GasUsed)
+			// Roll back lastUpdate so the bridge re-queues this symbol
+			if contractAddr != "" {
+				destClient.clearLastUpdate(symbol, contractAddr)
+			}
+			return
+		}
+
+		h.recordConfirmation(txCtx, txHash, receipt.GasUsed)
+		h.updateState(txCtx)
+
+		logger.Infof("[TX-CONFIRM-ASYNC] Confirmed: %s, status: %d, gas: %d, router=%s, symbol=%s, confirm_time=%v",
+			txHash, receipt.Status, receipt.GasUsed, routerID, symbol, time.Since(confirmStartTime))
+	}()
 }
 
 // recordSubmission records transaction submission metrics
