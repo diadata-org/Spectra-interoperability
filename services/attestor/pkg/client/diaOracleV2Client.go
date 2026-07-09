@@ -42,6 +42,45 @@ const diaOracleV2ABIJSON = `[
     ],
     "stateMutability": "view",
     "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getThreshold",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getWindowSize",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "priceMethodology",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
   }
 ]`
 
@@ -198,6 +237,111 @@ func (oc *DIAOracleV2Client) fetchOracleValue(ctx context.Context, symbol string
 	}
 
 	return price, timestamp, nil
+}
+
+// GetThreshold fetches the current threshold from the DIAOracleV2 contract.
+func (oc *DIAOracleV2Client) GetThreshold(ctx context.Context) (*big.Int, error) {
+	logger.WithFields(map[string]interface{}{
+		"oracle_address": oc.oracleAddr.Hex(),
+		"function":       "getThreshold",
+	}).Info("Calling DIAOracleV2 contract: getThreshold")
+
+	data, err := oc.oracleABI.Pack("getThreshold")
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack input data for getThreshold: %v", err)
+	}
+
+	callMsg := ethereum.CallMsg{To: &oc.oracleAddr, Data: data}
+	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("contract call failed for getThreshold: %v", err)
+	}
+
+	outputs, err := oc.oracleABI.Unpack("getThreshold", resultBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unpack getThreshold result: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		return nil, fmt.Errorf("unexpected number of outputs for getThreshold: got %d, want 1", len(outputs))
+	}
+
+	threshold, ok := outputs[0].(*big.Int)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert getThreshold result to big.Int")
+	}
+
+	return threshold, nil
+}
+
+// GetWindowSize fetches the current window size from the DIAOracleV2 contract.
+func (oc *DIAOracleV2Client) GetWindowSize(ctx context.Context) (*big.Int, error) {
+	logger.WithFields(map[string]interface{}{
+		"oracle_address": oc.oracleAddr.Hex(),
+		"function":       "getWindowSize",
+	}).Info("Calling DIAOracleV2 contract: getWindowSize")
+
+	data, err := oc.oracleABI.Pack("getWindowSize")
+	if err != nil {
+		return nil, fmt.Errorf("failed to pack input data for getWindowSize: %v", err)
+	}
+
+	callMsg := ethereum.CallMsg{To: &oc.oracleAddr, Data: data}
+	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
+	if err != nil {
+		return nil, fmt.Errorf("contract call failed for getWindowSize: %v", err)
+	}
+
+	outputs, err := oc.oracleABI.Unpack("getWindowSize", resultBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unpack getWindowSize result: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		return nil, fmt.Errorf("unexpected number of outputs for getWindowSize: got %d, want 1", len(outputs))
+	}
+
+	windowSize, ok := outputs[0].(*big.Int)
+	if !ok {
+		return nil, fmt.Errorf("failed to convert getWindowSize result to big.Int")
+	}
+
+	return windowSize, nil
+}
+
+// GetPriceMethodology fetches the price methodology contract address from the DIAOracleV2 contract.
+func (oc *DIAOracleV2Client) GetPriceMethodology(ctx context.Context) (common.Address, error) {
+	logger.WithFields(map[string]interface{}{
+		"oracle_address": oc.oracleAddr.Hex(),
+		"function":       "priceMethodology",
+	}).Info("Calling DIAOracleV2 contract: priceMethodology")
+
+	data, err := oc.oracleABI.Pack("priceMethodology")
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to pack input data for priceMethodology: %v", err)
+	}
+
+	callMsg := ethereum.CallMsg{To: &oc.oracleAddr, Data: data}
+	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("contract call failed for priceMethodology: %v", err)
+	}
+
+	outputs, err := oc.oracleABI.Unpack("priceMethodology", resultBytes)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to unpack priceMethodology result: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		return common.Address{}, fmt.Errorf("unexpected number of outputs for priceMethodology: got %d, want 1", len(outputs))
+	}
+
+	addr, ok := outputs[0].(common.Address)
+	if !ok {
+		return common.Address{}, fmt.Errorf("failed to convert priceMethodology result to common.Address")
+	}
+
+	return addr, nil
 }
 
 // Accessors retained for compatibility.

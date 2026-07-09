@@ -455,6 +455,42 @@ func (oc *GuardedOracleClient) fetchOracleValue(ctx context.Context, symbol stri
 	return price, timestamp, nil
 }
 
+// GetBaseDIAContractAddress fetches the underlying DIAOracleV2 contract address
+// from the GuardedOracle contract by calling baseDIAContractAddress().
+func (oc *GuardedOracleClient) GetBaseDIAContractAddress(ctx context.Context) (common.Address, error) {
+	logger.WithFields(map[string]interface{}{
+		"oracle_address": oc.oracleAddr.Hex(),
+		"function":       "baseDIAContractAddress",
+	}).Info("Calling GuardedOracle contract: baseDIAContractAddress")
+
+	data, err := oc.oracleABI.Pack("baseDIAContractAddress")
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to pack input data for baseDIAContractAddress: %v", err)
+	}
+
+	callMsg := ethereum.CallMsg{To: &oc.oracleAddr, Data: data}
+	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("contract call failed for baseDIAContractAddress: %v", err)
+	}
+
+	outputs, err := oc.oracleABI.Unpack("baseDIAContractAddress", resultBytes)
+	if err != nil {
+		return common.Address{}, fmt.Errorf("failed to unpack baseDIAContractAddress result: %v", err)
+	}
+
+	if len(outputs) != 1 {
+		return common.Address{}, fmt.Errorf("unexpected number of outputs for baseDIAContractAddress: got %d, want 1", len(outputs))
+	}
+
+	addr, ok := outputs[0].(common.Address)
+	if !ok {
+		return common.Address{}, fmt.Errorf("failed to convert baseDIAContractAddress result to common.Address")
+	}
+
+	return addr, nil
+}
+
 // Accessors retained for compatibility.
 func (oc *GuardedOracleClient) GetRPCURL() string {
 	return oc.primaryRPC

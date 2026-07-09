@@ -171,6 +171,34 @@ func main() {
 	logger.Info("Shutdown complete")
 }
 
+// fetchAndLogDIAOracleConfig fetches threshold and window size from a DIAOracleV2
+// contract at service startup and logs the values.
+func fetchAndLogDIAOracleConfig(ctx context.Context, diaV2Client *client.DIAOracleV2Client) {
+	threshold, err := diaV2Client.GetThreshold(ctx)
+	if err != nil {
+		logger.WithError(err).Error("Failed to fetch threshold from DIAOracleV2")
+	} else {
+		logger.WithField("threshold", threshold.String()).
+			Info("Retrieved threshold from DIAOracleV2")
+	}
+
+	windowSize, err := diaV2Client.GetWindowSize(ctx)
+	if err != nil {
+		logger.WithError(err).Error("Failed to fetch window size from DIAOracleV2")
+	} else {
+		logger.WithField("window_size", windowSize.String()).
+			Info("Retrieved window size from DIAOracleV2")
+	}
+
+	priceMethodology, err := diaV2Client.GetPriceMethodology(ctx)
+	if err != nil {
+		logger.WithError(err).Error("Failed to fetch price methodology from DIAOracleV2")
+	} else {
+		logger.WithField("price_methodology", priceMethodology.Hex()).
+			Info("Retrieved price methodology from DIAOracleV2")
+	}
+}
+
 // dependencies holds all the service dependencies
 type dependencies struct {
 	oracle   interfaces.OracleReader
@@ -186,7 +214,7 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 
 	switch cfg.Oracle.ClientType {
 	case config.OracleClientTypeGuarded:
-		oracleClient, err = client.NewGuardedOracleClient(
+		guardedClient, err := client.NewGuardedOracleClient(
 			cfg.RPC.URLs,
 			cfg.Oracle.Address,
 			"",
@@ -195,10 +223,29 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create guarded oracle client: %w", err)
 		}
+		oracleClient = guardedClient
 		logger.WithField("client_type", "guarded").Info("Using GuardedOracleClient")
 
+		// Fetch threshold and window size from the underlying DIAOracleV2 contract
+		ctx := context.Background()
+		baseDiaAddr, err := guardedClient.GetBaseDIAContractAddress(ctx)
+		if err != nil {
+			logger.WithError(err).Error("Failed to fetch baseDIAContractAddress from GuardedOracle")
+		} else {
+			logger.WithField("base_dia_contract_address", baseDiaAddr.Hex()).
+				Info("Retrieved base DIA contract address from GuardedOracle")
+
+			diaV2Client, err := client.NewDIAOracleV2Client(cfg.RPC.URLs, baseDiaAddr.Hex(), "", "")
+			if err != nil {
+				logger.WithError(err).Error("Failed to create temporary DIAOracleV2 client for config fetch")
+			} else {
+				fetchAndLogDIAOracleConfig(ctx, diaV2Client)
+				diaV2Client.Close()
+			}
+		}
+
 	case config.OracleClientTypeDIAV2:
-		oracleClient, err = client.NewDIAOracleV2Client(
+		diaV2Client, err := client.NewDIAOracleV2Client(
 			cfg.RPC.URLs,
 			cfg.Oracle.Address,
 			"",
@@ -207,7 +254,12 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to create DIAOracleV2 client: %w", err)
 		}
+		oracleClient = diaV2Client
 		logger.WithField("client_type", "dia_v2").Info("Using DIAOracleV2Client")
+
+		// Fetch threshold and window size directly from the DIAOracleV2 contract
+		ctx := context.Background()
+		fetchAndLogDIAOracleConfig(ctx, diaV2Client)
 
 	default:
 		return nil, fmt.Errorf("unsupported oracle client type: %s", cfg.Oracle.ClientType)

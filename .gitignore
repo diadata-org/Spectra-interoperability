@@ -1,0 +1,21 @@
+# Local configuration directories
+config-local/
+
+# Log files
+*.log
+
+# Local stack
+.local-stack/
+
+# Documentation
+docs/
+
+# Bridge logs
+spectra-bridge-*.log
+spectra-bridge-*.txt
+
+# Compiled binaries
+bin/
+
+# Run scripts
+run-bridge.sh
