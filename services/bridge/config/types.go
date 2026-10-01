@@ -201,7 +201,7 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 
 // CronServiceConfig represents cron-based update service configuration
 type CronServiceConfig struct {
-	Enabled        bool     `yaml:"enabled" json:"enabled"`
-	Schedule       string   `yaml:"schedule" json:"schedule"` // Default cron expression, used if router doesn't have time_threshold
-	PriceDeviation float64  `yaml:"price_deviation" json:"price_deviation"` // Default minimum price deviation to trigger update (as percentage)
+	Enabled        bool    `yaml:"enabled" json:"enabled"`
+	Schedule       string  `yaml:"schedule" json:"schedule"`               // Default cron expression, used if router doesn't have time_threshold
+	PriceDeviation float64 `yaml:"price_deviation" json:"price_deviation"` // Default minimum price deviation to trigger update (as percentage)
 }

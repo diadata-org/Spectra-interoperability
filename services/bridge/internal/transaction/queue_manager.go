@@ -46,6 +46,7 @@ func (qm *QueueManager) Stop() {
 		queue.Stop()
 		logger.Infof("Stopped queue: %s", key)
 	}
+	qm.queues = make(map[string]*Queue)
 
 	logger.Infof("Transaction queue manager stopped")
 }
@@ -53,6 +54,10 @@ func (qm *QueueManager) Stop() {
 func (qm *QueueManager) GetOrCreateQueue(walletAddr string, chainID int64) (*Queue, error) {
 	qm.mu.Lock()
 	defer qm.mu.Unlock()
+
+	if !qm.running {
+		return nil, fmt.Errorf("queue manager is not running")
+	}
 
 	queueKey := fmt.Sprintf("%s-%d", walletAddr, chainID)
 

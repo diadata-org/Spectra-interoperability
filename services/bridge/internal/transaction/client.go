@@ -60,7 +60,7 @@ func (c *Client) CallMethod(ctx context.Context, contractAddr, methodName, abiJS
 
 	// Extract metadata for queue visibility
 	meta := SubmitMeta{
-		ChainID:  c.chainID,
+		ChainID: c.chainID,
 	}
 	if updateReq != nil {
 		meta.RouterID = updateReq.RouterID

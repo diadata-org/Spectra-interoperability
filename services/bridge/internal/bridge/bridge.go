@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -188,7 +189,7 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		} else {
 			errorMsg += "  - No enabled chains found in configuration\n"
 		}
-		return nil, fmt.Errorf(errorMsg)
+		return nil, errors.New(errorMsg)
 	}
 
 	routerClients := make(map[string]*WriteClient)
@@ -929,6 +930,37 @@ func (b *Bridge) buildMethodParams(methodConfig *config.DestinationMethodConfig,
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve parameter %s: %w", paramName, err)
 		}
+
+		if paramName == "intent" && paramValue == "${enrichment.fullIntent}" {
+			if intent, ok := value.(*bridgetypes.OracleIntent); ok {
+				value = struct {
+					IntentType string         `abi:"intentType"`
+					Version    string         `abi:"version"`
+					ChainId    *big.Int       `abi:"chainId"`
+					Nonce      *big.Int       `abi:"nonce"`
+					Expiry     *big.Int       `abi:"expiry"`
+					Symbol     string         `abi:"symbol"`
+					Price      *big.Int       `abi:"price"`
+					Timestamp  *big.Int       `abi:"timestamp"`
+					Source     string         `abi:"source"`
+					Signature  []byte         `abi:"signature"`
+					Signer     common.Address `abi:"signer"`
+				}{
+					IntentType: intent.IntentType,
+					Version:    intent.Version,
+					ChainId:    intent.ChainID,
+					Nonce:      intent.Nonce,
+					Expiry:     intent.Expiry,
+					Symbol:     intent.Symbol,
+					Price:      intent.Price,
+					Timestamp:  intent.Timestamp,
+					Source:     intent.Source,
+					Signature:  []byte(intent.Signature),
+					Signer:     intent.Signer,
+				}
+			}
+		}
+
 		params = append(params, value)
 	}
 

@@ -9,7 +9,17 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
+	"github.com/diadata.org/Spectra-interoperability/services/bridge/internal/transaction"
 )
+
+// testQueueManager and testMaxSafeGap are shared fixtures for NewWriteClient
+// calls below - the queue manager's behavior and the exact safe-gap value
+// aren't under test here, only WriteClient construction/validation.
+func testQueueManager() *transaction.QueueManager {
+	return transaction.NewQueueManager(10, nil)
+}
+
+const testMaxSafeGap = uint64(100)
 
 // JSON-RPC structures for mock server
 type jsonRPCRequest struct {
@@ -90,7 +100,7 @@ func TestNewWriteClient_Success(t *testing.T) {
 		privateKey := "0x1234567890123456789012345678901234567890123456789012345678901234"
 
 		// Test WriteClient creation
-		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 
 		if err != nil {
 			// If it fails, that's also valid - just check the error message
@@ -103,7 +113,7 @@ func TestNewWriteClient_Success(t *testing.T) {
 		assert.NotNil(t, writeClient)
 		assert.Equal(t, chainCfg, writeClient.chainConfig)
 		assert.NotNil(t, writeClient.client)
-		assert.NotNil(t, writeClient.receiverClient)
+		assert.NotNil(t, writeClient.txClient)
 		assert.NotNil(t, writeClient.lastUpdate)
 
 		// Clean up
@@ -133,7 +143,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 	})
@@ -157,7 +167,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 		assert.Contains(t, err.Error(), "no enabled receiver contract found")
@@ -182,7 +192,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 		assert.Contains(t, err.Error(), "no enabled receiver contract found")
@@ -207,7 +217,7 @@ func TestNewWriteClient_ValidationErrors(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, "invalid")
+		writeClient, err := NewWriteClient(chainCfg, contracts, "invalid", testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 	})
@@ -236,7 +246,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 		// May succeed or fail depending on contract initialization
 		if err != nil {
 			t.Logf("Expected failure during receiver client init: %v", err)
@@ -262,7 +272,7 @@ func TestNewWriteClient_ContractTypes(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 		// May succeed or fail depending on contract initialization
 		if err != nil {
 			t.Logf("Expected failure during receiver client init: %v", err)
@@ -286,7 +296,7 @@ func TestNewWriteClient_NilConfig(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(nil, contracts, privateKey)
+		writeClient, err := NewWriteClient(nil, contracts, privateKey, testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 	})
@@ -299,7 +309,7 @@ func TestNewWriteClient_NilConfig(t *testing.T) {
 			Enabled: true,
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, nil, privateKey)
+		writeClient, err := NewWriteClient(chainCfg, nil, privateKey, testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 	})
@@ -323,7 +333,7 @@ func TestNewWriteClient_NilConfig(t *testing.T) {
 			},
 		}
 
-		writeClient, err := NewWriteClient(chainCfg, contracts, "")
+		writeClient, err := NewWriteClient(chainCfg, contracts, "", testQueueManager(), testMaxSafeGap)
 		assert.Error(t, err)
 		assert.Nil(t, writeClient)
 	})

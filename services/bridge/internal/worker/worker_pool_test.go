@@ -272,7 +272,7 @@ func TestProcessTask_RetryLoopIgnoresContextExpiry(t *testing.T) {
 	handler := &MockTaskHandler{
 		errorToReturn: errors.New("simulated RPC error"),
 		delay:         300 * time.Millisecond, // Each attempt takes time
-		returnAfterN:  10, // Will never succeed, will retry forever
+		returnAfterN:  10,                     // Will never succeed, will retry forever
 	}
 	task := createTestTask("task-retry-forever", handler)
 

@@ -34,7 +34,7 @@ func TestQueue_Submit_Success(t *testing.T) {
 		return nil, nil
 	}
 
-	tx, err := queue.Submit(ctx, executor)
+	tx, err := queue.Submit(ctx, executor, SubmitMeta{})
 	if err != nil {
 		t.Errorf("Submit should succeed, got error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestQueue_Submit_Error(t *testing.T) {
 		return nil, expectedErr
 	}
 
-	tx, err := queue.Submit(ctx, executor)
+	tx, err := queue.Submit(ctx, executor, SubmitMeta{})
 	if err == nil {
 		t.Error("Submit should return error")
 	}
@@ -75,7 +75,7 @@ func TestQueue_Submit_NotRunning(t *testing.T) {
 		return &types.Transaction{}, nil
 	}
 
-	tx, err := queue.Submit(ctx, executor)
+	tx, err := queue.Submit(ctx, executor, SubmitMeta{})
 	if err == nil {
 		t.Error("Submit should fail when queue is not running")
 	}
@@ -97,7 +97,7 @@ func TestQueue_Submit_ContextCancelled(t *testing.T) {
 		return &types.Transaction{}, nil
 	}
 
-	tx, err := queue.Submit(ctx, executor)
+	tx, err := queue.Submit(ctx, executor, SubmitMeta{})
 	if err == nil {
 		t.Error("Submit should fail when context is cancelled")
 	}
@@ -134,15 +134,15 @@ func TestQueue_Sequential_Execution(t *testing.T) {
 
 	// Submit tasks without blocking - they'll execute sequentially in the background
 	go func() {
-		queue.Submit(ctx, executor1)
+		queue.Submit(ctx, executor1, SubmitMeta{})
 	}()
 	time.Sleep(10 * time.Millisecond) // Ensure first is queued first
 	go func() {
-		queue.Submit(ctx, executor2)
+		queue.Submit(ctx, executor2, SubmitMeta{})
 	}()
 	time.Sleep(10 * time.Millisecond) // Ensure second is queued second
 	go func() {
-		queue.Submit(ctx, executor3)
+		queue.Submit(ctx, executor3, SubmitMeta{})
 	}()
 
 	// Collect execution order

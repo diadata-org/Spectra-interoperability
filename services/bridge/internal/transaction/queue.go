@@ -45,12 +45,12 @@ type queuedRequest struct {
 
 // SubmitMeta carries caller-provided metadata about what the tx is for
 type SubmitMeta struct {
-	Symbol       string    `json:"symbol"`
-	Contract     string    `json:"contract"`
-	ChainID      int64     `json:"chain_id"`
-	RouterID     string    `json:"router_id"`
-	Enqueued     time.Time `json:"enqueued"`
-	OnchainTS    int64     `json:"onchain_ts"`
+	Symbol    string    `json:"symbol"`
+	Contract  string    `json:"contract"`
+	ChainID   int64     `json:"chain_id"`
+	RouterID  string    `json:"router_id"`
+	Enqueued  time.Time `json:"enqueued"`
+	OnchainTS int64     `json:"onchain_ts"`
 }
 
 func NewQueue(queueKey string, queueSize int, metrics *metrics.Collector) *Queue {
@@ -240,18 +240,18 @@ func (q *Queue) GetQueueLength() int {
 
 // QueueStats holds snapshot statistics for a queue
 type QueueStats struct {
-	Key             string        `json:"key"`
-	Pending         int           `json:"pending"`
-	Capacity        int           `json:"capacity"`
-	Running         bool          `json:"running"`
-	TotalSubmitted  int64         `json:"total_submitted"`
-	TotalCompleted  int64         `json:"total_completed"`
-	TotalFailed     int64         `json:"total_failed"`
-	AvgExecTime     string        `json:"avg_exec_time"`
-	LastSubmitTime  time.Time     `json:"last_submit_time"`
-	LastCompleteAt  time.Time     `json:"last_complete_at"`
+	Key              string       `json:"key"`
+	Pending          int          `json:"pending"`
+	Capacity         int          `json:"capacity"`
+	Running          bool         `json:"running"`
+	TotalSubmitted   int64        `json:"total_submitted"`
+	TotalCompleted   int64        `json:"total_completed"`
+	TotalFailed      int64        `json:"total_failed"`
+	AvgExecTime      string       `json:"avg_exec_time"`
+	LastSubmitTime   time.Time    `json:"last_submit_time"`
+	LastCompleteAt   time.Time    `json:"last_complete_at"`
 	ThroughputPerMin float64      `json:"throughput_per_min"`
-	PendingItems    []SubmitMeta  `json:"pending_items"`
+	PendingItems     []SubmitMeta `json:"pending_items"`
 }
 
 func (q *Queue) GetStats() QueueStats {

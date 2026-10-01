@@ -103,18 +103,30 @@ func TestRandomnessTransactionFlow(t *testing.T) {
 		// Mock bridge instance
 		b := &Bridge{}
 
-		// Build all parameters
+		// Build all parameters. buildMethodParams iterates
+		// methodConfig.Params (a map), so the two params can come back in
+		// either order - identify each by type rather than position.
 		params, err := b.buildMethodParams(updateReq.DestinationMethodConfig, updateReq)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(params), "Should have 2 parameters: requestId and randomInts")
 
-		// Verify parameter types
-		reqID, ok := params[0].(*big.Int)
-		require.True(t, ok, "First parameter should be *big.Int for requestId")
+		var reqID *big.Int
+		var randInts []*big.Int
+		for _, p := range params {
+			switch v := p.(type) {
+			case *big.Int:
+				reqID = v
+			case []*big.Int:
+				randInts = v
+			default:
+				t.Fatalf("unexpected parameter type %T", p)
+			}
+		}
+
+		require.NotNil(t, reqID, "expected one parameter to be *big.Int for requestId")
 		assert.Equal(t, requestID.String(), reqID.String())
 
-		randInts, ok := params[1].([]*big.Int)
-		require.True(t, ok, "Second parameter should be []*big.Int for randomInts, got %T", params[1])
+		require.NotNil(t, randInts, "expected one parameter to be []*big.Int for randomInts")
 		assert.Equal(t, 3, len(randInts))
 	})
 }

@@ -38,8 +38,8 @@ type TransactionContext struct {
 
 // TransactionHandler handles the complete lifecycle of a transaction
 type TransactionHandler struct {
-	chainClients   map[int64]*WriteClient   // Chain-based clients (infrastructure key)
-	routerClients  map[string]*WriteClient  // Router-specific clients (router key)
+	chainClients   map[int64]*WriteClient  // Chain-based clients (infrastructure key)
+	routerClients  map[string]*WriteClient // Router-specific clients (router key)
 	routerRegistry *router.GenericRegistry
 	metricsTracker *MetricsTracker
 	onChainMonitor *leader.OnChainMonitor // Optional: for replica monitoring info

@@ -101,9 +101,11 @@ func TestCallRouterMethod_UsesCorrectContractAddress(t *testing.T) {
 			assert.NoError(t, err)
 			assert.Len(t, params, 2)
 
-			// Verify the parameters are built correctly
-			assert.Equal(t, big.NewInt(462), params[0])       // requestId
-			assert.Equal(t, []int{999, -888, 777}, params[1]) // randomInts
+			// Verify the parameters are built correctly. buildMethodParams
+			// iterates methodConfig.Params (a map), so the two params can
+			// come back in either order - check by content, not position.
+			assert.Contains(t, params, big.NewInt(462))       // requestId
+			assert.Contains(t, params, []int{999, -888, 777}) // randomInts
 
 			// Test the address extraction logic (this is what was fixed)
 			extractedAddress := common.HexToAddress(updateReq.Contract.Address)
@@ -254,9 +256,11 @@ func TestCallRouterMethodParameters(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, params, 2)
 
-		// Verify parameter values
-		assert.Equal(t, big.NewInt(777), params[0])
-		assert.Equal(t, []int{999, -888, 777}, params[1])
+		// Verify parameter values. buildMethodParams iterates
+		// methodConfig.Params (a map), so the two params can come back in
+		// either order - check by content, not position.
+		assert.Contains(t, params, big.NewInt(777))
+		assert.Contains(t, params, []int{999, -888, 777})
 	})
 
 	t.Run("HandleIntentUpdate_Parameters", func(t *testing.T) {
