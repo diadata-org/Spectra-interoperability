@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"math/big"
 	"sync"
@@ -72,12 +73,15 @@ func (mt *MetricsTracker) RecordIntentConfirmed(intent *bridgetypes.OracleIntent
 
 	mt.mu.Lock()
 	lifecycle, exists := mt.lifecycles[intentHash]
+	if exists {
+		lifecycle.ConfirmationTime = confirmationTime
+	}
+	mt.mu.Unlock()
+
 	if !exists {
 		logger.Warnf("No lifecycle found for confirmed intent: %s", intentHash)
 		return
 	}
-	lifecycle.ConfirmationTime = confirmationTime
-	mt.mu.Unlock()
 
 	mt.collector.IntentMetrics.RecordIntentConfirmed(lifecycle, gasUsed)
 
@@ -117,8 +121,6 @@ func (mt *MetricsTracker) cleanupLifecycle(intentHash string, delay time.Duratio
 
 // Helper function to compute intent hash
 func getIntentHash(intent *bridgetypes.OracleIntent) []byte {
-	// This should match the actual intent hash computation
-	// For now, use a simple hash of key fields
 	data := fmt.Sprintf("%s-%s-%s-%s-%s",
 		intent.Symbol,
 		intent.Price.String(),
@@ -126,5 +128,6 @@ func getIntentHash(intent *bridgetypes.OracleIntent) []byte {
 		intent.Nonce.String(),
 		intent.Signer.Hex(),
 	)
-	return []byte(data)[:32] // Simplified - use proper hashing in production
+	sum := sha256.Sum256([]byte(data))
+	return sum[:]
 }
