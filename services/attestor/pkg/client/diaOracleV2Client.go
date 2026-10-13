@@ -129,12 +129,6 @@ func (oc *DIAOracleV2Client) Close() {
 
 // GetValue fetches the latest oracle value from DIAOracleV2 contract.
 func (oc *DIAOracleV2Client) GetValue(ctx context.Context, symbol string) (*big.Int, *big.Int, error) {
-	logger.WithFields(map[string]interface{}{
-		"symbol":         symbol,
-		"oracle_address": oc.oracleAddr.Hex(),
-		"function":       "getValue",
-	}).Debug("Calling DIAOracleV2 contract function: getValue")
-
 	price, timestamp, err := oc.fetchOracleValue(ctx, symbol)
 	if err != nil {
 		return nil, nil, errors.NewOracleError(symbol, "failed to get value (getValue)", err)
@@ -163,7 +157,7 @@ func (oc *DIAOracleV2Client) GetGuardedValue(ctx context.Context, symbol string,
 		"MaxDeviationBips":   params.MaxDeviationBips,
 		"MaxTimestampAge":    params.MaxTimestampAge,
 		"MinGuardianMatches": params.MinGuardianMatches,
-	}).Info("DIAOracleV2Client: Guardian parameters ignored (not supported), calling getValue(string) instead of getGuardedValue")
+	}).Debug("DIAOracleV2Client: Guardian parameters ignored (not supported), calling getValue(string) instead of getGuardedValue")
 	return oc.GetValue(ctx, symbol)
 }
 
@@ -172,7 +166,7 @@ func (oc *DIAOracleV2Client) fetchOracleValue(ctx context.Context, symbol string
 		"symbol":         symbol,
 		"oracle_address": oc.oracleAddr.Hex(),
 		"function":       "getValue(string)",
-	}).Debug("Packing contract call for DIAOracleV2.getValue")
+	}).Debug("Calling DIAOracleV2 contract: getValue")
 
 	data, err := oc.oracleABI.Pack("getValue", symbol)
 	if err != nil {
@@ -180,11 +174,6 @@ func (oc *DIAOracleV2Client) fetchOracleValue(ctx context.Context, symbol string
 	}
 
 	callMsg := ethereum.CallMsg{To: &oc.oracleAddr, Data: data}
-	logger.WithFields(map[string]interface{}{
-		"symbol":         symbol,
-		"oracle_address": oc.oracleAddr.Hex(),
-		"function":       "getValue(string)",
-	}).Info("Calling DIAOracleV2 contract: getValue")
 
 	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
 	if err != nil {

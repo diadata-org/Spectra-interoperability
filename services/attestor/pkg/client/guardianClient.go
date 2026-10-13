@@ -347,16 +347,6 @@ func (oc *GuardedOracleClient) GetGuardedValue(ctx context.Context, symbol strin
 	maxTimestampAge := big.NewInt(int64(params.MaxTimestampAge))
 	numMinGuardianMatches := big.NewInt(int64(params.MinGuardianMatches))
 
-	logger.WithFields(map[string]interface{}{
-		"symbol":             symbol,
-		"oracle_address":     oc.oracleAddr.Hex(),
-		"client_type":        "guarded",
-		"contract_function":  "getGuardedValue(string,uint256,uint256,uint256)",
-		"maxDeviationBips":   params.MaxDeviationBips,
-		"maxTimestampAge":    params.MaxTimestampAge,
-		"minGuardianMatches": params.MinGuardianMatches,
-	}).Info("GuardedOracleClient: Calling getGuardedValue with guardian validation")
-
 	price, timestamp, err := oc.fetchOracleValue(ctx, symbol, maxDeviationBips, maxTimestampAge, numMinGuardianMatches)
 	if err != nil {
 		return nil, nil, errors.NewOracleError(symbol, "failed to get value (getGuardedValue)", err)
@@ -384,10 +374,13 @@ func (oc *GuardedOracleClient) GetValue(ctx context.Context, symbol string) (*bi
 
 func (oc *GuardedOracleClient) fetchOracleValue(ctx context.Context, symbol string, maxDeviationBips, maxTimestampAge, numMinGuardianMatches *big.Int) (*big.Int, *big.Int, error) {
 	logger.WithFields(map[string]interface{}{
-		"symbol":         symbol,
-		"oracle_address": oc.oracleAddr.Hex(),
-		"function":       "getGuardedValue(string,uint256,uint256,uint256)",
-	}).Debug("Packing contract call for GuardedOracle.getGuardedValue")
+		"symbol":             symbol,
+		"oracle_address":     oc.oracleAddr.Hex(),
+		"function":           "getGuardedValue(string,uint256,uint256,uint256)",
+		"maxDeviationBips":   maxDeviationBips.Int64(),
+		"maxTimestampAge":    maxTimestampAge.Int64(),
+		"minGuardianMatches": numMinGuardianMatches.Int64(),
+	}).Debug("Calling GuardedOracle contract: getGuardedValue")
 
 	data, err := oc.oracleABI.Pack("getGuardedValue", symbol, maxDeviationBips, maxTimestampAge, numMinGuardianMatches)
 	if err != nil {
@@ -395,11 +388,6 @@ func (oc *GuardedOracleClient) fetchOracleValue(ctx context.Context, symbol stri
 	}
 
 	callMsg := ethereum.CallMsg{To: &oc.oracleAddr, Data: data}
-	logger.WithFields(map[string]interface{}{
-		"symbol":         symbol,
-		"oracle_address": oc.oracleAddr.Hex(),
-		"function":       "getGuardedValue(string,uint256,uint256,uint256)",
-	}).Info("Calling GuardedOracle contract: getGuardedValue")
 
 	resultBytes, err := oc.multiClient.CallContract(ctx, callMsg, nil)
 	if err != nil {

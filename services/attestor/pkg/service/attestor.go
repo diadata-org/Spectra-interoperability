@@ -102,6 +102,7 @@ func (s *AttestorService) Start(ctx context.Context) error {
 			logger.Info("Attestor service stopped")
 			return nil
 		case <-ticker.C:
+			cycleStart := time.Now()
 			if s.config.Attestor.BatchMode {
 				if err := s.processBatchAttestation(serviceCtx); err != nil {
 					logger.WithError(err).Error("Batch attestation failed")
@@ -119,6 +120,10 @@ func (s *AttestorService) Start(ctx context.Context) error {
 					}
 				}
 			}
+			logger.WithFields(map[string]interface{}{
+				"symbols":  len(s.config.Attestor.Symbols),
+				"duration": time.Since(cycleStart).String(),
+			}).Info("Poll cycle completed")
 		}
 	}
 }

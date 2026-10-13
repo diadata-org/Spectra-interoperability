@@ -231,6 +231,10 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create key signer: %w", err)
 	}
+	logger.WithFields(map[string]interface{}{
+		"signing_backend": cfg.Attestor.SigningBackend.String(),
+		"signer_address":  keySigner.Address().Hex(),
+	}).Info("Key signer initialized")
 
 	switch cfg.Oracle.ClientType {
 	case config.OracleClientTypeGuarded:

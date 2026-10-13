@@ -532,16 +532,26 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 		if err := registryClient.SendTransaction(ctx, signedTx); err != nil {
 			retry, bumpGas, known := classifyTxError(err)
 			if known {
-				logger.WithField("info", "transaction already known").Debug("Batch transaction reported as already known")
-				logger.WithField("duration", time.Since(startTime).String()).Info("Batch transaction completed")
+				logger.WithFields(map[string]interface{}{
+					"duration": time.Since(startTime).String(),
+					"tx_hash":  signedTx.Hash().Hex(),
+				}).Info("Batch transaction reported as already known")
 				return signedTx.Hash().Hex(), nil
 			}
 
 			if retry {
 				lastErr = err
+				oldGasPrice := currentGasPrice
 				if bumpGas {
 					currentGasPrice = bumpGasPrice(currentGasPrice)
 				}
+				logger.WithFields(map[string]interface{}{
+					"attempt":       attempt + 1,
+					"max_attempts":  maxNonceAttempts,
+					"old_gas_price": oldGasPrice.String(),
+					"new_gas_price": currentGasPrice.String(),
+					"error":         err.Error(),
+				}).Info("Retrying batch transaction")
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -549,7 +559,10 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 			return "", fmt.Errorf("failed to send transaction: %v", err)
 		}
 
-		logger.WithField("duration", time.Since(startTime).String()).Info("Batch transaction completed")
+		logger.WithFields(map[string]interface{}{
+			"duration": time.Since(startTime).String(),
+			"tx_hash":  signedTx.Hash().Hex(),
+		}).Info("Batch transaction completed")
 		return signedTx.Hash().Hex(), nil
 	}
 
@@ -557,6 +570,8 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 }
 
 func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, ks keysigner.KeySigner, signedIntentJSON string) (string, error) {
+	startTime := time.Now()
+
 	if registryClient == nil {
 		return "", fmt.Errorf("registryClient is required")
 	}
@@ -649,15 +664,26 @@ func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, ks
 		if err := registryClient.SendTransaction(ctx, signedTx); err != nil {
 			retry, bumpGas, known := classifyTxError(err)
 			if known {
-				logger.WithField("info", "transaction already known").Debug("Transaction reported as already known")
+				logger.WithFields(map[string]interface{}{
+					"duration": time.Since(startTime).String(),
+					"tx_hash":  signedTx.Hash().Hex(),
+				}).Info("Transaction reported as already known")
 				return signedTx.Hash().Hex(), nil
 			}
 
 			if retry {
 				lastErr = err
+				oldGasPrice := currentGasPrice
 				if bumpGas {
 					currentGasPrice = bumpGasPrice(currentGasPrice)
 				}
+				logger.WithFields(map[string]interface{}{
+					"attempt":       attempt + 1,
+					"max_attempts":  maxNonceAttempts,
+					"old_gas_price": oldGasPrice.String(),
+					"new_gas_price": currentGasPrice.String(),
+					"error":         err.Error(),
+				}).Info("Retrying transaction")
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -665,6 +691,10 @@ func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, ks
 			return "", fmt.Errorf("failed to send transaction: %v", err)
 		}
 
+		logger.WithFields(map[string]interface{}{
+			"duration": time.Since(startTime).String(),
+			"tx_hash":  signedTx.Hash().Hex(),
+		}).Info("Transaction completed")
 		return signedTx.Hash().Hex(), nil
 	}
 
