@@ -15,10 +15,12 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/client"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/keysigner"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/metrics"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/registry"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/service"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/signer"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func main() {
@@ -150,8 +152,15 @@ func main() {
 	if deps.registry != nil {
 		deps.registry.Close()
 	}
-	if deps.signer != nil {
-		deps.signer.Close()
+	// deps.signer is stored as interfaces.IntentSigner, which does not declare
+	// Close(); type-assert to close the RPC client it owns internally.
+	if closer, ok := deps.signer.(interface{ Close() }); ok {
+		closer.Close()
+	}
+	if deps.keySigner != nil {
+		if err := deps.keySigner.Close(); err != nil {
+			logger.Errorf("Error closing key signer: %v", err)
+		}
 	}
 
 	// Wait for all goroutines to finish with timeout
@@ -171,9 +180,10 @@ func main() {
 	logger.Info("Shutdown complete")
 }
 
-// fetchAndLogDIAOracleConfig fetches threshold and window size from a DIAOracleV2
-// contract at service startup and logs the values.
-func fetchAndLogDIAOracleConfig(ctx context.Context, diaV2Client *client.DIAOracleV2Client) {
+// fetchAndLogDIAOracleConfig fetches threshold, window size, and price methodology
+// from a DIAOracleV2 contract at service startup. Returns the fetched price methodology
+// address and window size so they can be stored in config as defaults for custom assets.
+func fetchAndLogDIAOracleConfig(ctx context.Context, diaV2Client *client.DIAOracleV2Client) (common.Address, int, error) {
 	threshold, err := diaV2Client.GetThreshold(ctx)
 	if err != nil {
 		logger.WithError(err).Error("Failed to fetch threshold from DIAOracleV2")
@@ -185,6 +195,7 @@ func fetchAndLogDIAOracleConfig(ctx context.Context, diaV2Client *client.DIAOrac
 	windowSize, err := diaV2Client.GetWindowSize(ctx)
 	if err != nil {
 		logger.WithError(err).Error("Failed to fetch window size from DIAOracleV2")
+		return common.Address{}, 0, err
 	} else {
 		logger.WithField("window_size", windowSize.String()).
 			Info("Retrieved window size from DIAOracleV2")
@@ -193,18 +204,22 @@ func fetchAndLogDIAOracleConfig(ctx context.Context, diaV2Client *client.DIAOrac
 	priceMethodology, err := diaV2Client.GetPriceMethodology(ctx)
 	if err != nil {
 		logger.WithError(err).Error("Failed to fetch price methodology from DIAOracleV2")
+		return common.Address{}, 0, err
 	} else {
 		logger.WithField("price_methodology", priceMethodology.Hex()).
 			Info("Retrieved price methodology from DIAOracleV2")
 	}
+
+	return priceMethodology, int(windowSize.Int64()), nil
 }
 
 // dependencies holds all the service dependencies
 type dependencies struct {
-	oracle   interfaces.OracleReader
-	registry *registry.Client
-	signer   *signer.EIP712Signer
-	metrics  interfaces.MetricsCollector
+	oracle    interfaces.OracleReader
+	registry  *registry.Client
+	signer    interfaces.IntentSigner
+	keySigner keysigner.KeySigner
+	metrics   interfaces.MetricsCollector
 }
 
 // createDependencies creates all the service dependencies
@@ -212,13 +227,18 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	var oracleClient interfaces.OracleReader
 	var err error
 
+	keySigner, err := keysigner.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create key signer: %w", err)
+	}
+
 	switch cfg.Oracle.ClientType {
 	case config.OracleClientTypeGuarded:
 		guardedClient, err := client.NewGuardedOracleClient(
 			cfg.RPC.URLs,
 			cfg.Oracle.Address,
 			"",
-			cfg.Attestor.PrivateKey,
+			keySigner.Address(),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create guarded oracle client: %w", err)
@@ -235,11 +255,13 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 			logger.WithField("base_dia_contract_address", baseDiaAddr.Hex()).
 				Info("Retrieved base DIA contract address from GuardedOracle")
 
-			diaV2Client, err := client.NewDIAOracleV2Client(cfg.RPC.URLs, baseDiaAddr.Hex(), "", "")
+			diaV2Client, err := client.NewDIAOracleV2Client(cfg.RPC.URLs, baseDiaAddr.Hex(), "", common.Address{})
 			if err != nil {
 				logger.WithError(err).Error("Failed to create temporary DIAOracleV2 client for config fetch")
 			} else {
-				fetchAndLogDIAOracleConfig(ctx, diaV2Client)
+				pm, ws, _ := fetchAndLogDIAOracleConfig(ctx, diaV2Client)
+				cfg.Attestor.FetchedPriceMethodology = pm.Hex()
+				cfg.Attestor.FetchedWindowSize = ws
 				diaV2Client.Close()
 			}
 		}
@@ -249,7 +271,7 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 			cfg.RPC.URLs,
 			cfg.Oracle.Address,
 			"",
-			cfg.Attestor.PrivateKey,
+			keySigner.Address(),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create DIAOracleV2 client: %w", err)
@@ -259,7 +281,9 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 
 		// Fetch threshold and window size directly from the DIAOracleV2 contract
 		ctx := context.Background()
-		fetchAndLogDIAOracleConfig(ctx, diaV2Client)
+		pm, ws, _ := fetchAndLogDIAOracleConfig(ctx, diaV2Client)
+		cfg.Attestor.FetchedPriceMethodology = pm.Hex()
+		cfg.Attestor.FetchedWindowSize = ws
 
 	default:
 		return nil, fmt.Errorf("unsupported oracle client type: %s", cfg.Oracle.ClientType)
@@ -267,7 +291,7 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 
 	// Create registry client
 	registryClient, err := registry.NewClient(
-		cfg.Attestor.PrivateKey,
+		keySigner,
 		cfg.Registry.Address,
 		cfg.RPC.RegistryURLs,
 	)
@@ -276,7 +300,7 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	}
 
 	// Create signer
-	eip712Signer, err := signer.NewEIP712Signer(cfg.Attestor.PrivateKey, cfg.RPC.URLs)
+	eip712Signer, err := signer.NewEIP712Signer(keySigner, cfg.RPC.URLs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create signer: %w", err)
 	}
@@ -285,9 +309,10 @@ func createDependencies(cfg *config.Config) (*dependencies, error) {
 	metricsCollector := metrics.NewPrometheusCollector()
 
 	return &dependencies{
-		oracle:   oracleClient,
-		registry: registryClient,
-		signer:   eip712Signer,
-		metrics:  metricsCollector,
+		oracle:    oracleClient,
+		registry:  registryClient,
+		signer:    eip712Signer,
+		keySigner: keySigner,
+		metrics:   metricsCollector,
 	}, nil
 }

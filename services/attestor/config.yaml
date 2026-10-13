@@ -9,15 +9,27 @@ rpc:
 
 # Oracle Configuration
 oracle:
-  address: "0xFA3c5e662aB985317b90914305c263b6Ab02452d"
+  address: "0x20E8593ab0455f4BA5D6DE4bd0408c5146781ECB"
+  client_type: "dia_v2"
+  # address: "0xFA3c5e662aB985317b90914305c263b6Ab02452d"
+  # client_type: "guarded"
 
 # Registry Configuration (deployed on Lasernet)
 registry:
-  address: "0x30e2876ab98f62b7fFFBC5CC5B1c876BCd4B9a7b"
+  address: "0xfBf4D9b91f0dc514b04047f2A47537b824A1BcEb"
 
 # Attestor Configuration
 attestor:
   # private_key should be set via ATTESTOR_ATTESTOR_PRIVATE_KEY environment variable
+  # (only used when signing_backend is "privatekey")
+  signing_backend: pkcs11
+  pkcs11:
+    module_path: "/opt/cloudhsm/lib/libcloudhsm_pkcs11.so"
+    token_label: "hsm1"
+    key_label: "attestor-key"
+    public_key_label: "attestor-key-pub"
+    # PIN must be set via ATTESTOR_ATTESTOR_PKCS11_PIN environment variable
+    # (format: "<crypto-user-username>:<password>", e.g. "attestorcu:...")
   symbols:
     - BTC/USD
     - ETH/USD
@@ -41,6 +53,24 @@ attestor:
         max_deviation_bips: 400    # 4% deviation for ETH
         max_timestamp_age: 2400    # 40 minutes
         min_guardian_matches: 1
+
+  # Custom assets query the oracle via getValueByConfig with per-asset parameters.
+  # parentAsset is used as the oracle query key, customName is used when publishing the intent.
+  # customMethodology defaults to the priceMethodology fetched from the oracle at startup.
+  # Only supported with dia_v2 client type.
+  custom_assets:
+    - custom_name: "BTC-window/USD"
+      parent_asset: "BTC/USD"
+      custom_window_size: 0              # 0 = use fetched default (100)
+      custom_methodology: ""             # empty = use fetched default
+      custom_timeout_seconds: 3600
+      custom_threshold: 2
+    - custom_name: "ETH-window/USD"
+      parent_asset: "ETH/USD"
+      custom_window_size: 50
+      custom_methodology: ""
+      custom_timeout_seconds: 3600
+      custom_threshold: 2
       
 
 # Logging Configuration
