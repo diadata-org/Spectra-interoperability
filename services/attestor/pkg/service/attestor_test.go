@@ -64,7 +64,7 @@ type mockIntentSigner struct {
 	signature []byte
 }
 
-func (m *mockIntentSigner) SignIntent(ctx context.Context, price, volume *big.Int, symbol string) ([]byte, error) {
+func (m *mockIntentSigner) SignIntent(ctx context.Context, price, volume, timestamp *big.Int, symbol string) ([]byte, error) {
 	if m.signErr != nil {
 		return nil, m.signErr
 	}

@@ -2,40 +2,27 @@ package signer
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"strings"
 
 	multirpc "github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/keysigner"
 )
 
 // EIP712Signer implements the IntentSigner interface using EIP-712
 type EIP712Signer struct {
-	privateKey    *ecdsa.PrivateKey
-	address       common.Address
-	privateKeyHex string
+	keySigner     keysigner.KeySigner
 	signingClient *multirpc.MultiClient
 }
 
-// NewEIP712Signer
-func NewEIP712Signer(privateKeyHex string, rpcURLs []string) (*EIP712Signer, error) {
-	// Remove 0x prefix if present
-	cleanKey := strings.TrimPrefix(privateKeyHex, "0x")
-
-	// Parse the private key
-	privateKey, err := crypto.HexToECDSA(cleanKey)
-	if err != nil {
-		return nil, errors.NewSignerError("parse private key", "", err)
+// NewEIP712Signer creates an EIP-712 signer backed by the given key signer.
+func NewEIP712Signer(ks keysigner.KeySigner, rpcURLs []string) (*EIP712Signer, error) {
+	if ks == nil {
+		return nil, errors.NewSignerError("create signer", "", fmt.Errorf("key signer is required"))
 	}
-
-	// Derive the address
-	address := crypto.PubkeyToAddress(privateKey.PublicKey)
 
 	signingClient, err := multirpc.NewMultiClient(rpcURLs)
 	if err != nil {
@@ -43,9 +30,7 @@ func NewEIP712Signer(privateKeyHex string, rpcURLs []string) (*EIP712Signer, err
 	}
 
 	return &EIP712Signer{
-		privateKey:    privateKey,
-		address:       address,
-		privateKeyHex: privateKeyHex,
+		keySigner:     ks,
 		signingClient: signingClient,
 	}, nil
 }
@@ -63,7 +48,7 @@ func (s *EIP712Signer) SignIntent(ctx context.Context, price, volume, timestamp 
 		return nil, errors.NewValidationError("symbol", symbol, "must not be empty")
 	}
 
-	signedIntentJSON, err := intent.AttestValue(ctx, s.signingClient, s.privateKeyHex, s.address.Hex(), price, volume, symbol, timestamp)
+	signedIntentJSON, err := intent.AttestValue(ctx, s.signingClient, s.keySigner, price, volume, symbol, timestamp)
 	if err != nil {
 		return nil, errors.NewSignerError("sign intent", symbol, err)
 	}
@@ -111,7 +96,7 @@ func (s *EIP712Signer) SignBatchIntent(ctx context.Context, values []interfaces.
 		})
 	}
 
-	batchIntentJSON, err := intent.AttestMultipleValues(ctx, s.signingClient, s.privateKeyHex, s.address.Hex(), symbolData)
+	batchIntentJSON, err := intent.AttestMultipleValues(ctx, s.signingClient, s.keySigner, symbolData)
 	if err != nil {
 		return nil, errors.NewSignerError("sign batch intent", fmt.Sprintf("%d values", len(values)), err)
 	}

@@ -2,7 +2,6 @@ package intent
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/pkg/logger"
 	multirpc "github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/config"
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/keysigner"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/types"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -42,9 +42,9 @@ func generateNonce() *big.Int {
 	return big.NewInt(nonce)
 }
 
-func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, price *big.Int, volume *big.Int, symbol string, oracleTimestamp *big.Int) (string, error) {
-	if privateKey == "" {
-		return "", fmt.Errorf("private key not provided")
+func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, ks keysigner.KeySigner, price *big.Int, volume *big.Int, symbol string, oracleTimestamp *big.Int) (string, error) {
+	if ks == nil {
+		return "", fmt.Errorf("key signer not provided")
 	}
 	if multiClient == nil {
 		return "", fmt.Errorf("multiClient is required")
@@ -86,17 +86,7 @@ func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, private
 	}
 	contractAddress := common.HexToAddress(contractAddr)
 
-	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse private key: %v", err)
-	}
-
-	publicKey := privKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		return "", fmt.Errorf("failed to cast public key to ECDSA")
-	}
-	signerAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	signerAddress := ks.Address()
 
 	intent := types.OracleIntent{
 		IntentType: intentType,
@@ -168,10 +158,13 @@ func AttestValue(ctx context.Context, multiClient *multirpc.MultiClient, private
 	dataToSign = append(dataToSign, typedDataHash[:]...)
 	hash := crypto.Keccak256Hash(dataToSign)
 
-	signature, err := crypto.Sign(hash.Bytes(), privKey)
+	var digest [32]byte
+	copy(digest[:], hash.Bytes())
+	sig65, err := ks.SignDigest(ctx, digest)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign message: %v", err)
 	}
+	signature := sig65[:]
 
 	if signature[64] == 0 || signature[64] == 1 {
 		signature[64] += 27
@@ -229,9 +222,9 @@ type SymbolData struct {
 	Timestamp *big.Int // Oracle timestamp; nil means use time.Now() at signing
 }
 
-func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient, privateKey string, fromAddress string, symbolsData []SymbolData) (string, error) {
-	if privateKey == "" {
-		return "", fmt.Errorf("private key not provided")
+func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient, ks keysigner.KeySigner, symbolsData []SymbolData) (string, error) {
+	if ks == nil {
+		return "", fmt.Errorf("key signer not provided")
 	}
 	if multiClient == nil {
 		return "", fmt.Errorf("multiClient is required")
@@ -270,17 +263,7 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 	}
 	contractAddress := common.HexToAddress(contractAddr)
 
-	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse private key: %v", err)
-	}
-
-	publicKey := privKey.Public()
-	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-	if !ok {
-		return "", fmt.Errorf("failed to cast public key to ECDSA")
-	}
-	signerAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	signerAddress := ks.Address()
 
 	signedIntents := make([]types.SignedIntent, len(symbolsData))
 
@@ -364,10 +347,13 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 		dataToSign = append(dataToSign, typedDataHash[:]...)
 		hash := crypto.Keccak256Hash(dataToSign)
 
-		signature, err := crypto.Sign(hash.Bytes(), privKey)
+		var digest [32]byte
+		copy(digest[:], hash.Bytes())
+		sig65, err := ks.SignDigest(ctx, digest)
 		if err != nil {
 			return "", fmt.Errorf("failed to sign message: %v", err)
 		}
+		signature := sig65[:]
 
 		if signature[64] == 0 || signature[64] == 1 {
 			signature[64] += 27
@@ -412,7 +398,7 @@ func AttestMultipleValues(ctx context.Context, multiClient *multirpc.MultiClient
 	return string(batchIntentJSON), nil
 }
 
-func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiClient, privateKey string, batchIntentJSON string) (string, error) {
+func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiClient, ks keysigner.KeySigner, batchIntentJSON string) (string, error) {
 	startTime := time.Now()
 
 	if registryClient == nil {
@@ -442,11 +428,6 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 	}
 
 	logger.WithField("intent_count", intentCount).Info("Processing batch transaction")
-
-	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse private key: %v", err)
-	}
 
 	chainID, err := registryClient.ChainID(ctx)
 	if err != nil {
@@ -523,7 +504,7 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 	}
 
 	gasLimit := uint64(3000000 + (intentCount * 200000))
-	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
+	fromAddress := ks.Address()
 	currentGasPrice := new(big.Int).Set(gasPrice)
 
 	var lastErr error
@@ -543,7 +524,7 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 			data,
 		)
 
-		signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
+		signedTx, err := keysigner.NewEVMSigner(ks).SignTx(ctx, ethTypes.NewEIP155Signer(chainID), tx)
 		if err != nil {
 			return "", fmt.Errorf("failed to sign transaction: %v", err)
 		}
@@ -575,7 +556,7 @@ func PublishMultipleIntents(ctx context.Context, registryClient *multirpc.MultiC
 	return "", fmt.Errorf("failed to send transaction after %d attempts: %v", maxNonceAttempts, lastErr)
 }
 
-func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, privateKey string, signedIntentJSON string) (string, error) {
+func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, ks keysigner.KeySigner, signedIntentJSON string) (string, error) {
 	if registryClient == nil {
 		return "", fmt.Errorf("registryClient is required")
 	}
@@ -630,17 +611,12 @@ func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, pr
 		return "", fmt.Errorf("failed to pack input data: %v", err)
 	}
 
-	privKey, err := crypto.HexToECDSA(strings.TrimPrefix(privateKey, "0x"))
-	if err != nil {
-		return "", fmt.Errorf("failed to parse private key: %v", err)
-	}
-
 	chainID, err := registryClient.ChainID(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get chain ID: %v", err)
 	}
 
-	fromAddress := crypto.PubkeyToAddress(privKey.PublicKey)
+	fromAddress := ks.Address()
 	gasPrice, err := registryClient.SuggestGasPrice(ctx)
 	if err != nil {
 		return "", fmt.Errorf("failed to get gas price: %v", err)
@@ -665,7 +641,7 @@ func PublishIntent(ctx context.Context, registryClient *multirpc.MultiClient, pr
 			data,
 		)
 
-		signedTx, err := ethTypes.SignTx(tx, ethTypes.NewEIP155Signer(chainID), privKey)
+		signedTx, err := keysigner.NewEVMSigner(ks).SignTx(ctx, ethTypes.NewEIP155Signer(chainID), tx)
 		if err != nil {
 			return "", fmt.Errorf("failed to sign transaction: %v", err)
 		}

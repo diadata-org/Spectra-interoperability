@@ -3,36 +3,29 @@ package registry
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/keysigner"
 )
 
-func TestNewClient(t *testing.T) {
-	tests := []struct {
-		name         string
-		privateKey   string
-		registryAddr string
-		wantErr      bool
-	}{
-		{
-			name:         "invalid private key",
-			privateKey:   "invalid",
-			registryAddr: "0x1234567890abcdef1234567890abcdef12345678",
-			wantErr:      true,
-		},
-		{
-			name:         "valid hex private key without 0x",
-			privateKey:   "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-			registryAddr: "0x1234567890abcdef1234567890abcdef12345678",
-			wantErr:      false,
-		},
+func TestNewClient_NilKeySigner(t *testing.T) {
+	_, err := NewClient(nil, "0x1234567890abcdef1234567890abcdef12345678", []string{"http://localhost:8545"})
+	if err == nil {
+		t.Error("Expected error when key signer is nil")
+	}
+}
+
+func TestNewClient_ValidKeySigner(t *testing.T) {
+	// NewClient dials the registry RPC URLs, so this requires network access.
+	t.Skip("Skipping test that requires network access to dial RPC URLs")
+
+	ks, err := keysigner.NewHexKeySigner("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+	if err != nil {
+		t.Fatalf("failed to create key signer: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewClient(tt.privateKey, tt.registryAddr)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("NewClient() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+	_, err = NewClient(ks, "0x1234567890abcdef1234567890abcdef12345678", []string{"http://localhost:8545"})
+	if err != nil {
+		t.Errorf("NewClient() error = %v", err)
 	}
 }
 

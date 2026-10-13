@@ -57,6 +57,52 @@ func ParseOracleClientType(s string) (OracleClientType, error) {
 	return clientType, nil
 }
 
+// SigningBackend selects where the attestor's ECDSA signing key material lives.
+type SigningBackend string
+
+const (
+	SigningBackendPrivateKey SigningBackend = "privatekey"
+	SigningBackendPKCS11     SigningBackend = "pkcs11"
+)
+
+// String returns the string representation of the signing backend.
+func (b SigningBackend) String() string {
+	return string(b)
+}
+
+// IsValid checks if the signing backend is valid.
+func (b SigningBackend) IsValid() bool {
+	return b == SigningBackendPrivateKey || b == SigningBackendPKCS11
+}
+
+// ParseSigningBackend parses a string into SigningBackend.
+func ParseSigningBackend(s string) (SigningBackend, error) {
+	backend := SigningBackend(s)
+	if !backend.IsValid() {
+		return "", fmt.Errorf("invalid signing backend: %s (must be 'privatekey' or 'pkcs11')", s)
+	}
+	return backend, nil
+}
+
+// PKCS11Config holds PKCS#11 (e.g. SoftHSM) signing backend configuration.
+// The PIN is deliberately not a field here: it is read exclusively from the
+// ATTESTOR_ATTESTOR_PKCS11_PIN environment variable at the point of use, so
+// it never round-trips through YAML/mapstructure or gets logged as part of
+// a config dump.
+type PKCS11Config struct {
+	ModulePath string `mapstructure:"module_path"`
+	TokenLabel string `mapstructure:"token_label"`
+	SlotNumber *int   `mapstructure:"slot_number"`
+	KeyLabel   string `mapstructure:"key_label"`
+	// PublicKeyLabel is the label of the public key object, if it differs
+	// from KeyLabel. Some tokens (e.g. AWS CloudHSM) require separate
+	// private/public key labels; others (e.g. SoftHSM) use one shared
+	// label for both. Defaults to KeyLabel when empty.
+	PublicKeyLabel string `mapstructure:"public_key_label"`
+	KeyID          string `mapstructure:"key_id"`
+	MaxSessions    int    `mapstructure:"max_sessions"`
+}
+
 // AttestorConfig holds attestor-specific configuration
 type AttestorConfig struct {
 	PrivateKey          string        `mapstructure:"private_key"`

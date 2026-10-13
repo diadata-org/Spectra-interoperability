@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // DIAOracleV2 ABI JSON - based on DIAOracleV2.sol contract
@@ -90,13 +88,12 @@ type DIAOracleV2Client struct {
 	multiClient *multirpc.MultiClient
 	oracleAddr  common.Address
 	signedAddr  string
-	privateKey  string
 	fromAddress common.Address
 	oracleABI   abi.ABI
 }
 
 // NewDIAOracleV2Client creates a new DIAOracleV2 client backed by the multi-RPC failover helper.
-func NewDIAOracleV2Client(rpcURLs []string, oracleAddrStr, signedAddrStr, privateKeyStr string) (*DIAOracleV2Client, error) {
+func NewDIAOracleV2Client(rpcURLs []string, oracleAddrStr, signedAddrStr string, fromAddress common.Address) (*DIAOracleV2Client, error) {
 	if len(rpcURLs) == 0 {
 		return nil, fmt.Errorf("no RPC URLs provided for oracle client")
 	}
@@ -113,34 +110,11 @@ func NewDIAOracleV2Client(rpcURLs []string, oracleAddrStr, signedAddrStr, privat
 		return nil, fmt.Errorf("failed to parse DIAOracleV2 ABI: %w", err)
 	}
 
-	var fromAddress common.Address
-	if privateKeyStr != "" {
-		cleanPrivKey := strings.TrimPrefix(privateKeyStr, "0x")
-		privateKey, err := crypto.HexToECDSA(cleanPrivKey)
-		if err != nil {
-			multi.Close()
-			return nil, fmt.Errorf("failed to parse private key: %v", err)
-		}
-
-		publicKey := privateKey.Public()
-		publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-		if !ok {
-			multi.Close()
-			return nil, fmt.Errorf("failed to cast public key to ECDSA")
-		}
-
-		fromAddress = crypto.PubkeyToAddress(*publicKeyECDSA)
-		logger.WithField("address", fromAddress.Hex()).Debug("Derived DIAOracleV2 client address from private key")
-	} else {
-		fromAddress = common.Address{}
-	}
-
 	return &DIAOracleV2Client{
 		primaryRPC:  rpcURLs[0],
 		multiClient: multi,
 		oracleAddr:  oracleAddr,
 		signedAddr:  signedAddrStr,
-		privateKey:  privateKeyStr,
 		fromAddress: fromAddress,
 		oracleABI:   oracleABI,
 	}, nil
@@ -355,10 +329,6 @@ func (oc *DIAOracleV2Client) GetOracleAddr() string {
 
 func (oc *DIAOracleV2Client) GetSignedAddr() string {
 	return oc.signedAddr
-}
-
-func (oc *DIAOracleV2Client) GetPrivateKey() string {
-	return oc.privateKey
 }
 
 func (oc *DIAOracleV2Client) GetFromAddress() string {

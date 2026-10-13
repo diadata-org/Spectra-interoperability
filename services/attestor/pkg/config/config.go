@@ -3,12 +3,19 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/logger"
 	"github.com/spf13/viper"
 )
+
+// PKCS11PINEnvVar is the environment variable the PKCS#11 signing backend
+// reads its token PIN from. It is intentionally not bound through viper or
+// stored on Config so it never round-trips through YAML/mapstructure or gets
+// logged as part of a config dump.
+const PKCS11PINEnvVar = "ATTESTOR_ATTESTOR_PKCS11_PIN"
 
 func parseCSV(input string) []string {
 	parts := strings.Split(input, ",")
@@ -100,6 +107,8 @@ type Config struct {
 
 	Attestor struct {
 		PrivateKey          string         `mapstructure:"private_key"`
+		SigningBackend      SigningBackend `mapstructure:"signing_backend"`
+		PKCS11              PKCS11Config   `mapstructure:"pkcs11"`
 		Symbols             []string       `mapstructure:"symbols"`
 		PollingTime         time.Duration  `mapstructure:"polling_time"`
 		BatchMode           bool           `mapstructure:"batch_mode"`
@@ -112,6 +121,11 @@ type Config struct {
 		ForceUpdateInterval time.Duration  `mapstructure:"force_update_interval"`
 		UseOracleTimestamp  bool           `mapstructure:"use_oracle_timestamp"`
 		Guardian            GuardianConfig `mapstructure:"guardian"`
+
+		// FetchedPriceMethodology and FetchedWindowSize are populated at startup
+		// from the oracle contract, not read from config files/env.
+		FetchedPriceMethodology string `mapstructure:"-"`
+		FetchedWindowSize       int    `mapstructure:"-"`
 	} `mapstructure:"attestor"`
 
 	Logging struct {
@@ -189,6 +203,15 @@ func Init(configPath string) (*Config, error) {
 	v.BindEnv("attestor.deviation_threshold", "ATTESTOR_ATTESTOR_DEVIATION_THRESHOLD")
 	v.BindEnv("attestor.force_update_interval", "ATTESTOR_ATTESTOR_FORCE_UPDATE_INTERVAL")
 	v.BindEnv("attestor.use_oracle_timestamp", "ATTESTOR_ATTESTOR_USE_ORACLE_TIMESTAMP")
+	v.BindEnv("attestor.signing_backend", "ATTESTOR_ATTESTOR_SIGNING_BACKEND")
+	v.BindEnv("attestor.pkcs11.module_path", "ATTESTOR_ATTESTOR_PKCS11_MODULE_PATH")
+	v.BindEnv("attestor.pkcs11.token_label", "ATTESTOR_ATTESTOR_PKCS11_TOKEN_LABEL")
+	v.BindEnv("attestor.pkcs11.slot_number", "ATTESTOR_ATTESTOR_PKCS11_SLOT_NUMBER")
+	v.BindEnv("attestor.pkcs11.key_label", "ATTESTOR_ATTESTOR_PKCS11_KEY_LABEL")
+	v.BindEnv("attestor.pkcs11.public_key_label", "ATTESTOR_ATTESTOR_PKCS11_PUBLIC_KEY_LABEL")
+	v.BindEnv("attestor.pkcs11.key_id", "ATTESTOR_ATTESTOR_PKCS11_KEY_ID")
+	v.BindEnv("attestor.pkcs11.max_sessions", "ATTESTOR_ATTESTOR_PKCS11_MAX_SESSIONS")
+	// Deliberately no BindEnv for the PKCS#11 PIN: see PKCS11PINEnvVar.
 	v.BindEnv("oracle.client_type", "ATTESTOR_ORACLE_CLIENT_TYPE")
 	v.BindEnv("attestor.guardian.default.max_deviation_bips", "ATTESTOR_GUARDIAN_MAX_DEVIATION_BIPS")
 	v.BindEnv("attestor.guardian.default.max_timestamp_age", "ATTESTOR_GUARDIAN_MAX_TIMESTAMP_AGE")
@@ -211,6 +234,7 @@ func Init(configPath string) (*Config, error) {
 	v.SetDefault("attestor.deviation_threshold", 50)
 	v.SetDefault("attestor.force_update_interval", "0s")
 	v.SetDefault("attestor.use_oracle_timestamp", false)
+	v.SetDefault("attestor.signing_backend", "privatekey")
 	v.SetDefault("attestor.guardian.default.max_deviation_bips", 500)
 	v.SetDefault("attestor.guardian.default.max_timestamp_age", 3600)
 	v.SetDefault("attestor.guardian.default.min_guardian_matches", 1)
@@ -245,6 +269,17 @@ func Init(configPath string) (*Config, error) {
 			return nil, fmt.Errorf("invalid oracle client type: %w", err)
 		}
 		cfg.Oracle.ClientType = clientType
+	}
+
+	// Parse and validate signing backend
+	if cfg.Attestor.SigningBackend == "" {
+		cfg.Attestor.SigningBackend = SigningBackendPrivateKey // Default to privatekey
+	} else {
+		backend, err := ParseSigningBackend(string(cfg.Attestor.SigningBackend))
+		if err != nil {
+			return nil, fmt.Errorf("invalid signing backend: %w", err)
+		}
+		cfg.Attestor.SigningBackend = backend
 	}
 
 	assetGuardianFromJSON, err := parseAssetGuardianFromJSON(v)
@@ -305,8 +340,8 @@ func Init(configPath string) (*Config, error) {
 
 // validateConfig validates the configuration after loading
 func validateConfig(cfg *Config) error {
-	if cfg.Attestor.PrivateKey == "" {
-		return fmt.Errorf("private key not configured")
+	if err := validateSigningBackend(cfg); err != nil {
+		return err
 	}
 
 	if cfg.Oracle.Address == "" {
@@ -340,6 +375,42 @@ func validateConfig(cfg *Config) error {
 	// Validate guardian params
 	if err := validateGuardianConfig(&cfg.Attestor.Guardian); err != nil {
 		return fmt.Errorf("guardian configuration invalid: %w", err)
+	}
+
+	return nil
+}
+
+// validateSigningBackend validates the signing backend configuration and
+// enforces mutual exclusivity between the privatekey and pkcs11 backends.
+func validateSigningBackend(cfg *Config) error {
+	switch cfg.Attestor.SigningBackend {
+	case SigningBackendPrivateKey:
+		if cfg.Attestor.PrivateKey == "" {
+			return fmt.Errorf("private key not configured (required when signing_backend=privatekey)")
+		}
+
+	case SigningBackendPKCS11:
+		if cfg.Attestor.PrivateKey != "" {
+			return fmt.Errorf("attestor.private_key must not be set when signing_backend=pkcs11 (mutually exclusive)")
+		}
+		if cfg.Attestor.PKCS11.ModulePath == "" {
+			return fmt.Errorf("attestor.pkcs11.module_path is required when signing_backend=pkcs11")
+		}
+		if cfg.Attestor.PKCS11.TokenLabel == "" && cfg.Attestor.PKCS11.SlotNumber == nil {
+			return fmt.Errorf("attestor.pkcs11.token_label or slot_number is required when signing_backend=pkcs11")
+		}
+		if cfg.Attestor.PKCS11.TokenLabel != "" && cfg.Attestor.PKCS11.SlotNumber != nil {
+			return fmt.Errorf("attestor.pkcs11.token_label and slot_number are mutually exclusive")
+		}
+		if cfg.Attestor.PKCS11.KeyLabel == "" && cfg.Attestor.PKCS11.KeyID == "" {
+			return fmt.Errorf("attestor.pkcs11.key_label or key_id is required when signing_backend=pkcs11")
+		}
+		if os.Getenv(PKCS11PINEnvVar) == "" {
+			return fmt.Errorf("%s environment variable is required when signing_backend=pkcs11", PKCS11PINEnvVar)
+		}
+
+	default:
+		return fmt.Errorf("invalid signing backend: %s (must be 'privatekey' or 'pkcs11')", cfg.Attestor.SigningBackend)
 	}
 
 	return nil

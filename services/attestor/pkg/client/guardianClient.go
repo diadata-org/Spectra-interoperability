@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 const guardedOracleABIJSON = `[
@@ -308,13 +306,12 @@ type GuardedOracleClient struct {
 	multiClient *multirpc.MultiClient
 	oracleAddr  common.Address
 	signedAddr  string
-	privateKey  string
 	fromAddress common.Address
 	oracleABI   abi.ABI
 }
 
 // NewGuardedOracleClient creates a new guarded oracle client backed by the multi-RPC failover helper.
-func NewGuardedOracleClient(rpcURLs []string, oracleAddrStr, signedAddrStr, privateKeyStr string) (*GuardedOracleClient, error) {
+func NewGuardedOracleClient(rpcURLs []string, oracleAddrStr, signedAddrStr string, fromAddress common.Address) (*GuardedOracleClient, error) {
 	if len(rpcURLs) == 0 {
 		return nil, fmt.Errorf("no RPC URLs provided for oracle client")
 	}
@@ -327,34 +324,11 @@ func NewGuardedOracleClient(rpcURLs []string, oracleAddrStr, signedAddrStr, priv
 	oracleAddr := common.HexToAddress(oracleAddrStr)
 	oracleABI, _ := abi.JSON(strings.NewReader(guardedOracleABIJSON))
 
-	var fromAddress common.Address
-	if privateKeyStr != "" {
-		cleanPrivKey := strings.TrimPrefix(privateKeyStr, "0x")
-		privateKey, err := crypto.HexToECDSA(cleanPrivKey)
-		if err != nil {
-			multi.Close()
-			return nil, fmt.Errorf("failed to parse private key: %v", err)
-		}
-
-		publicKey := privateKey.Public()
-		publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-		if !ok {
-			multi.Close()
-			return nil, fmt.Errorf("failed to cast public key to ECDSA")
-		}
-
-		fromAddress = crypto.PubkeyToAddress(*publicKeyECDSA)
-		logger.WithField("address", fromAddress.Hex()).Debug("Derived oracle client address from private key")
-	} else {
-		fromAddress = common.Address{}
-	}
-
 	return &GuardedOracleClient{
 		primaryRPC:  rpcURLs[0],
 		multiClient: multi,
 		oracleAddr:  oracleAddr,
 		signedAddr:  signedAddrStr,
-		privateKey:  privateKeyStr,
 		fromAddress: fromAddress,
 		oracleABI:   oracleABI,
 	}, nil
@@ -502,10 +476,6 @@ func (oc *GuardedOracleClient) GetOracleAddr() string {
 
 func (oc *GuardedOracleClient) GetSignedAddr() string {
 	return oc.signedAddr
-}
-
-func (oc *GuardedOracleClient) GetPrivateKey() string {
-	return oc.privateKey
 }
 
 func (oc *GuardedOracleClient) GetFromAddress() string {

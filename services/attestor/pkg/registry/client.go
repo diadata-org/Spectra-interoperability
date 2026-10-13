@@ -12,29 +12,26 @@ import (
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/errors"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/intent"
 	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/interfaces"
+	"github.com/diadata.org/Spectra-interoperability/services/attestor/pkg/keysigner"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // Client implements the RegistryClient interface
 type Client struct {
-	privateKey     string
+	keySigner      keysigner.KeySigner
 	registryAddr   common.Address
 	fromAddress    common.Address
 	registryClient *multirpc.MultiClient
 }
 
-// NewClient creates a new registry client
-func NewClient(privateKey string, registryAddr string, registryRPCURLs []string) (*Client, error) {
-	cleanKey := strings.TrimPrefix(privateKey, "0x")
-	privKey, err := crypto.HexToECDSA(cleanKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
+// NewClient creates a new registry client. The registry client does not own
+// ks's lifecycle; callers are responsible for closing it.
+func NewClient(ks keysigner.KeySigner, registryAddr string, registryRPCURLs []string) (*Client, error) {
+	if ks == nil {
+		return nil, fmt.Errorf("key signer is required")
 	}
-
-	fromAddr := crypto.PubkeyToAddress(privKey.PublicKey)
 
 	registryClient, err := multirpc.NewMultiClient(registryRPCURLs)
 	if err != nil {
@@ -44,9 +41,9 @@ func NewClient(privateKey string, registryAddr string, registryRPCURLs []string)
 	logger.Infof("Connected to registry RPC: %s", registryClient.GetCurrentRPCURL())
 
 	return &Client{
-		privateKey:     privateKey,
+		keySigner:      ks,
 		registryAddr:   common.HexToAddress(registryAddr),
-		fromAddress:    fromAddr,
+		fromAddress:    ks.Address(),
 		registryClient: registryClient,
 	}, nil
 }
@@ -60,7 +57,7 @@ func (c *Client) PublishIntent(ctx context.Context, signedIntent []byte) (string
 	}
 
 	// Use the intent package's publish functionality with shared registry client
-	txHash, err := intent.PublishIntent(ctx, c.registryClient, c.privateKey, string(signedIntent))
+	txHash, err := intent.PublishIntent(ctx, c.registryClient, c.keySigner, string(signedIntent))
 	if err != nil {
 		return "", errors.NewRegistryError("publish", "", err)
 	}
@@ -82,7 +79,7 @@ func (c *Client) PublishBatchIntents(ctx context.Context, signedIntents []byte) 
 	}
 
 	// Use the intent package's batch publish functionality with shared registry client
-	txHash, err := intent.PublishMultipleIntents(ctx, c.registryClient, c.privateKey, string(signedIntents))
+	txHash, err := intent.PublishMultipleIntents(ctx, c.registryClient, c.keySigner, string(signedIntents))
 	if err != nil {
 		return "", errors.NewRegistryError("publish batch", "", err)
 	}
