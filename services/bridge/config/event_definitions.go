@@ -74,6 +74,7 @@ type DestinationMethodConfig struct {
 	Value         string            `json:"value"`
 	GasLimit      uint64            `json:"gas_limit"`
 	GasMultiplier float64           `json:"gas_multiplier"`
+	SkipSimulation bool             `json:"skip_simulation"`
 }
 
 // ExtractedData represents data extracted from an event

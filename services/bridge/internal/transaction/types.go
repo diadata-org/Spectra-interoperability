@@ -18,6 +18,7 @@ type Request struct {
 	GasPrice      *big.Int
 	GasLimit      uint64
 	UpdateRequest *bridgetypes.UpdateRequest
+	SkipSimulation bool
 }
 
 type Result struct {

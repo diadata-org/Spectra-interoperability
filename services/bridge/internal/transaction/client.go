@@ -37,21 +37,22 @@ func NewClient(receiverClient *contracts.ReceiverClient, ethClient rpc.EthClient
 	}
 }
 
-func (c *Client) CallMethod(ctx context.Context, contractAddr, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64, updateReq *bridgetypes.UpdateRequest) (*types.Transaction, error) {
+func (c *Client) CallMethod(ctx context.Context, contractAddr, methodName, abiJSON string, params []interface{}, gasPrice *big.Int, gasLimit uint64, updateReq *bridgetypes.UpdateRequest, skipSimulation bool) (*types.Transaction, error) {
 	queue, err := c.queueManager.GetOrCreateQueue(c.walletAddr, c.chainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get transaction queue: %w", err)
 	}
 
 	req := &Request{
-		Ctx:           ctx,
-		ContractAddr:  contractAddr,
-		MethodName:    methodName,
-		ABI:           abiJSON,
-		Params:        params,
-		GasPrice:      gasPrice,
-		GasLimit:      gasLimit,
-		UpdateRequest: updateReq,
+		Ctx:            ctx,
+		ContractAddr:   contractAddr,
+		MethodName:     methodName,
+		ABI:            abiJSON,
+		Params:         params,
+		GasPrice:       gasPrice,
+		GasLimit:       gasLimit,
+		UpdateRequest:  updateReq,
+		SkipSimulation: skipSimulation,
 	}
 
 	executorFunc := func(execCtx context.Context) (*types.Transaction, error) {

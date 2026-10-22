@@ -89,43 +89,47 @@ func (e *Executor) Execute(ctx context.Context, req *Request) (*types.Transactio
 	if req.UpdateRequest != nil {
 		routerID = req.UpdateRequest.RouterID
 	}
-	logger.Infof("Simulating transaction for method %s on contract %s, router=%s", req.MethodName, req.ContractAddr, routerID)
-	callMsg := ethereum.CallMsg{
-		From:     fromAddress,
-		To:       &contractAddress,
-		Gas:      req.GasLimit,
-		GasPrice: req.GasPrice,
-		Value:    big.NewInt(0),
-		Data:     callData,
-	}
-
-	t0 := time.Now()
-	if _, err := e.ethClient.CallContract(ctx, callMsg, nil); err != nil {
-		logger.Errorf("[RPC] CallContract (simulate) failed: took=%v, error=%v", time.Since(t0), err)
-		// Log raw error for debugging - MUST be Error level to see in production
-		logger.Errorf("Raw simulation error for chain %d: %v (Type: %T)", e.chainID, err, err)
-
-		revertReason := extractRevertReason(err)
-
-		if revertReason != "" {
-			// We have the exact revert reason
-			logger.Errorf("Transaction simulation reverted for method %s on contract %s: %s",
-				req.MethodName, req.ContractAddr, revertReason)
-			return nil, fmt.Errorf("transaction simulation reverted: %s", revertReason)
-		} else {
-			// Couldn't decode exact error, provide diagnostics
-			possibleCauses := identifyPossibleCauses(err)
-			logger.Errorf("Transaction simulation failed for method %s on contract %s: %v (Diagnostics: %s)",
-				req.MethodName, req.ContractAddr, err, possibleCauses)
-			return nil, fmt.Errorf("transaction simulation failed: %w", err)
+	if req.SkipSimulation {
+		logger.Warnf("Skipping eth_call pre-flight for method %s on contract %s, router=%s (skip_simulation enabled)", req.MethodName, req.ContractAddr, routerID)
+	} else {
+		logger.Infof("Simulating transaction for method %s on contract %s, router=%s", req.MethodName, req.ContractAddr, routerID)
+		callMsg := ethereum.CallMsg{
+			From:     fromAddress,
+			To:       &contractAddress,
+			Gas:      req.GasLimit,
+			GasPrice: req.GasPrice,
+			Value:    big.NewInt(0),
+			Data:     callData,
 		}
-	}
 
-	if req.UpdateRequest != nil && routerID != "unknown" {
-		routerID = req.UpdateRequest.RouterID
+		t0 := time.Now()
+		if _, err := e.ethClient.CallContract(ctx, callMsg, nil); err != nil {
+			logger.Errorf("[RPC] CallContract (simulate) failed: took=%v, error=%v", time.Since(t0), err)
+			// Log raw error for debugging - MUST be Error level to see in production
+			logger.Errorf("Raw simulation error for chain %d: %v (Type: %T)", e.chainID, err, err)
+
+			revertReason := extractRevertReason(err)
+
+			if revertReason != "" {
+				// We have the exact revert reason
+				logger.Errorf("Transaction simulation reverted for method %s on contract %s: %s",
+					req.MethodName, req.ContractAddr, revertReason)
+				return nil, fmt.Errorf("transaction simulation reverted: %s", revertReason)
+			} else {
+				// Couldn't decode exact error, provide diagnostics
+				possibleCauses := identifyPossibleCauses(err)
+				logger.Errorf("Transaction simulation failed for method %s on contract %s: %v (Diagnostics: %s)",
+					req.MethodName, req.ContractAddr, err, possibleCauses)
+				return nil, fmt.Errorf("transaction simulation failed: %w", err)
+			}
+		}
+
+		if req.UpdateRequest != nil && routerID != "unknown" {
+			routerID = req.UpdateRequest.RouterID
+		}
+		logger.Infof("Transaction simulation successful, proceeding to send transaction, router=%s", routerID)
+		logger.Infof("[RPC] CallContract (simulate) done: took=%v", time.Since(t0))
 	}
-	logger.Infof("Transaction simulation successful, proceeding to send transaction, router=%s", routerID)
-	logger.Infof("[RPC] CallContract (simulate) done: took=%v", time.Since(t0))
 
 	// CRITICAL: Allocate nonce immediately before sending to minimize staleness window
 	// This happens AFTER simulation to reduce the time between allocation and sending

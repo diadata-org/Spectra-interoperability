@@ -23,9 +23,11 @@ WORKDIR /bridge
 COPY services/bridge/go.mod services/bridge/go.sum ./
 
 # Install protoc and Go plugins
+ARG GRPC_PLUGIN_VERSION=v1.5.1
+ARG PROTOC_GEN_GO_GRPC_CMD="go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@${GRPC_PLUGIN_VERSION}"
 RUN apk add --no-cache protoc protobuf-c-dev && \
     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+    eval "${PROTOC_GEN_GO_GRPC_CMD}"
 
 # Regenerate proto files
 RUN cd /proto && protoc --go_out=. --go-grpc_out=. bridge.proto

@@ -152,7 +152,7 @@ func (wc *WriteClient) callRouterMethod(ctx context.Context, updateReq *bridgety
 		return nil, fmt.Errorf("failed to build method params: %w", err)
 	}
 
-	return wc.txClient.CallMethod(ctx, updateReq.Contract.Address, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit, updateReq)
+	return wc.txClient.CallMethod(ctx, updateReq.Contract.Address, methodConfig.Name, methodConfig.ABI, params, gasPrice, gasLimit, updateReq, methodConfig.SkipSimulation)
 }
 
 func (wc *WriteClient) GetEthClient() rpc.EthClient {
