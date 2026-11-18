@@ -862,3 +862,25 @@ func (gr *GenericRouter) OnRouted(eventName string, data *config.ExtractedData) 
 func (gr *GenericRouter) generateDestinationKey(dest config.RouterDestination, symbol string) string {
 	return utils.GenerateDestinationKey(dest.ChainID, dest.Contract, symbol)
 }
+
+// SyncDestinationState refreshes this router's cached last price/timestamp for a destination
+// from a value just read on-chain, so Gate 1 (price deviation/time threshold checks) compares
+// against ground truth instead of only this process's own prior sends.
+func (gr *GenericRouter) SyncDestinationState(chainID int64, contract, symbol string, price *big.Int, timestamp uint64) {
+	if price == nil || price.Sign() == 0 || timestamp == 0 {
+		return
+	}
+
+	destKey := utils.GenerateDestinationKey(chainID, contract, symbol)
+	state := gr.getOrCreateDestinationState(destKey)
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if timestamp <= state.lastTimestamp {
+		return
+	}
+	state.lastPrice = price.String()
+	state.lastTimestamp = timestamp
+	state.lastUpdate = time.Unix(int64(timestamp), 0)
+}

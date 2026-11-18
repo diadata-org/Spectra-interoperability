@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"math/big"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
@@ -21,4 +22,5 @@ type GenericRouterInterface interface {
 	UpdateDestinationTime(dest config.RouterDestination, symbol string, data ...*config.ExtractedData)
 	GetSymbolFromData(data *config.ExtractedData) string
 	FetchOracleStateFromOnChain(ctx context.Context, clients map[int64]rpc.EthClient) error
+	SyncDestinationState(chainID int64, contract, symbol string, price *big.Int, timestamp uint64)
 }
