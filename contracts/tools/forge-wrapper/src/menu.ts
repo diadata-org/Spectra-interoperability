@@ -34,6 +34,21 @@ import { getTemplate } from "./utils/templates";
 import { loadDeployments } from "./deployments";
 import { NetworkConfig, DeploymentRecord } from "./types";
 import { formatCommand, runCast } from "./utils/forge";
+import {
+  buildCreate2Plan,
+  checkFactoryPresence,
+  CREATE2_FACTORY,
+  getDeployedCode,
+  grindVanitySalt,
+  isValidVanitySuffix,
+  normalizeSalt,
+} from "./utils/create2";
+import {
+  ensureReceiverFactory,
+  predictReceiverAddress,
+  receiverCreate2Salt,
+  RECEIVER_FACTORY_ARTIFACT,
+} from "./utils/receiver-factory";
 import { defaultOracleIntentInput } from "./utils/intents";
 
 const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
@@ -2265,6 +2280,7 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
     );
   }
 
+  // ---- Key selection (needed before CREATE2: owner salts the address) ----
   let availableKeys = await listKeyAliases(customer);
   const masterKeys = await listKeyAliases("master");
   const allAvailableKeys = [...availableKeys, ...masterKeys.filter(key => !availableKeys.includes(key))];
@@ -2337,6 +2353,150 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
   const privateKey = walletMeta.privateKey;
   const deployerAddress = walletMeta.address;
 
+  // ---- Deployment method: standard (forge create) vs CREATE2 ----
+  const { deployMethod } = await promptWithContext(customer, network, {
+    type: "select",
+    name: "deployMethod",
+    message: "Deployment method",
+    choices: [
+      { title: "Standard (forge create) — address derived from deployer nonce", value: "create" },
+      { title: "CREATE2 (deterministic, owner-correct via DIAReceiverFactory) — same address on every chain", value: "create2" },
+    ],
+    initial: 0,
+  });
+
+  let create2Salt: string | undefined;
+  let create2Plan: Awaited<ReturnType<typeof buildCreate2Plan>> | undefined;
+  let receiverFactoryAddress: string | undefined;
+
+  if (deployMethod === "create2") {
+    const factoryPresence = await checkFactoryPresence(networkConfig.rpc_url);
+    if (factoryPresence === "missing") {
+      // eslint-disable-next-line no-console
+      console.log(chalk.red(
+        `CREATE2 factory ${CREATE2_FACTORY} is not deployed on ${network}. ` +
+        `Broadcast the canonical deterministic-deployment-proxy transaction first, or choose Standard.`
+      ));
+      return;
+    }
+    if (factoryPresence === "unknown") {
+      // eslint-disable-next-line no-console
+      console.log(chalk.yellow(
+        `Warning: could not verify CREATE2 factory presence on ${network} — continuing anyway.`
+      ));
+    }
+
+    // Ensure DIAReceiverFactory exists on this chain (deploy via Arachnid if missing)
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`Ensuring DIAReceiverFactory on ${network} (chainId ${networkConfig.chain_id})...`));
+    const ensured = await ensureReceiverFactory({
+      rpcUrl: networkConfig.rpc_url,
+      chainId: networkConfig.chain_id,
+      networkName: network,
+      privateKey,
+      legacy: networkConfig.legacy,
+      gasPrice: networkConfig.gas?.max_fee_per_gas,
+    });
+    receiverFactoryAddress = ensured.address;
+    // eslint-disable-next-line no-console
+    console.log(ensured.reused
+      ? chalk.gray(`Reusing DIAReceiverFactory at ${ensured.address}`)
+      : chalk.green(`DIAReceiverFactory deployed at ${ensured.address}${ensured.txHash ? ` (tx ${ensured.txHash})` : ""}`));
+
+    // The receiver's CREATE2 initCode is creation code + args, address derived
+    // from receiverFactory (not Arachnid) with salt = keccak(owner ++ userSalt)
+    const userSaltInput = await promptWithContext(customer, network, {
+      type: "text",
+      name: "userSalt",
+      message: "CREATE2 salt — string (keccak256-hashed) or vanity:d1a (grind address ending); final salt = keccak(owner ++ salt)",
+      initial: `${alias}-v1`,
+      validate: (value: string) => (value && value.trim().length > 0 ? true : "Required"),
+    });
+    let saltStr = String(userSaltInput.userSalt || "").trim();
+
+    let wantsVanity = saltStr.toLowerCase().startsWith("vanity:");
+    if (wantsVanity) {
+      saltStr = saltStr.slice("vanity:".length).trim();
+    } else if (isValidVanitySuffix(saltStr)) {
+      const { vanity } = await promptWithContext(customer, network, {
+        type: "confirm",
+        name: "vanity",
+        message: `Grind the salt so the address ends in "${saltStr.toLowerCase()}"? (No = use "${saltStr}" as a literal salt string)`,
+        initial: true,
+      });
+      wantsVanity = Boolean(vanity);
+    }
+
+    if (wantsVanity) {
+      const suffix = saltStr.toLowerCase();
+      if (!isValidVanitySuffix(suffix)) {
+        // eslint-disable-next-line no-console
+        console.log(chalk.red(
+          `Invalid vanity suffix "${suffix}" — must be 1-6 hex characters (0-9, a-f). ` +
+          `Note: addresses cannot contain letters like i/o — "dia" is impossible, use "d1a".`
+        ));
+        return;
+      }
+      // eslint-disable-next-line no-console
+      console.log(chalk.gray(`Grinding owner-salted addresses for suffix "${suffix}" (seconds for 4+ chars)...`));
+
+      const plan0 = await buildCreate2Plan({
+        artifact,
+        constructorArgs: sanitizedArgs,
+        salt: "grind-placeholder",
+        forgeProfile: networkConfig.forge_profile,
+        evmVersion: networkConfig.evm_version,
+      });
+      const ownerSalt = (raw: string) => receiverCreate2Salt(deployerAddress ?? "0x0000000000000000000000000000000000000000", normalizeSalt(raw));
+      const grindOpts = {
+        base: alias,
+        factory: receiverFactoryAddress!,
+        transformSalt: ownerSalt,
+      };
+
+      let ground = grindVanitySalt(plan0.initCodeHash, suffix, grindOpts);
+      // eslint-disable-next-line no-console
+      console.log(chalk.green(`Found salt after ${ground.tries} tries: "${ground.saltStr}" -> ${ground.address}`));
+
+      // Skip salts whose address is already occupied on this chain
+      let occupied = await getDeployedCode(networkConfig.rpc_url, ground.address);
+      while (occupied) {
+        const { next } = await promptWithContext(customer, network, {
+          type: "confirm",
+          name: "next",
+          message: `${ground.address} already has code on ${network}. Search for the next free "${suffix}" address?`,
+          initial: true,
+        });
+        if (!next) {
+          // eslint-disable-next-line no-console
+          console.log(chalk.gray("Deployment cancelled (salt address occupied)."));
+          return;
+        }
+        ground = grindVanitySalt(plan0.initCodeHash, suffix, { ...grindOpts, startAfter: ground.index });
+        // eslint-disable-next-line no-console
+        console.log(chalk.green(`Found salt after ${ground.tries} tries: "${ground.saltStr}" -> ${ground.address}`));
+        occupied = await getDeployedCode(networkConfig.rpc_url, ground.address);
+      }
+
+      saltStr = ground.saltStr;
+    }
+
+    create2Salt = normalizeSalt(saltStr);
+
+    create2Plan = await buildCreate2Plan({
+      artifact,
+      constructorArgs: sanitizedArgs,
+      salt: create2Salt,
+      forgeProfile: networkConfig.forge_profile,
+      evmVersion: networkConfig.evm_version,
+    });
+    // Recompute address from the receiver factory + owner salt
+    if (receiverFactoryAddress && create2Salt && deployerAddress) {
+      const finalAddress = predictReceiverAddress(receiverFactoryAddress, deployerAddress, create2Salt, create2Plan.initCodeHash);
+      create2Plan = { ...create2Plan, address: finalAddress, factory: receiverFactoryAddress };
+    }
+  }
+
   const classification = classifyNetwork(networkConfig);
   const previewArgs = [
     "create",
@@ -2349,10 +2509,15 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
     String(networkConfig.chain_id),
     "--broadcast",
   ];
+  if (networkConfig.evm_version) {
+    previewArgs.push("--evm-version", networkConfig.evm_version);
+  }
   if (sanitizedArgs.length > 0) {
     previewArgs.push("--constructor-args", ...sanitizedArgs);
   }
-  const previewCommand = formatCommand("forge", previewArgs);
+  const previewCommand = create2Plan
+    ? `CREATE2 via ${CREATE2_FACTORY} (salt ${create2Salt}, data = salt ++ initCode)`
+    : formatCommand("forge", previewArgs);
 
   const summaryLines = [
     `network: ${network} (chainId ${networkConfig.chain_id}, ${classification})`,
@@ -2360,6 +2525,10 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
     sanitizedArgs.length
       ? `constructor args: [${sanitizedArgs.map((arg) => JSON.stringify(arg)).join(", ")}]`
       : undefined,
+    create2Plan ? `deploy method: CREATE2 (deterministic)` : undefined,
+    create2Plan ? `predicted address: ${create2Plan.address}` : undefined,
+    create2Plan ? `salt: ${create2Plan.salt}` : undefined,
+    create2Plan ? `initCodeHash: ${create2Plan.initCodeHash}` : undefined,
     `account: ${resolvedAccount}${
       deployerAddress ? ` (${deployerAddress})` : ""
     }`,
@@ -2396,7 +2565,8 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
     account: resolvedAccount,
     rpcUrl: undefined,
     dryRun: false,
-    salt: undefined,
+    salt: create2Salt,
+    deployMethod: deployMethod === "create2" ? "create2" : undefined,
     privateKeyOverride: privateKey,
     deployerAddress,
   });
@@ -2418,9 +2588,15 @@ async function interactiveDeploy(customer: string, network: string): Promise<voi
         .join("")
     : "";
   const envPrefix = forgeProfile ? `FOUNDRY_PROFILE=${forgeProfile} ` : "";
-  logEquivalent(
-    `${envPrefix}forge-wrapper deploy ${deployRecord.alias} --customer ${customer} --network ${network} --account ${resolvedAccount} --artifact ${artifact}${argsList}`
-  );
+  if (deployRecord.deployMethod === "create2" && deployRecord.create2) {
+    logEquivalent(
+      `${envPrefix}forge-wrapper deploy ${deployRecord.alias} --customer ${customer} --network ${network} --account ${resolvedAccount} --artifact ${artifact} --create2 --salt ${deployRecord.create2.salt}${argsList}`
+    );
+  } else {
+    logEquivalent(
+      `${envPrefix}forge-wrapper deploy ${deployRecord.alias} --customer ${customer} --network ${network} --account ${resolvedAccount} --artifact ${artifact}${argsList}`
+    );
+  }
 
   if (networkConfig.verification) {
     const { verify } = await promptWithContext(customer, network, {

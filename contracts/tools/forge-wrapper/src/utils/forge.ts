@@ -35,10 +35,12 @@ export async function runBinary(
 
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();
+      process.stdout.write(chunk);
     });
 
     child.stderr?.on("data", (chunk) => {
       stderr += chunk.toString();
+      process.stderr.write(chunk);
     });
 
     child.on("error", (error) => {

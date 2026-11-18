@@ -190,6 +190,10 @@ async function buildForgeVerifyArgs(context: VerifyContext): Promise<ForgeVerify
 
   args.push("--rpc-url", networkConfig.rpc_url);
 
+  if (networkConfig.evm_version) {
+    args.push("--evm-version", networkConfig.evm_version);
+  }
+
   const encodedConstructorArgs = await encodeConstructorArgs(record);
   if (encodedConstructorArgs) {
     args.push("--constructor-args", encodedConstructorArgs);

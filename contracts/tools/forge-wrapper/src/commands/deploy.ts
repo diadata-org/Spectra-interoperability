@@ -11,9 +11,23 @@ import {
   getDefaultNetwork,
 } from "../utils/paths";
 import { formatCommand, runForge } from "../utils/forge";
+import {
+  buildCreate2Plan,
+  checkFactoryPresence,
+  executeCreate2DeployWithInitCode,
+  getContractsRoot,
+  normalizeSalt,
+} from "../utils/create2";
+import {
+  ensureReceiverFactory,
+  predictReceiverAddress,
+} from "../utils/receiver-factory";
 import { DeployOptions, DeploymentRecord } from "../types";
 import { getTemplate } from "../utils/templates";
 import { timestampNow } from "../utils/dates";
+import path from "path";
+import { promises as fs } from "fs";
+import { ethers } from "ethers";
 
 function collectArgs(value: string, previous: string[]): string[] {
   return [...previous, value];
@@ -43,6 +57,102 @@ function maskSensitiveArgs(args: string[]): string[] {
     }
   }
   return masked;
+}
+
+/** initCodeHash of artifact+args (no salt dependence) for receiver-address prediction. */
+async function plan0InitCodeHash(
+  artifact: string,
+  constructorArgs: string[],
+  forgeProfile?: string
+): Promise<string> {
+  const plan = await buildCreate2Plan({
+    artifact,
+    constructorArgs,
+    salt: "0x" + "0".repeat(64),
+    forgeProfile,
+  });
+  return plan.initCodeHash;
+}
+
+/** Dry-run DeploymentRecord for the receiver-factory path. */
+function dryRecord(
+  options: DeployOptions,
+  artifact: string,
+  constructorArgs: string[],
+  accountName: string,
+  predicted: string,
+  receiverFactory: string,
+  salt: string,
+  initCodeHash: string
+): DeploymentRecord {
+  return {
+    alias: options.alias,
+    address: predicted,
+    txHash: undefined,
+    deployedAt: timestampNow(),
+    artifact,
+    constructorArgs,
+    deployer: { alias: accountName, address: options.deployerAddress },
+    deployMethod: "create2",
+    create2: { factory: receiverFactory, salt, initCodeHash },
+  };
+}
+
+/** Broadcast deployReceiver(...) on the DIAReceiverFactory. */
+async function executeReceiverDeploy(options: {
+  rpcUrl: string;
+  chainId: number;
+  privateKey: string;
+  receiverFactory: string;
+  userSalt: string;
+  constructorArgs: string[];
+  legacy?: boolean;
+  gasPrice?: string;
+}): Promise<{ address: string; txHash: string }> {
+  const { ethers } = await import("ethers");
+  const provider = new ethers.JsonRpcProvider(options.rpcUrl);
+  const wallet = new ethers.Wallet(options.privateKey, provider);
+  const iface = new ethers.Interface([
+    "function deployReceiver(bytes32 userSalt, string domainName, string domainVersion, uint256 sourceChainId, address verifyingContract) returns (address)",
+    "event ReceiverDeployed(address indexed receiver, address indexed owner, bytes32 indexed userSalt)",
+  ]);
+  const [domainName, domainVersion, sourceChainId, verifyingContract] = options.constructorArgs;
+  const data = iface.encodeFunctionData("deployReceiver", [
+    options.userSalt,
+    domainName,
+    domainVersion,
+    BigInt(sourceChainId),
+    verifyingContract,
+  ]);
+  const tx: any = { to: options.receiverFactory, data, chainId: options.chainId };
+  if (options.legacy || options.gasPrice) {
+    tx.type = 0;
+    if (options.gasPrice) tx.gasPrice = ethers.parseUnits(options.gasPrice, "wei");
+  } else {
+    const fee = await provider.getFeeData();
+    if (fee.maxFeePerGas) tx.maxFeePerGas = fee.maxFeePerGas + (fee.maxFeePerGas / 4n);
+    if (fee.maxPriorityFeePerGas) tx.maxPriorityFeePerGas = fee.maxPriorityFeePerGas;
+  }
+  const sent = await wallet.sendTransaction(tx);
+  // eslint-disable-next-line no-console
+  console.log(chalk`{gray tx: ${sent.hash}}`);
+  const receipt = await sent.wait();
+  if (!receipt || receipt.status !== 1) {
+    throw new Error(`DIAReceiverFactory.deployReceiver tx reverted: ${sent.hash}`);
+  }
+  const event = receipt.logs
+    .map((log: any) => {
+      try {
+        return iface.parseLog({ topics: log.topics as string[], data: log.data });
+      } catch {
+        return undefined;
+      }
+    })
+    .find((parsed: any) => parsed && parsed.name === "ReceiverDeployed");
+  if (!event) {
+    throw new Error(`ReceiverDeployed event not found in receipt ${sent.hash}`);
+  }
+  return { address: String(event.args.receiver), txHash: sent.hash };
 }
 
 function parseForgeCreateOutput(stdout: string): { address: string; txHash?: string } {
@@ -105,9 +215,26 @@ export async function executeDeploy(options: DeployOptions): Promise<DeploymentR
     String(networkConfig.chain_id),
   ];
 
+  if (networkConfig.evm_version) {
+    displayArgs.push("--evm-version", networkConfig.evm_version);
+  }
+
   // Add legacy flag early if needed
   if (options.legacy || networkConfig.legacy) {
     displayArgs.push("--legacy");
+  }
+
+  // Apply gas configuration when the network declares one. Some chains
+  // (e.g. Cosmos-SDK EVMs like goat-testnet) enforce a minimum priority
+  // fee that forge's auto-estimation underestimates, so the override is
+  // required for the transaction to be accepted.
+  if (networkConfig.gas) {
+    if (networkConfig.gas.max_fee_per_gas) {
+      displayArgs.push("--gas-price", networkConfig.gas.max_fee_per_gas);
+    }
+    if (networkConfig.gas.priority_fee) {
+      displayArgs.push("--priority-gas-price", networkConfig.gas.priority_fee);
+    }
   }
 
   let constructorArgs = options.constructorArgs;
@@ -119,6 +246,206 @@ export async function executeDeploy(options: DeployOptions): Promise<DeploymentR
   }
 
   constructorArgs = constructorArgs.map((arg) => arg.trim()).filter((arg) => arg.length > 0);
+
+  // ------------------------------------------------------------------
+  // CREATE2 path: deterministic deployment.
+  // PushOracleReceiverV2 routes through DIAReceiverFactory (owner-correct:
+  // factory deploys + atomically transfers ownership to the tx sender).
+  // Anything else deploys directly via the Arachnid proxy.
+  // ------------------------------------------------------------------
+  if (options.deployMethod === "create2") {
+    if (!options.salt) {
+      throw new Error("CREATE2 deployment requires a salt (--salt).");
+    }
+    const salt = normalizeSalt(options.salt);
+    const isReceiver = artifact.endsWith("PushOracleReceiverV2.sol:PushOracleReceiverV2");
+
+    let receiverFactory: string | undefined;
+    if (isReceiver) {
+      const ownerAddr = options.deployerAddress ?? new ethers.Wallet(privateKey).address;
+      const ensured = await ensureReceiverFactory({
+        rpcUrl,
+        chainId: networkConfig.chain_id,
+        networkName: options.network,
+        privateKey,
+        legacy: options.legacy || networkConfig.legacy,
+        gasPrice: networkConfig.gas?.max_fee_per_gas,
+      });
+      receiverFactory = ensured.address;
+      // eslint-disable-next-line no-console
+      console.log(ensured.reused
+        ? chalk.gray(`Reusing DIAReceiverFactory at ${ensured.address}`)
+        : chalk.green(`DIAReceiverFactory deployed at ${ensured.address}`));
+
+      const receiverInitCodeHash = await plan0InitCodeHash(artifact, constructorArgs, networkConfig.forge_profile);
+      const predicted = predictReceiverAddress(ensured.address, ownerAddr, salt, receiverInitCodeHash);
+      // eslint-disable-next-line no-console
+      console.log(chalk.gray(`CREATE2 plan (via DIAReceiverFactory, owner ${ownerAddr}):`));
+      // eslint-disable-next-line no-console
+      console.log(chalk.gray(`  • predicted address: ${predicted}`));
+      // eslint-disable-next-line no-console
+      console.log(chalk.gray(`  • user salt: ${salt}`));
+      // eslint-disable-next-line no-console
+      console.log(chalk.gray(`  • final salt: keccak(owner ++ userSalt)`));
+
+      if (options.dryRun) {
+        // eslint-disable-next-line no-console
+        console.log(chalk.yellow("Dry run enabled, not broadcasting CREATE2 deployment."));
+        return dryRecord(options, artifact, constructorArgs, accountName, predicted, receiverFactory!, salt, receiverInitCodeHash);
+      }
+
+      // Idempotency: refuse if predicted address already has code
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const existing = await provider.getCode(predicted);
+      if (existing && existing !== "0x") {
+        throw new Error(
+          `Address ${predicted} already has code — the same owner+salt was deployed before. Use a different salt.`
+        );
+      }
+
+      const result = await executeReceiverDeploy({
+        rpcUrl,
+        chainId: networkConfig.chain_id,
+        privateKey,
+        receiverFactory: ensured.address,
+        userSalt: salt,
+        constructorArgs,
+        legacy: options.legacy || networkConfig.legacy,
+        gasPrice: networkConfig.gas?.max_fee_per_gas,
+      });
+      if (result.address.toLowerCase() !== predicted.toLowerCase()) {
+        throw new Error(`Deployed ${result.address} != predicted ${predicted} — investigate.`);
+      }
+      return {
+        alias: options.alias,
+        address: result.address,
+        txHash: result.txHash,
+        deployedAt: timestampNow(),
+        artifact,
+        constructorArgs,
+        deployer: { alias: accountName, address: options.deployerAddress },
+        deployMethod: "create2",
+        create2: { factory: ensured.address, salt, initCodeHash: receiverInitCodeHash },
+      };
+    }
+
+    // Non-receiver contracts: Arachnid direct (owner WILL be the factory —
+    // only safe for non-Ownable contracts)
+    const plan = await buildCreate2Plan({
+      artifact,
+      constructorArgs,
+      salt,
+      forgeProfile: networkConfig.forge_profile,
+      evmVersion: networkConfig.evm_version,
+    });
+
+    const presence = await checkFactoryPresence(rpcUrl);
+    if (presence === "missing") {
+      throw new Error(
+        `CREATE2 factory ${plan.factory} not deployed on ${options.network}. ` +
+          `Broadcast the canonical deterministic-deployment-proxy tx first, or use the standard deploy method.`
+      );
+    }
+    if (presence === "unknown") {
+      // eslint-disable-next-line no-console
+      console.log(chalk.yellow(`Warning: could not verify factory presence on ${options.network} — continuing.`));
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`CREATE2 plan:`));
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`  • predicted address: ${plan.address}`));
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`  • salt: ${plan.salt}`));
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`  • initCodeHash: ${plan.initCodeHash}`));
+    // eslint-disable-next-line no-console
+    console.log(chalk.gray(`  • initCode size: ${plan.initCodeByteLength} bytes`));
+
+    if (options.dryRun) {
+      // eslint-disable-next-line no-console
+      console.log(chalk.yellow("Dry run enabled, not broadcasting CREATE2 deployment."));
+      return {
+        alias: options.alias,
+        address: plan.address,
+        txHash: undefined,
+        deployedAt: timestampNow(),
+        artifact,
+        constructorArgs,
+        deployer: {
+          alias: accountName,
+          address: options.deployerAddress,
+        },
+        deployMethod: "create2",
+        create2: {
+          factory: plan.factory,
+          salt: plan.salt,
+          initCodeHash: plan.initCodeHash,
+        },
+      };
+    }
+
+    // Already deployed at the predicted address? Make it idempotent.
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const existing = await provider.getCode(plan.address);
+    if (existing && existing !== "0x") {
+      throw new Error(
+        `Address ${plan.address} already has code — the same salt+initCode was deployed before. ` +
+          `Use a different salt for a fresh deployment.`
+      );
+    }
+
+    // Rebuild initCode for the tx data (creation code ++ encoded args)
+    const [sourcePath, contractName] = artifact.split(":");
+    const artifactRel = sourcePath.replace(/^contracts\//, "");
+    const artifactPath = path.join(getContractsRoot(), "out", artifactRel, `${contractName}.json`);
+    const artifactJson = JSON.parse(await fs.readFile(artifactPath, "utf-8"));
+    let initCode: string = artifactJson.bytecode.object;
+    if (constructorArgs.length > 0) {
+      const iface = new ethers.Interface(artifactJson.abi);
+      const typed = constructorArgs.map((arg) => (/^-?\d+$/.test(arg) ? BigInt(arg) : arg));
+      initCode = initCode + iface.encodeDeploy(typed as any[]).slice(2);
+    }
+
+    const result = await executeCreate2DeployWithInitCode({
+      rpcUrl,
+      chainId: networkConfig.chain_id,
+      privateKey,
+      salt,
+      initCode,
+      legacy: options.legacy || networkConfig.legacy,
+      gasPrice: networkConfig.gas?.max_fee_per_gas,
+    });
+
+    if (result.address.toLowerCase() !== plan.address.toLowerCase()) {
+      throw new Error(
+        `Deployed address ${result.address} != predicted ${plan.address}. Record NOT consistent — investigate.`
+      );
+    }
+
+    return {
+      alias: options.alias,
+      address: result.address,
+      txHash: result.txHash,
+      deployedAt: timestampNow(),
+      artifact,
+      constructorArgs,
+      deployer: {
+        alias: accountName,
+        address: options.deployerAddress,
+      },
+      deployMethod: "create2",
+      create2: {
+        factory: plan.factory,
+        salt: plan.salt,
+        initCodeHash: plan.initCodeHash,
+      },
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Standard path: forge create
+  // ------------------------------------------------------------------
 
   if (!displayArgs.includes("--broadcast")) {
     displayArgs.push("--broadcast");
@@ -232,7 +559,8 @@ export function registerDeployCommand(program: Command): void {
     .option("--account <account>", "Account alias from network config", "deployer")
     .option("--rpc-url <url>", "Override RPC URL")
     .option("--constructor-arg <value>", "Constructor argument", collectArgs, [])
-    .option("--salt <salt>", "Deterministic deployment salt")
+    .option("--create2", "Deploy deterministically via the Arachnid CREATE2 factory (requires --salt)")
+    .option("--salt <salt>", "CREATE2 salt (hex 0x64-chars or arbitrary string, hashed with keccak256)")
     .option("--dry-run", "Print command without executing")
     .option("--legacy", "Use legacy transactions instead of EIP1559")
   
@@ -256,6 +584,7 @@ export function registerDeployCommand(program: Command): void {
           rpcUrl: cmdOptions.rpcUrl,
           dryRun: Boolean(cmdOptions.dryRun),
           salt: cmdOptions.salt,
+          deployMethod: cmdOptions.create2 ? "create2" : undefined,
           legacy: Boolean(cmdOptions.legacy),
         });
 

@@ -59,6 +59,7 @@ export const networkConfigSchema = z.object({
   gas: gasConfigSchema.optional(),
   verification: verificationConfigSchema.optional(),
   legacy: z.boolean().optional(),
+  evm_version: z.string().optional(),
 });
 
 export type NetworkConfig = z.infer<typeof networkConfigSchema>;
@@ -73,6 +74,14 @@ export interface DeploymentRecord {
   deployer: {
     alias: string;
     address?: string;
+  };
+  /** How the contract was deployed: "create" (default, forge create) or "create2" (Arachnid proxy). */
+  deployMethod?: "create" | "create2";
+  /** CREATE2 metadata — present when deployMethod === "create2". */
+  create2?: {
+    factory: string;
+    salt: string;
+    initCodeHash: string;
   };
   verification?: {
     status: "success" | "failed";
@@ -100,7 +109,10 @@ export interface DeployOptions {
   account: string;
   rpcUrl?: string;
   dryRun?: boolean;
+  /** CREATE2 salt — when set (with deployMethod "create2"), deploy via the Arachnid factory. */
   salt?: string;
+  /** Deployment method: "create" (default, forge create) or "create2" (deterministic). */
+  deployMethod?: "create" | "create2";
   privateKeyOverride?: string;
   deployerAddress?: string;
   legacy?: boolean;

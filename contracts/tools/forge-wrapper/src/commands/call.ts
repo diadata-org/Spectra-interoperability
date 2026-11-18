@@ -61,6 +61,18 @@ export function registerCallCommand(program: Command): void {
           if (networkConfig.legacy) {
             castArgs.push("--legacy");
           }
+
+          // Apply gas configuration when the network declares one. Mirrors
+          // deploy.ts: some chains reject txs whose priority fee is below a
+          // chain-specific minimum that forge/cast auto-estimation misses.
+          if (networkConfig.gas) {
+            if (networkConfig.gas.max_fee_per_gas) {
+              castArgs.push("--gas-price", networkConfig.gas.max_fee_per_gas);
+            }
+            if (networkConfig.gas.priority_fee) {
+              castArgs.push("--priority-gas-price", networkConfig.gas.priority_fee);
+            }
+          }
         } else {
           castArgs.push("call", ...baseArgs, "--rpc-url", rpcUrl);
         }

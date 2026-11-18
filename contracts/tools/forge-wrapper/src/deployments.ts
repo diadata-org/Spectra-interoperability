@@ -76,6 +76,9 @@ export function formatDeploymentRecord(record: DeploymentRecord): string {
     record.txHash ? `tx: ${record.txHash}` : undefined,
     `artifact: ${record.artifact}`,
     `deployedAt: ${record.deployedAt}`,
+    record.deployMethod === "create2" ? `deployMethod: create2 (factory ${record.create2?.factory})` : undefined,
+    record.create2 ? `salt: ${record.create2.salt}` : undefined,
+    record.create2 ? `initCodeHash: ${record.create2.initCodeHash}` : undefined,
     record.constructorArgs.length
       ? `constructorArgs: [${record.constructorArgs.join(", ")}]`
       : undefined,
@@ -120,6 +123,22 @@ function normalizeRecord(raw: any): DeploymentRecord {
     }
   }
 
+  let deployMethod: DeploymentRecord["deployMethod"];
+  if (raw?.deployMethod === "create" || raw?.deployMethod === "create2") {
+    deployMethod = raw.deployMethod;
+  }
+
+  let create2: DeploymentRecord["create2"];
+  const rawCreate2 = raw?.create2;
+  if (rawCreate2 && typeof rawCreate2 === "object") {
+    const factory = typeof rawCreate2.factory === "string" ? rawCreate2.factory : undefined;
+    const salt = typeof rawCreate2.salt === "string" ? rawCreate2.salt : undefined;
+    const initCodeHash = typeof rawCreate2.initCodeHash === "string" ? rawCreate2.initCodeHash : undefined;
+    if (factory && salt && initCodeHash) {
+      create2 = { factory, salt, initCodeHash };
+    }
+  }
+
   return {
     alias,
     address,
@@ -131,6 +150,8 @@ function normalizeRecord(raw: any): DeploymentRecord {
       alias: deployerAlias,
       address: deployerAddress,
     },
+    deployMethod,
+    create2,
     verification,
   };
 }
