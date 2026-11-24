@@ -354,6 +354,13 @@ func NewBridge(modularCfg *config.ModularConfig, cfgService *config.ConfigServic
 		logMonitorConfig(monitorConfig, "using defaults (no replica config)")
 	}
 
+	if monitorConfig.Enabled {
+		for _, routerInstance := range routerRegistry.GetActiveRouters() {
+			routerInstance.SetPriceDeviationOffset(monitorConfig.PriceDeviationOffset)
+			routerInstance.SetTimeThresholdOffset(monitorConfig.TimeThresholdOffset)
+		}
+	}
+
 	bridge.onChainMonitor = leader.NewOnChainMonitor(routerRegistry, ethClients, monitorConfig)
 
 	// Initialize cron service for periodic updates

@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"math/big"
+	"time"
 
 	"github.com/diadata.org/Spectra-interoperability/pkg/rpc"
 	"github.com/diadata.org/Spectra-interoperability/services/bridge/config"
@@ -15,7 +16,7 @@ type GenericRouterInterface interface {
 	IsEnabled() bool
 	ShouldRoute(eventName string, data *config.ExtractedData) (bool, string)
 	GetDestinations(data *config.ExtractedData) []config.RouterDestination
-	FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData, intentHash string) []config.RouterDestination
+	FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData, intentHash string) []FilteredDestination
 	ProcessingConfig() *config.ProcessingConfig
 	OnRouted(eventName string, data *config.ExtractedData)
 	GetStats() GenericRouterStats
@@ -23,4 +24,6 @@ type GenericRouterInterface interface {
 	GetSymbolFromData(data *config.ExtractedData) string
 	FetchOracleStateFromOnChain(ctx context.Context, clients map[int64]rpc.EthClient) error
 	SyncDestinationState(chainID int64, contract, symbol string, price *big.Int, timestamp uint64)
+	SetPriceDeviationOffset(offset *big.Float)
+	SetTimeThresholdOffset(offset time.Duration)
 }

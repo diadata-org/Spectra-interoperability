@@ -100,9 +100,13 @@ func (h *TransactionHandler) Process(ctx context.Context, updateReq *bridgetypes
 		monitoringInfo := h.getMonitoringInfo(txCtx)
 		triggeredByMonitoring = monitoringInfo
 	}
-	logger.Infof("[TX-HANDLER] Transaction sent: %s for %s on chain %d, router=%s, symbol=%s%s",
+	filterReason := txCtx.UpdateRequest.FilterReason
+	if filterReason == "" {
+		filterReason = "FilterDestinationsByTimeThreshold: no reason recorded"
+	}
+	logger.Infof("[TX-HANDLER] Transaction sent: %s for %s on chain %d, router=%s, symbol=%s, %s%s",
 		tx.Hash().Hex(), txCtx.Identifier, txCtx.UpdateRequest.DestinationChain.ChainID,
-		txCtx.UpdateRequest.RouterID, txCtx.Symbol, triggeredByMonitoring)
+		txCtx.UpdateRequest.RouterID, txCtx.Symbol, filterReason, triggeredByMonitoring)
 
 	// Mark update time immediately so the bridge staleness check doesn't re-queue
 	// this symbol while the receipt is pending. updateState() in asyncConfirm will
