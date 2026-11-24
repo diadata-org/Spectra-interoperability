@@ -16,7 +16,8 @@ func init() {
 	log = logrus.New()
 	log.SetOutput(os.Stdout)
 	log.SetFormatter(&logrus.JSONFormatter{
-		TimestampFormat: "2006-01-02T15:04:05.000Z",
+		TimestampFormat:   "2006-01-02T15:04:05.000Z",
+		DisableHTMLEscape: true,
 	})
 	
 	// Set log level from environment
