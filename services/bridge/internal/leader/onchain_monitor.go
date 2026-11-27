@@ -18,7 +18,8 @@ import (
 )
 
 type OnChainMonitor struct {
-	routers map[string]*RouterMonitor
+	routers        map[string]*RouterMonitor
+	routerRegistry *router.GenericRegistry
 
 	enabled bool
 
@@ -47,6 +48,7 @@ type RouterMonitor struct {
 type DestinationMonitor struct {
 	config.RouterDestination
 
+	RouterID             string
 	ContractAddress      common.Address
 	Client               rpc.EthClient
 	mu                   sync.RWMutex
@@ -84,6 +86,7 @@ func NewOnChainMonitor(
 
 	monitor := &OnChainMonitor{
 		routers:              make(map[string]*RouterMonitor),
+		routerRegistry:       routerRegistry,
 		enabled:              monitorConfig.Enabled,
 		timeThresholdOffset:  monitorConfig.TimeThresholdOffset,
 		priceDeviationOffset: monitorConfig.PriceDeviationOffset,
@@ -117,6 +120,7 @@ func NewOnChainMonitor(
 				key := utils.GenerateDestinationKey(dest.ChainID, dest.Contract, symbol)
 				routerMonitor.destinations[key] = &DestinationMonitor{
 					RouterDestination: dest,
+					RouterID:          routerID,
 					ContractAddress:   contractAddress,
 					Client:            ethClient,
 				}
@@ -287,6 +291,18 @@ func (m *OnChainMonitor) getValueFromContract(dest *DestinationMonitor, symbol s
 	return utils.GetValueFromOracleContract(m.ctx, dest.Client, dest.ContractAddress, symbol)
 }
 
+// syncRouterState feeds a fresh on-chain read back into the owning router's own cache
+func (m *OnChainMonitor) syncRouterState(dest *DestinationMonitor, symbol string, value *big.Int, timestamp uint64) {
+	if m.routerRegistry == nil || dest.RouterID == "" {
+		return
+	}
+	routerInstance := m.routerRegistry.GetRouterByID(dest.RouterID)
+	if routerInstance == nil {
+		return
+	}
+	routerInstance.SyncDestinationState(dest.ChainID, dest.Contract, symbol, value, timestamp)
+}
+
 func formatValue(v *big.Int) string {
 	if v == nil {
 		return "nil"
@@ -310,7 +326,6 @@ func (m *OnChainMonitor) ShouldProcess(chainID int64, contractAddress common.Add
 	lastCheck := dest.lastCheck
 	timeThreshold := dest.TimeThreshold.Duration()
 	currentValue := dest.lastValue
-	lastPercentageChange := dest.lastPercentageChange
 	dest.mu.RUnlock()
 
 	if lastTimestamp == 0 {
@@ -322,36 +337,15 @@ func (m *OnChainMonitor) ShouldProcess(chainID int64, contractAddress common.Add
 		return true
 	}
 
-	//  skip deviation checks if last update was within last 2 minutes
 	timeSinceUpdate := time.Since(time.Unix(int64(lastTimestamp), 0))
-	skipDeviationCheck := timeSinceUpdate < 2*time.Minute
 
-	if skipDeviationCheck {
-		logger.Debugf("Skipping deviation check for chain=%d contract=%s symbol=%s (last update %v ago < 2 minutes)",
-			chainID, contractAddress.Hex(), symbol, timeSinceUpdate)
-	} else {
-		if lastPercentageChange != nil {
-			priceDevThreshold := m.getPriceDeviationThresholdWithOffset(chainID, contractAddress, symbol)
-			if priceDevThreshold != nil {
-				thresholdPercent := new(big.Float).Mul(priceDevThreshold, big.NewFloat(100))
-				absChange := new(big.Float).Abs(lastPercentageChange)
-				if absChange.Cmp(thresholdPercent) > 0 {
-					logger.Infof("Monitoring triggered: price deviation threshold exceeded for chain=%d contract=%s symbol=%s, "+
-						"change=%.2f%% threshold=%.2f%% value=%s",
-						chainID, contractAddress.Hex(), symbol, lastPercentageChange, thresholdPercent, formatValue(currentValue))
-					return true
-				}
-			}
-		}
-
-		if incomingPrice != nil {
-			freshValue, _, err := m.getValueFromContract(dest, symbol)
-			if err != nil {
-				logger.Warnf("Failed to fetch fresh on-chain value for chain=%d contract=%s symbol=%s, using cached value: %v",
-					chainID, contractAddress.Hex(), symbol, err)
-				// Fall back to cached value if fetch fails
-				freshValue = currentValue
-			}
+	if incomingPrice != nil {
+		freshValue, freshTimestamp, err := m.getValueFromContract(dest, symbol)
+		if err != nil {
+			logger.Warnf("Failed to fetch fresh on-chain value for chain=%d contract=%s symbol=%s, skipping on-chain dedup check: %v",
+				chainID, contractAddress.Hex(), symbol, err)
+		} else {
+			m.syncRouterState(dest, symbol, freshValue, freshTimestamp)
 
 			if freshValue != nil && freshValue.Sign() != 0 {
 				priceDevThreshold := m.getPriceDeviationThresholdWithOffset(chainID, contractAddress, symbol)
@@ -369,17 +363,20 @@ func (m *OnChainMonitor) ShouldProcess(chainID int64, contractAddress common.Add
 							chainID, contractAddress.Hex(), symbol, percentageChange, thresholdPercent, formatValue(freshValue), incomingPrice.String())
 						return true
 					}
+					logger.Infof("Monitoring: incoming update for chain=%d contract=%s symbol=%s already reflected on-chain "+
+						"(change=%.2f%% threshold=%.2f%%), treating as duplicate",
+						chainID, contractAddress.Hex(), symbol, percentageChange, thresholdPercent)
+					return false
 				}
 			}
 		}
-	} // End of skipDeviationCheck else block
+	}
 
 	if timeThreshold == 0 {
 		timeThreshold = 5 * time.Minute
 	}
 	totalThreshold := timeThreshold + m.timeThresholdOffset
 
-	// Time threshold check always proceeds (not skipped by 2-minute rule)
 	if timeSinceUpdate > totalThreshold {
 		logger.Infof("Monitoring triggered: time threshold exceeded for chain=%d contract=%s symbol=%s, "+
 			"time_since_update=%v threshold=%v value=%s",

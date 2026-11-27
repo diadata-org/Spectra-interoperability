@@ -290,7 +290,9 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 				continue
 			}
 
-			for _, dest := range filteredDestinations {
+			for _, filteredDest := range filteredDestinations {
+				dest := filteredDest.Destination
+
 				var chainConfig *config.ChainConfig
 				for _, chain := range gep.configService.GetEnabledChains() {
 					if chain.ChainID == dest.ChainID {
@@ -369,6 +371,7 @@ func (gep *GenericEventProcessor) processEvent(ctx context.Context, event *types
 					RouterID:                result.RouterID,
 					DestinationMethodConfig: &dest.Method,
 					ExtractedData:           extractedData,
+					FilterReason:            filteredDest.Reason,
 				}
 
 				// For IntArraySet events, create a minimal Intent structure for compatibility

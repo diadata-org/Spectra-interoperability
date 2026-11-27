@@ -30,6 +30,9 @@ type GenericRouter struct {
 	mu                sync.RWMutex
 	stats             GenericRouterStats
 	destinationStates map[string]*DestinationState // Tracks state for each destination (key: "chainID-contract-symbol")
+
+	priceDeviationOffset *big.Float
+	timeThresholdOffset  time.Duration
 }
 
 // DestinationState holds the state for a specific destination
@@ -356,10 +359,15 @@ func (gr *GenericRouter) GetDestinations(data *config.ExtractedData) []config.Ro
 	return destinations
 }
 
+type FilteredDestination struct {
+	Destination config.RouterDestination
+	Reason      string // e.g. "FilterDestinationsByTimeThreshold: time threshold met: ..."
+}
+
 // FilterDestinationsByTimeThreshold filters destinations based on time thresholds after enrichment
 // Uses OR logic: update if EITHER time_threshold is met OR price_deviation is met
-func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData, intentHash string) []config.RouterDestination {
-	var filteredDestinations []config.RouterDestination
+func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config.RouterDestination, data *config.ExtractedData, intentHash string) []FilteredDestination {
+	var filteredDestinations []FilteredDestination
 
 	for _, dest := range destinations {
 		hasTimeThreshold := dest.TimeThreshold.Duration() > 0
@@ -367,7 +375,10 @@ func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config
 
 		// If neither threshold is configured, allow the update
 		if !hasTimeThreshold && !hasPriceDeviation {
-			filteredDestinations = append(filteredDestinations, dest)
+			filteredDestinations = append(filteredDestinations, FilteredDestination{
+				Destination: dest,
+				Reason:      "FilterDestinationsByTimeThreshold: no threshold configured, always allowed",
+			})
 			continue
 		}
 
@@ -392,17 +403,17 @@ func (gr *GenericRouter) FilterDestinationsByTimeThreshold(destinations []config
 			// Important: Time threshold timestamp is ONLY updated when time threshold itself triggers the update
 			// NOT when only price deviation triggers it, to preserve the real time-based update schedule
 
+			var reason string
 			if timeThresholdMet && priceDeviationMet {
-				logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=BOTH time threshold (%s) AND price deviation (%s) met",
-					gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice, timeReason, priceReason)
+				reason = fmt.Sprintf("checkAndReserveTimeThreshold+checkAndReservePriceDeviation: BOTH time threshold (%s) AND price deviation (%s) met", timeReason, priceReason)
 			} else if timeThresholdMet {
-				logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=time threshold met: %s (price deviation: %s)",
-					gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice, timeReason, priceReason)
+				reason = fmt.Sprintf("checkAndReserveTimeThreshold: time threshold met: %s (price deviation: %s)", timeReason, priceReason)
 			} else {
-				logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=price deviation met: %s (time threshold: %s)",
-					gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice, priceReason, timeReason)
+				reason = fmt.Sprintf("checkAndReservePriceDeviation: price deviation met: %s (time threshold: %s)", priceReason, timeReason)
 			}
-			filteredDestinations = append(filteredDestinations, dest)
+			logger.Infof("Update allowed: router=%s, chain=%d, contract=%s, symbol=%s, currentPrice=%s, reason=%s",
+				gr.config.ID, dest.ChainID, dest.Contract, symbol, currentPrice, reason)
+			filteredDestinations = append(filteredDestinations, FilteredDestination{Destination: dest, Reason: reason})
 		} else {
 			symbol := gr.GetSymbolFromData(data)
 			logger.Debugf("Update blocked: router=%s, chain=%d, contract=%s, symbol=%s, reason=NEITHER time threshold (%s) NOR price deviation (%s) met",
@@ -449,10 +460,14 @@ func (gr *GenericRouter) checkAndReserveTimeThreshold(dest config.RouterDestinat
 	state.mu.Lock()
 	defer state.mu.Unlock()
 
+	gr.mu.RLock()
+	timeThreshold := dest.TimeThreshold.Duration() + gr.timeThresholdOffset
+	gr.mu.RUnlock()
+
 	if state.lastUpdate.IsZero() {
 		// First time sending to this destination, reserve it now
 		state.lastUpdate = time.Now()
-		msg := fmt.Sprintf("first update, threshold=%v", dest.TimeThreshold.Duration())
+		msg := fmt.Sprintf("first update, threshold=%v", timeThreshold)
 		logger.Infof("Time threshold check: %s, router=%s, chain=%d, contract=%s, symbol=%s",
 			msg, gr.config.ID, dest.ChainID, dest.Contract, symbol)
 		return true, msg
@@ -460,21 +475,33 @@ func (gr *GenericRouter) checkAndReserveTimeThreshold(dest config.RouterDestinat
 
 	// Check if enough time has passed
 	timeSinceLastUpdate := time.Since(state.lastUpdate)
-	thresholdMet := timeSinceLastUpdate >= dest.TimeThreshold.Duration()
+	thresholdMet := timeSinceLastUpdate >= timeThreshold
 
 	if thresholdMet {
 		// Atomically reserve the slot by updating the time
 		state.lastUpdate = time.Now()
-		msg := fmt.Sprintf("time passed %v >= threshold %v", timeSinceLastUpdate, dest.TimeThreshold.Duration())
+		msg := fmt.Sprintf("time passed %v >= threshold %v", timeSinceLastUpdate, timeThreshold)
 		logger.Infof("Time threshold met and reserved: router=%s, chain=%d, contract=%s, symbol=%s, %s",
 			gr.config.ID, dest.ChainID, dest.Contract, symbol, msg)
 		return true, msg
 	}
 
-	msg := fmt.Sprintf("time passed %v < threshold %v", timeSinceLastUpdate, dest.TimeThreshold.Duration())
+	msg := fmt.Sprintf("time passed %v < threshold %v", timeSinceLastUpdate, timeThreshold)
 	logger.Debugf("Time threshold not met: router=%s, chain=%d, contract=%s, symbol=%s, %s",
 		gr.config.ID, dest.ChainID, dest.Contract, symbol, msg)
 	return false, msg
+}
+
+func (gr *GenericRouter) SetPriceDeviationOffset(offset *big.Float) {
+	gr.mu.Lock()
+	defer gr.mu.Unlock()
+	gr.priceDeviationOffset = offset
+}
+
+func (gr *GenericRouter) SetTimeThresholdOffset(offset time.Duration) {
+	gr.mu.Lock()
+	defer gr.mu.Unlock()
+	gr.timeThresholdOffset = offset
 }
 
 // checkAndReservePriceDeviation atomically checks if price deviation is met and reserves the update slot
@@ -541,6 +568,14 @@ func (gr *GenericRouter) checkAndReservePriceDeviation(dest config.RouterDestina
 			state.lastTimestamp = newTimestamp
 		}
 		return true, msg
+	}
+
+	gr.mu.RLock()
+	offset := gr.priceDeviationOffset
+	gr.mu.RUnlock()
+	if offset != nil {
+		offsetFloat, _ := offset.Float64()
+		deviationPercent += deviationPercent * offsetFloat
 	}
 
 	percentChange := gr.calculatePriceChangePercent(state.lastPrice, currentPrice)
@@ -861,4 +896,23 @@ func (gr *GenericRouter) OnRouted(eventName string, data *config.ExtractedData) 
 // generateDestinationKey creates a unique key for a destination
 func (gr *GenericRouter) generateDestinationKey(dest config.RouterDestination, symbol string) string {
 	return utils.GenerateDestinationKey(dest.ChainID, dest.Contract, symbol)
+}
+
+func (gr *GenericRouter) SyncDestinationState(chainID int64, contract, symbol string, price *big.Int, timestamp uint64) {
+	if price == nil || price.Sign() == 0 || timestamp == 0 {
+		return
+	}
+
+	destKey := utils.GenerateDestinationKey(chainID, contract, symbol)
+	state := gr.getOrCreateDestinationState(destKey)
+
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	if timestamp <= state.lastTimestamp {
+		return
+	}
+	state.lastPrice = price.String()
+	state.lastTimestamp = timestamp
+	state.lastUpdate = time.Unix(int64(timestamp), 0)
 }

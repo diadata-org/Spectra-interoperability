@@ -267,6 +267,11 @@ type UpdateRequest struct {
 
 	IsMonitoringTriggered bool `json:"is_monitoring_triggered,omitempty"`
 	IsCronTriggered       bool `json:"is_cron_triggered,omitempty"`
+
+	// FilterReason records why FilterDestinationsByTimeThreshold allowed this update through,
+	// e.g. "checkAndReserveTimeThreshold: time threshold met: ..." or
+	// "checkAndReservePriceDeviation: price deviation met: ...".
+	FilterReason string `json:"filter_reason,omitempty"`
 }
 
 // UpdateResult represents the result of an update operation
